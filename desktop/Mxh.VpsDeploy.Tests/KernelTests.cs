@@ -51,6 +51,22 @@ internal sealed partial class BoundaryTests
         var remote = new KernelRemote { LosePrepareAck = true }; var engine = new WorkflowEngine(f.Store, remote, new FakeKeys(), new FakeUser(), new FakeValidation());
         var relative = f.Relative(plan); var progress = new InlineProgress<TaskProgress>(_ => { });
         Task<TaskOutcome> Run(string action) => engine.ExecuteAsync(new(OperationKind.BbrKernel, relative, action == "Install" ? new() { ["Action"] = action, ["CatalogId"] = catalog.Text("Id") } : new() { ["Action"] = action }), Guid.NewGuid().ToString("N"), progress, default);
+        remote.Compatible = false;
+        try
+        {
+            await engine.ExecuteAsync(new(OperationKind.BbrKernel, relative, new() { ["Action"] = "Check", ["Source"] = "Latest" }), Guid.NewGuid().ToString("N"), progress, default);
+            throw new Exception("incompatible boot layout accepted");
+        }
+        catch (OperationException error) { Check(error.Code == "KernelIncompatible" && error.Message.Contains("synthetic boot incompatibility"), "compatibility cause was hidden by latest query"); }
+        Check(!remote.Commands.Contains("kernel-latest.sh") && !remote.Commands.Contains("kernel-prepare.sh"), "incompatible check continued into repository or installation");
+        Check(!BbrKernels.Pending(ArchiveStore.ReadJson(SafePath.Resolve(f.Paths.Instance(relative), "deployment-state.json"))), "read-only incompatibility created a kernel transaction");
+        remote.Compatible = true;
+        foreach (var code in new[] { "KernelVerifierMissing", "KernelSignatureRejected", "KernelSigningKeyMismatch", "KernelIndexHashMismatch", "KernelRepositoryForbidden", "KernelRepositoryRateLimited", "KernelRepositoryHttpFailed", "KernelRepositoryDnsFailed", "KernelRepositoryTimeout", "KernelRepositoryUnavailable", "KernelMetadataRejected", "KernelOperationRefused", "synthetic-secret" })
+        {
+            var marker = "VPSDEPLOY_KERNEL_FAILURE_CODE_B64=" + Convert.ToBase64String(Encoding.UTF8.GetBytes(code)) + "\n";
+            var safe = SafeFailures.Remote(new(1, marker, "synthetic-secret"), "内核检查失败");
+            Check(safe.Code == (code == "synthetic-secret" ? "RemoteStepFailed" : code) && !safe.Message.Contains("synthetic-secret"), "kernel failure cause lost or untrusted detail shown");
+        }
         Refuses(() => BbrKernels.Validate(new() { ["Action"] = "Install", ["CatalogId"] = "x", ["Url"] = "https://example.com" }), "arbitrary kernel URL accepted");
         Refuses(() => BbrKernels.Validate(new() { ["Action"] = "Reboot" }), "unknown kernel action accepted");
         await RefusesAsync(() => Run("Install"), "lost kernel install ACK treated as completion");

@@ -17,8 +17,11 @@ public sealed partial class MainWindow
         if (preset.Text("Selected") != "Custom") options["TimeZoneId"] = canonical;
         var choice = Choice("主要使用地时区", preset, "Selected", presets, preventWheelSelection: true);
         var custom = Field("自定义时区（IANA 或 Windows ID）", options, "TimeZoneId");
-        var start = Field("高峰开始（0–23 时）", options, "PeakStartHour", numeric: true);
-        var end = Field("高峰结束（0–24 时）", options, "PeakEndHour", numeric: true);
+        var start = Field("高峰开始（24 小时制）", options, "PeakStartHour", numeric: true);
+        var end = Field("高峰结束（24 小时制）", options, "PeakEndHour", numeric: true);
+        start.PlaceholderText = "0–23，例如 20";
+        end.PlaceholderText = "0–24，24 表示当天午夜";
+        var format = Text("按整点填写小时数：开始填 0–23，结束填 0–24。结束填 24 表示次日 00:00；结束早于开始表示跨午夜。", 14, true);
         var description = Text("", 14, true); description.Tag = "NetworkPeakDescription";
         void Refresh()
         {
@@ -27,6 +30,6 @@ public sealed partial class MainWindow
         }
         choice.SelectionChanged += (_, _) => { if (preset.Text("Selected") != "Custom") { options["TimeZoneId"] = preset.Text("Selected"); custom.Text = options.Text("TimeZoneId"); } Refresh(); };
         custom.TextChanged += (_, _) => Refresh(); start.TextChanged += (_, _) => Refresh(); end.TextChanged += (_, _) => Refresh(); Refresh();
-        return Card(Column(SectionHeading("使用时间", Symbol.Clock), choice, custom, Fields(start, end), description));
+        return Card(Column(SectionHeading("使用时间", Symbol.Clock), choice, custom, Fields(start, end), format, description));
     }
 }

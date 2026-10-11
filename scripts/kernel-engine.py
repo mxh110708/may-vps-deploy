@@ -10,18 +10,32 @@ import os
 import platform
 import re
 import shutil
+import socket
 import stat
 import subprocess
 import sys
 import time
 import tempfile
 import urllib.request
+import urllib.error
 from pathlib import Path
 
 BASE = Path('/var/lib/mxh-vps-deploy/kernel')
 DEFAULT = Path('/etc/default/grub.d/99-mxh-bbr-kernel.cfg')
 UNIT = Path('/etc/systemd/system/mxh-kernel-boot-guard.service')
 TERMINAL = ('Committed', 'RolledBack', 'Aborted')
+
+
+class KernelFailure(RuntimeError):
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+
+def signature_verifier():
+    for tool in ('sqv', 'gpgv'):
+        if shutil.which(tool): return tool
+    raise KernelFailure('KernelVerifierMissing')
 
 
 def run(args, timeout=30, allow=False):
@@ -86,7 +100,7 @@ def entry(kernel):
     text = Path('/boot/grub/grub.cfg').read_text()
     sub = re.findall(r"^submenu .*?\$menuentry_id_option '([^']+)' \{", text, re.M)
     ids = re.findall(r"^\s+menuentry .*?\$menuentry_id_option '(gnulinux-"+re.escape(kernel)+r"-advanced-[^']+)' \{", text, re.M)
-    if len(sub) != 1 or len(ids) != 1 or not re.fullmatch('[a-zA-Z0-9_.>:-]+', sub[0]+'>'+ids[0]):
+    if len(sub) != 1 or len(ids) != 1 or not re.fullmatch('[a-zA-Z0-9_.+>:-]+', sub[0]+'>'+ids[0]):
         raise RuntimeError('Ambiguous GRUB entry refused')
     return sub[0]+'>'+ids[0]
 
@@ -119,7 +133,9 @@ def audit():
     if virt not in ('kvm', 'qemu', 'vmware', 'microsoft', 'none', ''):
         reasons.append('不支持此虚拟化或容器启动环境')
     if Path('/sys/firmware/efi').exists(): reasons.append('EFI / Secure Boot 启动布局尚未适配')
-    for tool in ('grub-reboot', 'grub-set-default', 'grub-editenv', 'update-grub', 'gpgv', 'dpkg-deb', 'apt-get', 'systemd-run', 'systemctl'):
+    try: result['SignatureVerifier'] = signature_verifier()
+    except KernelFailure: reasons.append('缺少签名验证工具（gpgv / sqv）')
+    for tool in ('grub-reboot', 'grub-set-default', 'grub-editenv', 'update-grub', 'dpkg-deb', 'apt-get', 'systemd-run', 'systemctl'):
         if not shutil.which(tool): reasons.append('缺少 '+tool)
     try:
         old = platform.release(); regular(Path('/boot/vmlinuz-'+old)); regular(Path('/boot/initrd.img-'+old))
@@ -173,13 +189,23 @@ def set_default(s, value):
 
 
 def signed_index(root, fingerprint):
-    out = run(['gpgv', '--status-fd', '1', '--keyring', str(root/'xanmod.gpg'), str(root/'InRelease')])
-    if '[GNUPG:] VALIDSIG '+fingerprint+' ' not in out:
-        raise RuntimeError('Signing fingerprint mismatch')
+    verifier = signature_verifier()
+    with tempfile.TemporaryDirectory(prefix='mxh-kernel-signature-') as directory:
+        authenticated = Path(directory)/'Release'
+        if verifier == 'sqv':
+            args = ['sqv', '--keyring', str(root/'xanmod.gpg'), '--cleartext', '--output', str(authenticated), str(root/'InRelease')]
+        else:
+            args = ['gpgv', '--status-fd', '1', '--keyring', str(root/'xanmod.gpg'), '--output', str(authenticated), str(root/'InRelease')]
+        try: out = run(args)
+        except FileNotFoundError: raise KernelFailure('KernelVerifierMissing') from None
+        except (OSError, RuntimeError, subprocess.TimeoutExpired): raise KernelFailure('KernelSignatureRejected') from None
+        valid = fingerprint in out.splitlines() if verifier == 'sqv' else '[GNUPG:] VALIDSIG '+fingerprint+' ' in out
+        if not valid: raise KernelFailure('KernelSigningKeyMismatch')
+        if not authenticated.is_file(): raise KernelFailure('KernelSignatureRejected')
+        release = authenticated.read_text()
     pbytes = (root/'Packages.gz').read_bytes()
     pat = r'^ '+hashlib.sha256(pbytes).hexdigest()+r'\s+'+str(len(pbytes))+r'\s+main/binary-amd64/Packages.gz$'
-    release = (root/'InRelease').read_text()
-    if not re.search(pat, release, re.M): raise RuntimeError('Package index signature chain failed')
+    if not re.search(pat, release, re.M): raise KernelFailure('KernelIndexHashMismatch')
     date = re.findall(r'^Date: (.+)$', release, re.M)
     code = re.findall(r'^Codename: (.+)$', release, re.M)
     if len(date) != 1 or len(code) != 1: raise RuntimeError('Ambiguous signed release metadata')
@@ -209,6 +235,7 @@ def latest_candidate():
     key = base64.b64decode(os.environ['VPS_PARAM_KEY'], validate=True)
     if hashlib.sha256(key).hexdigest() != anchor['SourceFiles']['xanmod.gpg']:
         raise RuntimeError('Signing trust anchor mismatch')
+    signature_verifier()  # Refuse before network access when no verifier is available.
     info = dict(line.split('=', 1) for line in Path('/etc/os-release').read_text().splitlines() if '=' in line)
     distribution = {'12': 'bookworm', '13': 'trixie'}.get(info.get('VERSION_ID', '').strip('"'))
     if info.get('ID', '').strip('"') != 'debian' or not distribution: raise RuntimeError('Latest kernel distribution unsupported')
@@ -217,9 +244,16 @@ def latest_candidate():
         for name, suffix in [('InRelease', 'InRelease'), ('Packages.gz', 'main/binary-amd64/Packages.gz')]:
             url = 'https://deb.xanmod.org/dists/'+distribution+'/'+suffix
             request = urllib.request.Request(url, headers={'User-Agent': 'Debian APT-HTTP/1.3 (2.6.1)'})
-            with urllib.request.urlopen(request, timeout=25) as response:
-                if not response.geturl().startswith('https://deb.xanmod.org/'): raise RuntimeError('Untrusted metadata redirect')
-                data = response.read(2097153)
+            try:
+                with urllib.request.urlopen(request, timeout=25) as response:
+                    if not response.geturl().startswith('https://deb.xanmod.org/'): raise KernelFailure('KernelMetadataRejected')
+                    data = response.read(2097153)
+            except urllib.error.HTTPError as error:
+                raise KernelFailure('KernelRepositoryForbidden' if error.code == 403 else 'KernelRepositoryRateLimited' if error.code == 429 else 'KernelRepositoryHttpFailed') from None
+            except urllib.error.URLError as error:
+                code = 'KernelRepositoryDnsFailed' if isinstance(error.reason, socket.gaierror) else 'KernelRepositoryTimeout' if isinstance(error.reason, TimeoutError) else 'KernelRepositoryUnavailable'
+                raise KernelFailure(code) from None
+            except TimeoutError: raise KernelFailure('KernelRepositoryTimeout') from None
             if len(data) > 2097152: raise RuntimeError('Oversized signed metadata')
             (root/name).write_bytes(data)
         entries, signed_at, code = signed_index(root, anchor['SigningFingerprint'])
@@ -443,9 +477,16 @@ def main():
     print('VPSDEPLOY_KERNEL_RESULT_B64='+base64.b64encode(json.dumps(result, sort_keys=True).encode()).decode())
 
 
+def failure_code(error, action):
+    if isinstance(error, KernelFailure): return error.code
+    return 'KernelMetadataRejected' if action == 'Latest' else 'KernelOperationRefused'
+
+
 if __name__ == '__main__':
     try:
         main()
-    except Exception:
+    except Exception as error:
+        code = failure_code(error, sys.argv[1] if len(sys.argv) > 1 else '')
+        print('VPSDEPLOY_KERNEL_FAILURE_CODE_B64='+base64.b64encode(code.encode()).decode())
         print('VPSDEPLOY_KERNEL_OPERATION_REFUSED', file=sys.stderr)
         raise SystemExit(1)

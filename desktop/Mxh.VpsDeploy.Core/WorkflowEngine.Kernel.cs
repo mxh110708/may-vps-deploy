@@ -55,7 +55,8 @@ public sealed partial class WorkflowEngine
         {
             await c.TrackStep("kernel-check", async () =>
             {
-                await VerifyManagement(c); await KernelRun(c, "audit");
+                await VerifyManagement(c); var audit = await KernelRun(c, "audit");
+                if (!audit.Flag("Compatible")) throw new OperationException("内核兼容性检查未通过：" + string.Join("；", audit.Strings("Reasons")), code: "KernelIncompatible", nextAction: "查看内核与网络配置中的兼容性结果；先解决所列问题，再检查或安装内核。");
                 if (c.Request.Options.Text("Source", "Fixed") == "Latest")
                 {
                     var anchor = BbrKernels.Catalog(store.Paths);

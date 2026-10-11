@@ -55,6 +55,64 @@ class KernelContract(unittest.TestCase):
         with mock.patch.object(NS['Path'], 'read_text', return_value=text+text):
             with self.assertRaises(RuntimeError): NS['entry']('test')
 
+    def test_debian13_kernel_plus_is_accepted_but_shell_characters_are_refused(self):
+        kernel = '6.12.38+deb13-amd64'
+        text = "submenu 'Debian' $menuentry_id_option 'gnulinux-advanced-identity' {\n\tmenuentry 'Debian kernel' $menuentry_id_option 'gnulinux-"+kernel+"-advanced-identity' {\n"
+        with mock.patch.object(NS['Path'], 'read_text', return_value=text):
+            self.assertEqual(NS['entry'](kernel), 'gnulinux-advanced-identity>gnulinux-'+kernel+'-advanced-identity')
+        with mock.patch.object(NS['Path'], 'read_text', return_value=text.replace('identity', 'identity;bad')):
+            with self.assertRaises(RuntimeError): NS['entry'](kernel)
+
+    def test_verifier_selection_does_not_require_installing_gpgv_on_debian13(self):
+        for tools, expected in [({'sqv'}, 'sqv'), ({'gpgv'}, 'gpgv'), ({'sqv', 'gpgv'}, 'sqv')]:
+            with mock.patch.object(NS['shutil'], 'which', side_effect=lambda tool: '/usr/bin/'+tool if tool in tools else None):
+                self.assertEqual(NS['signature_verifier'](), expected)
+        with mock.patch.object(NS['shutil'], 'which', return_value=None):
+            with self.assertRaisesRegex(NS['KernelFailure'], 'KernelVerifierMissing'): NS['signature_verifier']()
+
+    def test_both_verifiers_require_pinned_fingerprint_and_authenticated_index(self):
+        cat = json.loads((ROOT/'config/kernel-catalog.json').read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for name in ('xanmod.gpg', 'InRelease', 'Packages.gz'): (root/name).write_bytes((ROOT/'assets/kernel'/name).read_bytes())
+            for verifier in ('sqv', 'gpgv'):
+                def verify(args, fingerprint=cat['SigningFingerprint']):
+                    self.assertEqual(args[0], verifier)
+                    self.assertNotIn('--policy-as-of', args)
+                    NS['Path'](args[args.index('--output')+1]).write_text((root/'InRelease').read_text())
+                    return fingerprint if verifier == 'sqv' else '[GNUPG:] VALIDSIG '+fingerprint+' '
+                with mock.patch.dict(NS, {'signature_verifier': lambda: verifier, 'run': verify}):
+                    entries, signed_at, _ = NS['signed_index'](root, cat['SigningFingerprint'])
+                    self.assertTrue(any(p.get('Package') == cat['Package'] for p in entries))
+                    self.assertEqual(signed_at, cat['SignedAt'])
+                with mock.patch.dict(NS, {'signature_verifier': lambda: verifier, 'run': lambda args: verify(args, 'F'*40)}):
+                    with self.assertRaisesRegex(NS['KernelFailure'], 'KernelSigningKeyMismatch'): NS['signed_index'](root, cat['SigningFingerprint'])
+                failing = mock.Mock(side_effect=RuntimeError('synthetic-secret'))
+                with mock.patch.dict(NS, {'signature_verifier': lambda: verifier, 'run': failing}):
+                    with self.assertRaisesRegex(NS['KernelFailure'], 'KernelSignatureRejected') as error: NS['signed_index'](root, cat['SigningFingerprint'])
+                    self.assertNotIn('synthetic-secret', str(error.exception))
+                    self.assertEqual(failing.call_count, 1)
+            (root/'Packages.gz').write_bytes(b'tampered index')
+            with mock.patch.dict(NS, {'signature_verifier': lambda: 'gpgv', 'run': verify}):
+                with self.assertRaisesRegex(NS['KernelFailure'], 'KernelIndexHashMismatch'): NS['signed_index'](root, cat['SigningFingerprint'])
+
+    def test_real_available_verifiers_accept_signed_fixture_and_refuse_tampering(self):
+        tools = [tool for tool in ('sqv', 'gpgv') if NS['shutil'].which(tool)]
+        if not tools: self.skipTest('OpenPGP verifier not installed on this runner; Debian CI and native VPS checks cover it')
+        cat = json.loads((ROOT/'config/kernel-catalog.json').read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for name in ('xanmod.gpg', 'InRelease', 'Packages.gz'): (root/name).write_bytes((ROOT/'assets/kernel'/name).read_bytes())
+            original = (root/'InRelease').read_bytes()
+            self.assertIn(b'Origin:', original)
+            for verifier in tools:
+                with mock.patch.dict(NS, {'signature_verifier': lambda: verifier}):
+                    (root/'InRelease').write_bytes(original)
+                    _, signed_at, _ = NS['signed_index'](root, cat['SigningFingerprint'])
+                    self.assertEqual(signed_at, cat['SignedAt'])
+                    (root/'InRelease').write_bytes(original.replace(b'Origin:', b'Origjn:', 1))
+                    with self.assertRaisesRegex(NS['KernelFailure'], 'KernelSignatureRejected'): NS['signed_index'](root, cat['SigningFingerprint'])
+
     def test_latest_reads_only_signed_compatible_lts_and_pins_its_hash(self):
         cat = json.loads((ROOT/'config/kernel-catalog.json').read_text())
         data = {name: (ROOT/'assets/kernel'/name).read_bytes() for name in ('xanmod.gpg', 'InRelease', 'Packages.gz')}
@@ -66,7 +124,7 @@ class KernelContract(unittest.TestCase):
             response.geturl.return_value = request.full_url; response.read.return_value = data[request.full_url.rsplit('/', 1)[1]]
             return response
         env = {'VPS_PARAM_CATALOG': json.dumps(cat), 'VPS_PARAM_KEY': base64.b64encode(data['xanmod.gpg']).decode()}
-        with mock.patch.dict(NS['os'].environ, env), mock.patch.object(NS['Path'], 'read_text', return_value='ID=debian\nVERSION_ID="12"'), mock.patch.object(NS['urllib'].request, 'urlopen', side_effect=download), mock.patch.dict(NS, {'signed_index': lambda *args: (entries, cat['SignedAt'], 'bookworm'), 'run': mock.Mock(side_effect=AssertionError('persistent system mutation'))}):
+        with mock.patch.dict(NS['os'].environ, env), mock.patch.object(NS['Path'], 'read_text', return_value='ID=debian\nVERSION_ID="12"'), mock.patch.object(NS['urllib'].request, 'urlopen', side_effect=download), mock.patch.dict(NS, {'signature_verifier': lambda: 'gpgv', 'signed_index': lambda *args: (entries, cat['SignedAt'], 'bookworm'), 'run': mock.Mock(side_effect=AssertionError('persistent system mutation'))}):
             result = NS['latest_candidate']()
         self.assertEqual(result['Catalog']['Kernel'], cat['Kernel'])
         self.assertEqual(result['Catalog']['Sha256'], cat['Sha256'])
@@ -80,8 +138,24 @@ class KernelContract(unittest.TestCase):
             root = pathlib.Path(directory); identity = 'a'*32; target = root/identity; target.mkdir()
             for name in ('xanmod.gpg', 'InRelease', 'Packages.gz'): (target/name).write_bytes((ROOT/'assets/kernel'/name).read_bytes())
             cat['SignedAt'] = NS['datetime'].datetime.now(NS['datetime'].timezone.utc).isoformat()
-            with mock.patch.dict(NS, {'BASE': root, 'run': lambda *args: '[GNUPG:] VALIDSIG '+cat['SigningFingerprint']+' '}):
+            def verify(args):
+                NS['Path'](args[args.index('--output')+1]).write_text((target/'InRelease').read_text())
+                return '[GNUPG:] VALIDSIG '+cat['SigningFingerprint']+' '
+            with mock.patch.dict(NS, {'BASE': root, 'signature_verifier': lambda: 'gpgv', 'run': verify}):
                 with self.assertRaisesRegex(RuntimeError, 'Signed date'): NS['sources_verify']({'Id': identity, 'Catalog': cat})
+
+    def test_latest_missing_verifier_and_network_errors_report_safe_distinct_causes(self):
+        cat = json.loads((ROOT/'config/kernel-catalog.json').read_text())
+        env = {'VPS_PARAM_CATALOG': json.dumps(cat), 'VPS_PARAM_KEY': base64.b64encode((ROOT/'assets/kernel/xanmod.gpg').read_bytes()).decode()}
+        with mock.patch.dict(NS['os'].environ, env), mock.patch.object(NS['shutil'], 'which', return_value=None), mock.patch.object(NS['urllib'].request, 'urlopen', side_effect=AssertionError('network call')):
+            with self.assertRaisesRegex(NS['KernelFailure'], 'KernelVerifierMissing'): NS['latest_candidate']()
+        errors = [(NS['urllib'].error.HTTPError('synthetic-secret', 403, 'synthetic-secret', {}, None), 'KernelRepositoryForbidden'), (NS['urllib'].error.URLError(NS['socket'].gaierror('synthetic-secret')), 'KernelRepositoryDnsFailed'), (NS['urllib'].error.URLError(TimeoutError('synthetic-secret')), 'KernelRepositoryTimeout')]
+        for failure, code in errors:
+            with mock.patch.dict(NS['os'].environ, env), mock.patch.dict(NS, {'signature_verifier': lambda: 'sqv'}), mock.patch.object(NS['Path'], 'read_text', return_value='ID=debian\nVERSION_ID="13"'), mock.patch.object(NS['urllib'].request, 'urlopen', side_effect=failure):
+                with self.assertRaisesRegex(NS['KernelFailure'], code) as error: NS['latest_candidate']()
+                self.assertNotIn('synthetic-secret', str(error.exception))
+                self.assertEqual(NS['failure_code'](error.exception, 'Latest'), code)
+        self.assertEqual(NS['failure_code'](RuntimeError('synthetic-secret'), 'Latest'), 'KernelMetadataRejected')
 
     def test_latest_refuses_an_arbitrary_signing_key(self):
         cat = json.loads((ROOT/'config/kernel-catalog.json').read_text())

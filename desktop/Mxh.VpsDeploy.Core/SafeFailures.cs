@@ -23,6 +23,28 @@ public static class SafeFailures
     {
         try
         {
+            var code = RemoteAssets.Marker(result.Output, "KERNEL_FAILURE_CODE", false);
+            var detail = code switch
+            {
+                "KernelVerifierMissing" => "远端缺少内核签名验证工具，需要 gpgv 或 sqv。",
+                "KernelSignatureRejected" => "官方内核元数据的签名未通过验证，已停止操作。",
+                "KernelSigningKeyMismatch" => "内核元数据签名与应用固定的官方公钥指纹不一致，已停止操作。",
+                "KernelIndexHashMismatch" => "内核包索引与已验证签名中的摘要不一致，已停止操作。",
+                "KernelRepositoryForbidden" => "官方内核仓库拒绝了请求（HTTP 403）。",
+                "KernelRepositoryRateLimited" => "官方内核仓库限制了请求频率（HTTP 429）。",
+                "KernelRepositoryHttpFailed" => "官方内核仓库返回 HTTP 错误，未取得有效元数据。",
+                "KernelRepositoryDnsFailed" => "VPS 无法解析官方内核仓库域名。",
+                "KernelRepositoryTimeout" => "VPS 查询官方内核仓库超时。",
+                "KernelRepositoryUnavailable" => "VPS 无法连接官方内核仓库。",
+                "KernelMetadataRejected" => "官方内核元数据不符合受信任的兼容 LTS 要求，已停止操作。",
+                "KernelOperationRefused" => "内核步骤未通过安全检查；请核对内核兼容性与事务状态。",
+                _ => ""
+            };
+            if (detail != "") return new(detail, code: code, nextAction: code.StartsWith("KernelRepository", StringComparison.Ordinal) ? "核对 VPS 的 DNS 和仓库连接后重新检查版本；安装时仍需重新审阅。" : "查看内核与网络配置中的检查结果；保留归档，核对所列依赖、签名或事务状态。");
+        }
+        catch (FormatException) { }
+        try
+        {
             var phase = RemoteAssets.Marker(result.Output, "MONITORING_FAILURE_PHASE", false);
             var detail = phase switch
             {
