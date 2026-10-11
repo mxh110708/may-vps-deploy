@@ -17,12 +17,16 @@ public sealed class BackgroundTestPipe(BackgroundTestSession session, Func<strin
     public void Start() { if (listener != null) throw new InvalidOperationException(); listener = Listen(); }
     private async Task Listen()
     {
+        // Keep the listener alive across clients. On Unix, disposing the last server
+        // instance also closes its listening socket and drops already queued clients.
+        await using var pipe = new NamedPipeServerStream(session.PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         while (!stopping.IsCancellationRequested)
         {
-            await using var pipe = new NamedPipeServerStream(session.PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            var connected = false;
             try
             {
                 await pipe.WaitForConnectionAsync(stopping.Token);
+                connected = true;
                 using var limit = CancellationTokenSource.CreateLinkedTokenSource(stopping.Token); limit.CancelAfter(TimeSpan.FromSeconds(15));
                 var request = await Read(pipe, limit.Token);
                 var response = await Handle(request);
@@ -30,6 +34,7 @@ public sealed class BackgroundTestPipe(BackgroundTestSession session, Func<strin
             }
             catch (OperationCanceledException) when (stopping.IsCancellationRequested) { break; }
             catch (Exception error) when (error is IOException or JsonException or OperationException or OperationCanceledException) { /* Reject malformed/oversized/idle clients; keep the session available. */ }
+            finally { if (connected) pipe.Disconnect(); }
         }
     }
     private async Task<JsonObject> Handle(JsonObject request)

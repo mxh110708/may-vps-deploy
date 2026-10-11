@@ -56,10 +56,14 @@ internal sealed partial class BoundaryTests
         Refuses(() => transition.PrepareReviewedDeployment(wrongBootstrap), "derived port authorized another transition");
         Check(Directory.GetFiles(Path.Combine(root, "test-artifacts"), "reviewed-management-*.private.json").Length == 1, "reviewed port scope evidence missing");
         var count = 0;
-        await using var server = new BackgroundTestPipe(session, (command, args) =>
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new BackgroundTestPipe(session, async (command, args) =>
         {
             if (command != "ui.read") throw new OperationException("Unknown test command.", code: "TestUnknownCommand");
-            count++; return Task.FromResult(new JsonObject { ["calls"] = count });
+            count++;
+            if (args.Flag("hold")) { entered.SetResult(); await release.Task; }
+            return new JsonObject { ["calls"] = count };
         }); server.Start();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         async Task<JsonObject> Send(JsonObject request)
@@ -79,6 +83,35 @@ internal sealed partial class BoundaryTests
             await pipe.ConnectAsync(3000, timeout.Token); await pipe.WriteAsync(Encoding.UTF8.GetBytes("[1]\n"), timeout.Token);
         }
         result = await BackgroundTestPipe.SendAsync(session, "ui.read", new(), timeout.Token); Check(result.Flag("ok") && count == 2, "malformed JSON killed test listener");
+        request = Request(); request["arguments"] = new JsonObject { ["hold"] = true };
+        var held = Send(request);
+        await entered.Task.WaitAsync(timeout.Token);
+        await using (var queued = new NamedPipeClientStream(".", session.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
+        {
+            var connecting = queued.ConnectAsync(3000, timeout.Token);
+            try
+            {
+                // Unix can queue a connected client while the previous dispatch is held.
+                // Windows waits for the occupied pipe instance to become available.
+                if (!OperatingSystem.IsWindows()) await connecting;
+                Check(count == 3, "queued request executed before current dispatch completed");
+            }
+            finally { release.TrySetResult(); }
+            result = await held; Check(result.Flag("ok") && count == 3, "held pipe response failed");
+            await connecting;
+            await BackgroundTestPipe.Write(queued, Request(), timeout.Token);
+            result = await BackgroundTestPipe.Read(queued, timeout.Token);
+            Check(result.Flag("ok") && count == 4, "queued connection lost during previous client cleanup");
+        }
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            result = await BackgroundTestPipe.SendAsync(session, "ui.read", new(), timeout.Token);
+            Check(result.Flag("ok") && count == 5 + attempt, "consecutive pipe request lost or replayed");
+        }
+        await using (var abandoned = new NamedPipeClientStream(".", session.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
+            await abandoned.ConnectAsync(3000, timeout.Token);
+        result = await BackgroundTestPipe.SendAsync(session, "ui.read", new(), timeout.Token);
+        Check(result.Flag("ok") && count == 25, "client disconnect left listener unable to accept requests");
         var log = File.ReadAllText(session.Artifact("commands.jsonl")); Check(!log.Contains(token) && !log.Contains("wrong"), "test session credentials leaked into audit");
         File.WriteAllText(SafePath.Resolve(root, PrivateDirectory.LocationFile), "{}");
         Refuses(() => BackgroundTestSession.Load(manifest, app), "external production archive reused by test process");
