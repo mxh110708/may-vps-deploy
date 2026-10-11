@@ -84,7 +84,7 @@ public static class ComponentInstallations
             case "AnyTlsEntry":
                 DeploymentPlans.Domain(settings.Text("AnyTlsName")); DeploymentPlans.Domain(settings.Text("EchPublicName")); DeploymentPlans.Domain(settings.Text("ZoneName"));
                 if (!System.Net.Mail.MailAddress.TryCreate(settings.Text("CertbotEmail"), out _) || !File.Exists(settings.Text("CloudflareTokenFile"))) throw new OperationException("AnyTLS 可信证书需要有效联系邮件与私人 Token 文件。");
-                SafePath.CheckLinks(settings.Text("CloudflareTokenFile"));
+                CloudflareCredentials.ReadToken(settings.Text("CloudflareTokenFile"));
                 plan["AnyTls"] = new JsonObject { ["ServerName"] = settings.Text("AnyTlsName"), ["EchPublicName"] = settings.Text("EchPublicName"), ["ForceIpv4Egress"] = true, ["PaddingSchemeMode"] = "OfficialDefault", ["SingBoxVersion"] = versions.Text("sing_box.version") };
                 plan.Put("Ports.AnyTlsPrimary", JsonValue.Create(settings.Number("AnyTlsPort", 8443)));
                 plan.Put("TrustedTls.Enabled", JsonValue.Create(true)); plan.Put("TrustedTls.ZoneName", JsonValue.Create(settings.Text("ZoneName"))); plan.Put("TrustedTls.CertbotEmail", JsonValue.Create(settings.Text("CertbotEmail"))); plan.Put("TrustedTls.CloudflareTokenFile", JsonValue.Create(settings.Text("CloudflareTokenFile"))); plan.Put("TrustedTls.AnyTlsCertificateName", JsonValue.Create("mxh-anytls"));

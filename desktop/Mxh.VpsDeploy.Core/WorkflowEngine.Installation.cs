@@ -51,8 +51,7 @@ public sealed partial class WorkflowEngine
             });
             if (component == "AnyTlsEntry") await c.TrackStep(Step("certbot-dns"), async () =>
             {
-                var tokenFile = c.Plan.Text("TrustedTls.CloudflareTokenFile"); SafePath.CheckLinks(tokenFile); var token = File.ReadAllText(tokenFile).Trim();
-                if (token == "" || token.Any(char.IsWhiteSpace)) throw new OperationException("证书 Token 文件应只含一行非空 Token。");
+                var token = CloudflareCredentials.ReadToken(c.Plan.Text("TrustedTls.CloudflareTokenFile"));
                 await c.Run("certbot-dns-setup.sh", new() { ["CLOUDFLARE_TOKEN"] = token, ["ZONE_NAME"] = c.Plan.Text("TrustedTls.ZoneName"), ["EMAIL"] = c.Plan.Text("TrustedTls.CertbotEmail"), ["PROPAGATION_SECONDS"] = "30", ["ANYTLS_ENABLED"] = "true", ["ANYTLS_CERT_NAME"] = "mxh-anytls", ["ANYTLS_DOMAINS"] = c.Plan.Text("AnyTls.ServerName") + "," + c.Plan.Text("AnyTls.EchPublicName"), ["REALITY_ENABLED"] = "false", ["PRESERVE_EXISTING_CREDENTIALS"] = "true" }, true, 1800, "CERTBOT_DNS_OK");
             });
             await c.TrackStep(Step("component-install"), async () =>

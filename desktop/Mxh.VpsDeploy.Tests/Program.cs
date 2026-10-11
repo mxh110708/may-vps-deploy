@@ -18,6 +18,7 @@ internal sealed partial class BoundaryTests(string repository)
     public async Task Run()
     {
         using var f = new Fixture(repository); Paths(f); Fonts(f); await Coordinator(f); Publisher(f); SinglePublisher(f); Profiles(f); MultiPurpose(f); Keys(f); await Workflows(f); await DesktopDeployment(f); await Credentials(f); await Workbench(f); await Trust(f); await DeploymentExperience(f); await MaintenanceExperience(f);
+        CloudflareCredentialExperience(f);
         await MonitoringArchiveExperience(f);
         await RecoveryExperience(f);
         await PrivateDirectoryExperience();
@@ -26,6 +27,7 @@ internal sealed partial class BoundaryTests(string repository)
         await AdditionsExperience(f);
         await TunnelAccessExperience(f);
         await BackgroundTestTransport(f);
+        await BackgroundFaultExperience(f);
         var sshPython = Environment.GetEnvironmentVariable("MXH_TEST_SSH_PYTHON"); if (!string.IsNullOrEmpty(sshPython)) await LocalSshConfirmation(f, sshPython);
         var python = Environment.GetEnvironmentVariable("MXH_TEST_PYTHON"); if (!string.IsNullOrEmpty(python)) await RealClientWorkbench(f, python);
         Console.WriteLine($"PASS: {assertions} C# boundary and workflow assertions; no production connections.");

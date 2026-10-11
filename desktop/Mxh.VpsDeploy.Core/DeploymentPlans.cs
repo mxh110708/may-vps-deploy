@@ -69,6 +69,7 @@ public static class DeploymentPlans
         if (Uses(plan, "RealityEntry")) Domain(plan.Text("Reality.ServerName"));
         if (Uses(plan, "AnyTlsEntry")) { Domain(plan.Text("AnyTls.ServerName")); Domain(plan.Text("AnyTls.EchPublicName")); }
         if (plan.Flag("TrustedTls.Enabled") && (plan.Text("TrustedTls.ZoneName") == "" || plan.Text("TrustedTls.CertbotEmail") == "" || !File.Exists(plan.Text("TrustedTls.CloudflareTokenFile")))) throw new OperationException("可信证书需要区域、邮件与私人 Token 文件。");
+        if (plan.Flag("TrustedTls.Enabled")) CloudflareCredentials.ReadToken(plan.Text("TrustedTls.CloudflareTokenFile"));
         if (Uses(plan, "ShadowsocksLanding") && plan.Strings("Shadowsocks.TrustedEntryIPv4s").Length + plan.Strings("Shadowsocks.TrustedEntryIPv6s").Length == 0) throw new OperationException("落地至少需要一个可信入口地址。");
         if (Uses(plan, "ShadowsocksLanding") && plan.Flag("Shadowsocks.SecondaryIpv6Enabled") && (!IPAddress.TryParse(plan.Text("Shadowsocks.SecondaryIpv6Address"), out var source6) || source6.AddressFamily != AddressFamily.InterNetworkV6)) throw new OperationException("IPv6 专用用户需要明确的 IPv6 源地址。");
         if (plan.Flag("Komari.Enabled") && (!Uri.TryCreate(plan.Text("Komari.Endpoint"), UriKind.Absolute, out var endpoint) || endpoint.Scheme is not ("http" or "https"))) throw new OperationException("Komari 地址需要完整的 HTTP/HTTPS URL。");

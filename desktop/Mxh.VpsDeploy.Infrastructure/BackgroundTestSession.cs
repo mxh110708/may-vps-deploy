@@ -14,6 +14,7 @@ public sealed class BackgroundTestSession
     public string Token { get; }
     public string Id { get; }
     private readonly bool allowManagementPortTransition;
+    private readonly bool allowTransportFaults;
     private readonly object endpointLock = new();
     private readonly HashSet<string> endpoints = new(StringComparer.Ordinal);
     private readonly HashSet<string> initialEndpoints = new(StringComparer.Ordinal);
@@ -21,6 +22,8 @@ public sealed class BackgroundTestSession
     {
         Root = root; PipeName = config.Text("PipeName"); Token = config.Text("Token"); Id = config.Text("SessionId");
         allowManagementPortTransition = config.Flag("AllowManagementPortTransition");
+        allowTransportFaults = config.Flag("AllowTransportFaults");
+        if (allowTransportFaults && (config["AllowedEndpoints"] as JsonArray ?? []).Count == 0) throw new OperationException("中断测试需要明确的测试机白名单。");
         if (config.Number("SchemaVersion") != 1 || !Guid.TryParseExact(Id, "N", out _) ||
             !Regex.IsMatch(PipeName, @"^mxh-test-[a-f0-9]{32}$") || !Regex.IsMatch(Token, @"^[a-f0-9]{64}$"))
             throw new OperationException("后台测试会话参数无效。");
@@ -103,12 +106,13 @@ public sealed class BackgroundTestSession
     }
     private sealed class RestrictedFactory(BackgroundTestSession session, IRemoteSessionFactory factory) : IRemoteSessionFactory
     {
-        public Task<IRemoteSession> OpenAsync(SshEndpoint endpoint, IUserInteraction interaction, CancellationToken cancellationToken)
+        public async Task<IRemoteSession> OpenAsync(SshEndpoint endpoint, IUserInteraction interaction, CancellationToken cancellationToken)
         {
             if (!session.Allows(endpoint))
                 throw new OperationException("此 SSH 目标未列入本次后台测试白名单，连接已阻止。", code: "TestTargetDenied");
             if (endpoint.KeyPath != null) session.RequireLocalPath(endpoint.KeyPath);
-            return factory.OpenAsync(endpoint, interaction, cancellationToken);
+            var connection = await factory.OpenAsync(endpoint, interaction, cancellationToken);
+            return session.allowTransportFaults ? new BackgroundFaultSession(session, connection) : connection;
         }
     }
 }

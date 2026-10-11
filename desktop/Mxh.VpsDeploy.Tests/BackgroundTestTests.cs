@@ -8,7 +8,7 @@ internal sealed partial class BoundaryTests
 {
     public async Task RunBackgroundTests()
     {
-        using var f = new Fixture(repository); await BackgroundTestTransport(f);
+        using var f = new Fixture(repository); await BackgroundTestTransport(f); await BackgroundFaultExperience(f);
         Console.WriteLine($"PASS: {assertions} background session boundary assertions; no production connections.");
     }
     private async Task BackgroundTestTransport(Fixture f)

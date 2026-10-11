@@ -116,8 +116,7 @@ public sealed partial class WorkflowEngine
         });
         if (c.Plan.Flag("TrustedTls.Enabled")) await Step("certbot-dns", async () =>
         {
-            var tokenFile = c.Plan.Text("TrustedTls.CloudflareTokenFile"); SafePath.CheckLinks(tokenFile); var token = File.ReadAllText(tokenFile).Trim();
-            if (token == "" || token.Any(char.IsWhiteSpace)) throw new OperationException("证书 Token 文件应只含一行非空 Token。");
+            var token = CloudflareCredentials.ReadToken(c.Plan.Text("TrustedTls.CloudflareTokenFile"));
             var anyTls = DeploymentPlans.Uses(c.Plan, "AnyTlsEntry"); var localReality = DeploymentPlans.Uses(c.Plan, "RealityEntry") && c.Plan.Text("Reality.TargetMode") == "LocalOwnedTls";
             await c.Run("certbot-dns-setup.sh", new() { ["CLOUDFLARE_TOKEN"] = token, ["ZONE_NAME"] = c.Plan.Text("TrustedTls.ZoneName"), ["EMAIL"] = c.Plan.Text("TrustedTls.CertbotEmail"), ["PROPAGATION_SECONDS"] = "30", ["ANYTLS_ENABLED"] = Bool(anyTls), ["ANYTLS_CERT_NAME"] = c.Plan.Text("TrustedTls.AnyTlsCertificateName"), ["ANYTLS_DOMAINS"] = anyTls ? c.Plan.Text("AnyTls.ServerName") + "," + c.Plan.Text("AnyTls.EchPublicName") : "", ["REALITY_ENABLED"] = Bool(localReality), ["REALITY_CERT_NAME"] = c.Plan.Text("TrustedTls.RealityCertificateName"), ["REALITY_DOMAINS"] = localReality ? c.Plan.Text("Reality.ServerName") : "" }, true, 1800, "CERTBOT_DNS_OK");
         });

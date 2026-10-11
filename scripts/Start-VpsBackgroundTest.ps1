@@ -5,10 +5,12 @@ param(
     [string]$PublicAssetRoot = $ApplicationDirectory,
     [object[]]$AllowedEndpoints = @(),
     [switch]$AllowManagementPortTransition,
+    [switch]$AllowTransportFaults,
     [switch]$SyntheticFixture
 )
 $ErrorActionPreference = 'Stop'
 if ($SyntheticFixture -and $AllowManagementPortTransition) { throw 'Synthetic UI suites cannot authorize management port transitions.' }
+if ($AllowTransportFaults -and ($SyntheticFixture -or -not $AllowedEndpoints.Count)) { throw 'Transport fault tests require explicit test endpoints and a real isolated fixture.' }
 $app = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\','/')
 $root = [IO.Path]::GetFullPath($FixtureRoot).TrimEnd('\','/')
 $source = [IO.Path]::GetFullPath($PublicAssetRoot).TrimEnd('\','/')
@@ -49,7 +51,7 @@ $sessionId = [guid]::NewGuid().ToString('N')
 $token = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant()
 @{ IsolatedTestRoot = $true; SessionId = $sessionId } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'background-test.fixture.json') -Encoding utf8
 $manifest = Join-Path $root 'test-session.private.json'
-@{ SchemaVersion = 1; Root = $root; SessionId = $sessionId; PipeName = 'mxh-test-' + $sessionId; Token = $token; AllowedEndpoints = $AllowedEndpoints; AllowManagementPortTransition = [bool]$AllowManagementPortTransition } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifest -Encoding utf8
+@{ SchemaVersion = 1; Root = $root; SessionId = $sessionId; PipeName = 'mxh-test-' + $sessionId; Token = $token; AllowedEndpoints = $AllowedEndpoints; AllowManagementPortTransition = [bool]$AllowManagementPortTransition; AllowTransportFaults = [bool]$AllowTransportFaults } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifest -Encoding utf8
 @{ Appearance = 'Dark'; FontId = 'Route'; AutoCheckUpdates = $false } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'private/desktop-settings.json') -Encoding utf8
 if ($SyntheticFixture) {
     if ($AllowedEndpoints.Count) { throw 'Synthetic UI suites must not have remote targets.' }
