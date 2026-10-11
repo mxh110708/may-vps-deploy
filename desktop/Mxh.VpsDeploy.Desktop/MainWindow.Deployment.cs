@@ -63,28 +63,4 @@ public sealed partial class MainWindow
         }, true);
     }
 
-    private void NetworkPage()
-    {
-        var instances = store.ListInstances().Where(instance => { var status = InstanceLifecycle.Read(store, instance.RelativePath, instance.Plan); return status.Managed && !status.NeedsRecovery; }).ToArray();
-        if (instances.Length == 0) { page.Children.Add(Card(Column(SectionHeading("选择已部署的实例", Symbol.Globe, "部署完成或接入已有 VPS 后，可以在这里单独调优。"), Action("查看实例", () => { SelectPage("instances"); return Task.CompletedTask; })))); return; }
-        var selection = new JsonObject { ["Instance"] = instances.Any(i => i.RelativePath == selectedInstance) ? selectedInstance : instances[0].RelativePath };
-        var picker = Choice("目标实例", selection, "Instance", instances.Select(i => (i.RelativePath, i.Plan.Text("Provider") + " / " + i.Plan.Text("Instance"))), preventWheelSelection: true);
-        var panel = new StackPanel { Spacing = 20 }; page.Children.Add(picker); page.Children.Add(panel);
-        void Refresh()
-        {
-            selectedInstance = selection.Text("Instance"); var plan = instances.First(i => i.RelativePath == selectedInstance).Plan; panel.Children.Clear();
-            var storedBandwidth = plan.Number("NetworkTuning.BandwidthMbps");
-            var options = new JsonObject { ["Scope"] = "Network", ["BandwidthMbps"] = storedBandwidth > 0 ? storedBandwidth : 100, ["ReferenceRttMs"] = plan.Number("NetworkTuning.ReferenceRttMs"), ["Mode"] = plan.Number("NetworkTuning.ReferenceRttMs") > 0 ? "Adaptive" : "Baseline" };
-            panel.Children.Add(Card(SectionHeading(plan.Text("NodeName"), Symbol.World, "网络调优为独立维护任务，执行前会备份并审阅。")));
-            var stateFile = SafePath.Resolve(paths.Instance(selectedInstance), "deployment-state.json"); var state = File.Exists(stateFile) ? ArchiveStore.ReadJson(stateFile) : new JsonObject();
-            panel.Children.Add(SettingsGroup(SettingRow("本地调优记录", state["NetworkTuning"] == null ? "尚无已执行的调优记录" : state.Text("NetworkTuning.PROFILE"), Symbol.Clock, Text("运行状态以健康检查为准", 14, true))));
-            var mode = Choice("调优方式", options, "Mode", [("Baseline", "基础网络配置"), ("Adaptive", "按带宽与 RTT 估算")]);
-            var rtt = Field("参考 RTT（ms）", options, "ReferenceRttMs", numeric: true); rtt.IsEnabled = options.Text("Mode") == "Adaptive";
-            mode.SelectionChanged += (_, _) => { rtt.IsEnabled = options.Text("Mode") == "Adaptive"; if (!rtt.IsEnabled) rtt.Text = "0"; };
-            panel.Children.Add(Card(Column(SectionHeading("调优参数", Symbol.Setting), mode, Fields(Field("套餐标称带宽（Mbps）", options, "BandwidthMbps", numeric: true), rtt), Text("估算模式受目标内存上限约束。基础模式不推算链路缓冲；不会自动运行公网测速。", 14, true))));
-            panel.Children.Add(Card(Column(SectionHeading("本次范围", Symbol.Permissions, "仅调整部署器管理的网络参数文件。协议、SSH、防火墙和监控保持当前配置。"), Action("只读健康检查", () => Submit(new(OperationKind.HealthAudit, selectedInstance!, new()))))));
-            pageAction.Content = Action("审阅调优", () => Submit(new(OperationKind.TuneNetwork, selectedInstance!, options)), true);
-        }
-        picker.SelectionChanged += (_, _) => Refresh(); Refresh();
-    }
 }

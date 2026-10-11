@@ -29,7 +29,7 @@ v0.9.14 增加显式的 `AllowTransportFaults` 选项。它仅用于已经授权
 }
 ```
 
-`Id` 每次使用新的 GUID（N 格式）。步骤只允许 `audit.sh`、`ssh-transition.sh`、`nftables-apply.sh`、`xray-install.sh` 和 `deployment-snapshot-delete.sh`；动作只允许 `DisconnectBefore`、`DisconnectAfter`、`ExitAfter`。后两者在远端成功返回后、应用确认该步骤之前制造中断，验证丢失确认时的恢复。
+`Id` 每次使用新的 GUID（N 格式）。步骤只允许 `audit.sh`、`ssh-transition.sh`、`nftables-apply.sh`、`xray-install.sh`、`deployment-snapshot-delete.sh` 和 v0.9.15 增加的 `network-apply.sh`；动作只允许 `DisconnectBefore`、`DisconnectAfter`、`ExitAfter`。后两者在远端成功返回后、应用确认该步骤之前制造中断，验证丢失确认时的恢复。
 
 故障先保存消费标记，重新打开同一测试会话不会再次注入。请求记录只包含步骤名、时间和请求/返回阶段，不记录载荷或凭据。中断后通过实例页正常核对恢复状态；恢复或者明确开始新部署之前，不能重发原变更。测试进程退出后需重新建立已审阅管理端口的明确白名单，不能扩大到其他目标。
 
@@ -66,6 +66,7 @@ Windows 安装器 CI 的原有单次生命周期任务也执行这项后台回�
 | `ui.scroll` | 滚动测试应用自身的内容容器 |
 | `ui.drag` | 调用当前节点手柄的按下、移动、释放与取消处理，可分阶段检查拖动图像 |
 | `ui.capture` | 将应用自身的 XAML 页面或当前对话框渲染成 PNG |
+| `network.schedule.check` | 检查应用自己的到期网络测量计划，使用真实调度流程；不修改系统时钟 |
 | `suite.run` / `suite.status` | 启动并读取合成归档专用的原生页面回归 |
 | `session.stop` | 在安全边界取消任务并关闭本轮应用 |
 

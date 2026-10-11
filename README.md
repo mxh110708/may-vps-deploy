@@ -2,7 +2,9 @@
 
 面向个人 Debian VPS 的中文部署与运维工具，由 Windows 控制端统一管理部署计划、远端操作、私有归档和客户端配置。
 
-正式版为 [v0.9.14](https://github.com/mxh110708/mxh-vps-deploy/releases/tag/v0.9.14)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+正式版为 [v0.9.15](https://github.com/mxh110708/mxh-vps-deploy/releases/tag/v0.9.15)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+
+v0.9.15 重构网络调优：入口机自动采集 RTT、吞吐、延迟和资源，结合套餐与时段生成建议，应用后复测，未确认收益时恢复；落地机仅启用 fq 与可用 BBR。加入应用内一次性晚高峰补测，测量和配置进度直接显示在主页面。详见[使用说明](docs/NETWORK-TUNING.zh-CN.md)与[实测结果及边界](docs/TESTING-0.9.15.zh-CN.md)。
 
 v0.9.14 修正托盘恢复后的标题栏交互状态，兼容证书 DNS Token 的单行与 Certbot 凭据格式；补做首次部署中断恢复、专用令牌吊销与轮换、隔离安装更新及 Komari 真实备份副本验证，详见[结果与边界](docs/TESTING-0.9.14.zh-CN.md)。此前的双栈证书出口与恢复修正见 [v0.9.13](docs/TESTING-0.9.13.zh-CN.md)。窗口居中、位置大小记忆及节点拖动修正见 [v0.9.11 实测记录](docs/TESTING-0.9.11.zh-CN.md)。
 
@@ -66,7 +68,7 @@ dotnet run --project .\desktop\Mxh.VpsDeploy.Tests -c Release -- $PWD
 
 ### 3. 启动工具
 
-在正式发行页下载 `mxh-vps-deploy-v0.9.14-windows-amd64-setup.exe`，按同页 `SHA256SUMS.txt` 核对后安装，通过桌面／开始菜单启动。便携 ZIP 解压后双击 `MXH-VPS-Deploy.exe`；需要应用内原位更新时使用安装版。源码可先构建预览：
+在正式发行页下载 `mxh-vps-deploy-v0.9.15-windows-amd64-setup.exe`，按同页 `SHA256SUMS.txt` 核对后安装，通过桌面／开始菜单启动。便携 ZIP 解压后双击 `MXH-VPS-Deploy.exe`；需要应用内原位更新时使用安装版。源码可先构建预览：
 
 ```powershell
 pwsh -NoProfile -File .\scripts\New-VpsReleasePackage.ps1 -Development -Destination '<预览输出目录>'
@@ -86,7 +88,7 @@ pwsh -NoProfile -File .\Start-VPSDeploy.ps1
 | **实例** | 先选择实例，再进入运维、协议管理、继续部署或恢复 |
 | **部署** | 新机用途可组合，接入已有 VPS 保留现有配置；审阅后执行 |
 | **配置设计** | 点亮 sing-box / Clash 目标，编辑节点与连接关系，生成、校验并导出 |
-| **网络调优** | 选择已有实例，单独填写参数、审阅和调优；部署不自动调优 |
+| **网络调优** | 入口机自动采集并生成建议；落地机仅启用 fq＋可用 BBR；部署不自动调优 |
 | **记录** | 查看任务结果，核对并恢复未完成的配置导出 |
 | **设置** | 深浅模式、字体与四类字号、检查更新及数据位置 |
 
@@ -130,7 +132,7 @@ AnyTLS 和 Reality 本机 HTTPS 目标的准备步骤，见[证书与域名配�
 ### 网络与真实连接验收
 
 - 新部署在审计确认的干净 VPS 上应用最小 nftables；Shadowsocks 按可信入口地址限制访问。
-- 网络调优使用套餐标称带宽、远端内存和可选代表性 RTT，不运行公网测速，也不以虚拟网卡速率代替套餐带宽。
+- WinUI 网络调优：落地机仅启用 fq＋可用 BBR；入口机自动采集实际 TCP RTT、吞吐、延迟和资源，依据标称套餐与测试时段生成建议，应用后复测，未确认收益时恢复。无需手填 RTT。详见[网络调优流程与边界](docs/NETWORK-TUNING.zh-CN.md)。传统 CLI 的历史模式保持原流程。
 - Reality / AnyTLS 使用稳定版 Mihomo 和 sing-box，按地址族测试真实握手、HTTPS、出口 IP 与 UDP；Shadowsocks 支持自测及可信入口链式探测。
 - 项目携带 Windows amd64 测试核心及校验值，解压到 `.cache/client-cores/`，不读取 Clash Verge 安装、PATH 中的代理核心或注册表。
 - 核心不可用时可按提示重试、手动选择或明确跳过。本机 IPv6 验收路径不可用时，可选择受支持的外部验收路径或明确跳过。跳过记为 `SkippedByUser`，不算通过；非交互模式不能自动跳过。

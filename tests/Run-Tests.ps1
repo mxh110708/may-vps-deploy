@@ -1740,6 +1740,8 @@ if($pythonCommandForClient){
     if($LASTEXITCODE -ne 0){throw 'Client template compatibility tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_health_audit.py')
     if($LASTEXITCODE -ne 0){throw 'Health audit behavior tests failed.'}
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_network_runtime.py')
+    if($LASTEXITCODE -ne 0){throw 'Network runtime snapshot regressions failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_tunnel_public_access.py')
     if ($LASTEXITCODE -ne 0) { throw 'Tunnel public access probe regressions failed.' }
 }

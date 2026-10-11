@@ -164,13 +164,6 @@ public sealed partial class WorkflowEngine
             await c.VerifySsh(port, "root"); if (c.Plan.Text("AdminUser") != "root") await c.VerifySsh(port, c.Plan.Text("AdminUser"), !c.Plan.Flag("Import.SshAuthenticationPreserved"));
         }
     }
-    private async Task Tune(Context c, int bandwidth, int rtt)
-    {
-        var tuning = DeploymentPlans.Network(c.Plan.Text("Role"), c.State.Long("Audit.MemoryKiB"), bandwidth, rtt);
-        var r = await c.Run("network-tuning.sh", tuning.ToDictionary(x => x.Key, x => x.Value!.ToString()), true);
-        c.State["NetworkTuning"] = tuning; c.State.Put("BackupDirectories.Sysctl", JsonValue.Create(RemoteAssets.Marker(r.Output, "BACKUP_DIR"))); c.Save();
-        c.Plan["NetworkTuning"] = new JsonObject { ["Mode"] = tuning.Text("MODE"), ["BandwidthMbps"] = bandwidth, ["ReferenceRttMs"] = rtt };
-    }
     private async Task Firewall(Context c, bool final)
     {
         if (c.Plan.Text("Firewall.Mode") == "PreserveExisting") return;

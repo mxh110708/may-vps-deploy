@@ -4,11 +4,27 @@ namespace Mxh.VpsDeploy.Core;
 
 public static class OperationSteps
 {
-    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent;
+    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork;
     public static IReadOnlyList<PlannedTaskStep> Create(OperationRequest request, JsonObject plan)
     {
         var steps = new List<PlannedTaskStep>();
         void Add(string id, string title, string description) => steps.Add(new(id, title, description));
+        if (request.Kind == OperationKind.MeasureNetwork)
+        {
+            Add("network-connection", "核对管理连接", "使用已归档的连接读取 VPS。");
+            Add("network-measurement", "测量实际入口线路", "采集资源、实际 TCP RTT、吞吐、响应延迟及有限 UDP 样本；不修改网络参数。");
+            Add("network-analysis", "生成并保存建议", "结合套餐、内存与时段生成建议，明确未覆盖的条件。"); return steps;
+        }
+        if (request.Kind == OperationKind.TuneNetwork)
+        {
+            Add("network-preflight", "核对配置与队列", "确认当前用途、参数、管理入口和可恢复的队列布局。");
+            Add("network-backup", "保存网络恢复点", "保存运行值、实际队列及受管文件，启用限时回滚保护。");
+            Add("network-apply", "应用并核验参数", "启用 fq 和可用 BBR；检查实际队列与管理连接。");
+            if (request.Options.Text("Profile") == "EntryMeasured") Add("network-retest", "复测同一条线路", "对比吞吐和传输中延迟，检查实际收益。");
+            Add("network-completion", "确认结果或恢复", request.Options.Text("Profile") == "EntryMeasured"
+                ? "复测没有明确收益则恢复原值；保留记录与恢复材料。"
+                : "确认实际队列、拥塞控制与管理连接；保留记录与恢复材料。"); return steps;
+        }
         if (request.Kind == OperationKind.InstallComponent)
         {
             var selected = ComponentInstallations.Selected(request.Options);

@@ -25,7 +25,7 @@ internal sealed partial class BoundaryTests(string repository)
         WindowPlacementExperience();
         await ManagedKeyDeployment(f);
         await AdditionsExperience(f);
-        await TunnelAccessExperience(f);
+        await TunnelAccessExperience(f); await NetworkExperience(f);
         await BackgroundTestTransport(f);
         await BackgroundFaultExperience(f);
         var sshPython = Environment.GetEnvironmentVariable("MXH_TEST_SSH_PYTHON"); if (!string.IsNullOrEmpty(sshPython)) await LocalSshConfirmation(f, sshPython);
@@ -180,11 +180,11 @@ internal sealed partial class BoundaryTests(string repository)
         var deployPlan = f.Plan("LostBaseline"); var deployRemote = new FakeRemote { FailAsset = "deployment-baseline-arm.sh" }; var deploy = new OperationRequest(OperationKind.Deploy, f.Relative(deployPlan), new JsonObject { ["Plan"] = deployPlan });
         await RefusesAsync(() => f.Engine(deployRemote).ExecuteAsync(deploy, Guid.NewGuid().ToString("N"), new InlineProgress<TaskProgress>(_ => { }), default), "lost baseline accepted"); var state = ArchiveStore.ReadJson(SafePath.Resolve(f.Paths.Instance(deploy.InstanceRelativePath), "deployment-state.json")); Check(state.Text("DeploymentTransaction.Status") == "Arming", "no baseline recovery identity");
         await RefusesAsync(() => f.Engine(deployRemote).ExecuteAsync(deploy with { Kind = OperationKind.Resume, Options = new() }, Guid.NewGuid().ToString("N"), new InlineProgress<TaskProgress>(_ => { }), default), "uncertain deploy replayed"); Check(!deployRemote.Commands.Contains("base-system.sh"), "uncertain deploy advanced");
-        var scopePlan = f.Plan("Scope"); f.SaveInstance(scopePlan); var networkRemote = new FakeRemote(); var network = new OperationRequest(OperationKind.TuneNetwork, f.Relative(scopePlan), new JsonObject { ["BandwidthMbps"] = 100, ["ReferenceRttMs"] = 50 }); var task = Guid.NewGuid().ToString("N"); networkRemote.StatusTaskId = task;
+        var scopePlan = f.Plan("Scope"); f.SaveInstance(scopePlan); var networkRemote = new FakeRemote(); var network = new OperationRequest(OperationKind.TuneNetwork, f.Relative(scopePlan), new JsonObject { ["Scope"] = "Network", ["Profile"] = "EntryBasic" }); var task = Guid.NewGuid().ToString("N"); networkRemote.StatusTaskId = task;
         await f.Engine(networkRemote).ExecuteAsync(network, task, new InlineProgress<TaskProgress>(_ => { }), default); Check(networkRemote.ArmedComponents == "Network", "backup scope expanded"); Check(!networkRemote.Commands.Any(x => x is "xray-install.sh" or "ssh-transition.sh" or "nftables-apply.sh"), "network replayed unrelated modules");
         var commitPlan = f.Plan("LostCommit"); f.SaveInstance(commitPlan); var commitRemote = new FakeRemote { FailAsset = "maintenance-transaction-commit.sh", StatusPhase = "Committed" }; task = Guid.NewGuid().ToString("N"); commitRemote.StatusTaskId = task;
         Check(await f.Engine(commitRemote).ExecuteAsync(network with { InstanceRelativePath = f.Relative(commitPlan) }, task, new InlineProgress<TaskProgress>(_ => { }), default) == TaskOutcome.CompletedWithWarnings, "committed remote misclassified"); Check(!commitRemote.Commands.Contains("protocol-migration-trigger-rollback.sh"), "committed remote rolled back");
-        var failPlan = f.Plan("ScopedRollback"); f.SaveInstance(failPlan); var failure = new FakeRemote { FailAsset = "network-tuning.sh", StatusPhase = "Armed" }; task = Guid.NewGuid().ToString("N"); failure.StatusTaskId = task;
+        var failPlan = f.Plan("ScopedRollback"); f.SaveInstance(failPlan); var failure = new FakeRemote { FailAsset = "network-apply.sh", StatusPhase = "Armed" }; task = Guid.NewGuid().ToString("N"); failure.StatusTaskId = task;
         await RefusesAsync(() => f.Engine(failure).ExecuteAsync(network with { InstanceRelativePath = f.Relative(failPlan) }, task, new InlineProgress<TaskProgress>(_ => { }), default), "failed tune accepted"); Check(ArchiveStore.ReadJson(SafePath.Resolve(f.Paths.Instance(f.Relative(failPlan)), "deployment-plan.json")).Text("Reality.Target") == "example.com", "rollback changed protocol"); Check(failure.Commands.Contains("protocol-migration-trigger-rollback.sh"), "network not recovered");
         before = networkRemote.Commands.Count; await RefusesAsync(() => f.Engine(networkRemote).ExecuteAsync(network with { Kind = OperationKind.Komari, Options = new JsonObject { ["Scope"] = "KomariController", ["Action"] = "Remove" } }, Guid.NewGuid().ToString("N"), new InlineProgress<TaskProgress>(_ => { }), default), "destructive controller scope accepted"); Check(before == networkRemote.Commands.Count, "invalid task armed backup");
     }
@@ -205,7 +205,7 @@ internal sealed partial class BoundaryTests(string repository)
             f.Store.WriteSecret(secretFile, secrets); secrets.Clear();
             var task = Guid.NewGuid().ToString("N"); var remote = new FakeRemote { StatusTaskId = task }; var user = new FakeUser(title => title.StartsWith("root ", StringComparison.Ordinal) ? "synthetic-root" : "synthetic-admin");
             var engine = new WorkflowEngine(f.Store, remote, new FakeKeys(), user, new FakeValidation());
-            await engine.ExecuteAsync(new(OperationKind.TuneNetwork, f.Relative(plan), new JsonObject { ["BandwidthMbps"] = 100, ["ReferenceRttMs"] = 50 }), task, new InlineProgress<TaskProgress>(_ => { }), default);
+            await engine.ExecuteAsync(new(OperationKind.TuneNetwork, f.Relative(plan), new JsonObject { ["Scope"] = "Network", ["Profile"] = "EntryBasic" }), task, new InlineProgress<TaskProgress>(_ => { }), default);
             Check(remote.Endpoints.Any(e => e.User == "admin") && remote.Endpoints.Where(e => e.User == "admin").All(e => e.Password == "synthetic-admin"), "root credential reused for admin");
             Check(remote.Endpoints.Where(e => e.User == "root").All(e => e.Password == "synthetic-root"), "admin credential reused for root");
             Check(user.SecretPrompts.Count(title => title.StartsWith("root ", StringComparison.Ordinal)) == 1 && user.SecretPrompts.Count(title => title.StartsWith("admin ", StringComparison.Ordinal)) == (imported ? 1 : 0), "task credential cache mixed users");

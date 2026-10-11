@@ -45,7 +45,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
         this.paths = paths; launchArguments = arguments; testSession = session; store = new(paths, new WindowsSecretProtector());
         var assets = new ValidationAssets(paths, "windows-amd64"); var tools = new ExternalToolRunner();
         IRemoteSessionFactory remote = new SshSessionFactory(store); if (session != null) remote = session.Restrict(remote);
-        coordinator = new(store, new WorkflowEngine(store, remote, new ManagedKeys(new WindowsManagedKeyAccess()), this, new ProtocolValidation(assets, tools)));
+        coordinator = new(store, new WorkflowEngine(store, remote, new ManagedKeys(new WindowsManagedKeyAccess()), this, new ProtocolValidation(assets, tools), new NetworkMeasurement(assets, tools)));
         workbench = new(store, tools, assets, paths.Resolve("runtime/python/python.exe"));
         var preference = paths.Resolve("private/desktop-settings.json"); settings = File.Exists(preference) ? ArchiveStore.ReadJson(preference) : new JsonObject { ["AutoCheckUpdates"] = false, ["UpdateProxy"] = "http://127.0.0.1:2080" };
         fonts = new(paths);
@@ -89,10 +89,10 @@ public sealed partial class MainWindow : Window, IUserInteraction
                 catch (Exception error) { Show(error is OperationException safe ? safe.Message : "方案未能保存，窗口保持打开。", InfoBarSeverity.Error); }
             }
         };
-        Closed += (_, _) => { CancelNodeReorder(); trayIcon?.Dispose(); trayIcon = null; };
+        Closed += (_, _) => { CancelNodeReorder(); StopNetworkScheduler(); trayIcon?.Dispose(); trayIcon = null; };
         SetAppearance(settings.Text("Appearance", "Dark"));
         InitializeWindowPlacement();
-        root.Loaded += (_, _) => Program.Trace(arguments, "Root Loaded");
+        root.Loaded += (_, _) => { Program.Trace(arguments, "Root Loaded"); StartNetworkScheduler(); };
         root.Loaded += async (_, _) => { SelectPage("overview"); if (fontFallback) Show("所选字体暂时不可用，已使用内置原版字体。可在设置中重新选择或导入。", InfoBarSeverity.Warning); if (testSession != null) { StartTestSession(); return; } if (arguments.Contains("--verify-installed-update")) { await InstalledUpdateSmoke(); return; } if (arguments.Contains("--ui-smoke") || arguments.Contains("--verify-runtime")) { await UiSmoke(); return; } if (settings.Flag("AutoCheckUpdates")) await CheckUpdates(true); };
     }
     private static SolidColorBrush Brush(Paint role) => DesktopTheme.Brush(role);
@@ -242,7 +242,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
     private void RefreshTaskResultPage()
     {
         if (ShowingExecution) return;
-        if (currentPage is not ("instances" or "records" or "overview")) return;
+        if (currentPage is not ("instances" or "records" or "overview" or "network")) return;
         var shown = notice.IsOpen; var message = notice.Message; var severity = notice.Severity;
         SelectPage(currentPage); if (shown) Show(message, severity);
     }
@@ -257,14 +257,16 @@ public sealed partial class MainWindow : Window, IUserInteraction
     }
     private static string OutcomeLabel(TaskOutcome outcome) => outcome switch { TaskOutcome.Completed => "已完成", TaskOutcome.CompletedWithWarnings => "已完成，含提示", TaskOutcome.Cancelled => "已取消", TaskOutcome.NeedsRecovery => "待恢复", TaskOutcome.Failed => "失败", _ => "上次任务未确认结束" };
     private void SaveDraft() => SaveScheme();
-    public Task<bool> ConfirmHostAsync(HostIdentity identity, CancellationToken cancellationToken) => ConfirmHostIdentity(identity, cancellationToken);
+    public Task<bool> ConfirmHostAsync(HostIdentity identity, CancellationToken cancellationToken) => activeOperation?.Options.Flag("Scheduled") == true ? Task.FromResult(false) : ConfirmHostIdentity(identity, cancellationToken);
     public async Task<bool> ConfirmAsync(UserDecision decision, CancellationToken cancellationToken) => await OnUi(async () =>
     {
+        if (activeOperation?.Options.Flag("Scheduled") == true) return false;
         var phrase = new TextBox { Header = decision.RequiredPhrase == null ? "" : "输入 " + decision.RequiredPhrase + " 确认", Visibility = decision.RequiredPhrase == null ? Visibility.Collapsed : Visibility.Visible }; var dialog = OperationDialog(decision.Title, Column(Text(decision.Description), phrase), "确认");
         if (decision.RequiredPhrase != null) { dialog.IsPrimaryButtonEnabled = false; phrase.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = phrase.Text == decision.RequiredPhrase; } using var registration = cancellationToken.Register(() => DispatcherQueue.TryEnqueue(dialog.Hide)); return await ShowDialog(dialog) == ContentDialogResult.Primary;
     }, cancellationToken);
     public async Task<string?> SecretAsync(string title, CancellationToken cancellationToken) => await OnUi(async () =>
     {
+        if (activeOperation?.Options.Flag("Scheduled") == true) return null;
         var box = SecretField(title); var dialog = OperationDialog("输入凭据", box, "继续"); using var registration = cancellationToken.Register(() => DispatcherQueue.TryEnqueue(dialog.Hide)); var result = await ShowDialog(dialog); var value = result == ContentDialogResult.Primary ? box.Password : null; box.Password = ""; return value;
     }, cancellationToken);
     private async Task<T> OnUi<T>(Func<Task<T>> action, CancellationToken cancellationToken)

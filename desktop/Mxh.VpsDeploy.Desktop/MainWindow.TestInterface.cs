@@ -56,6 +56,10 @@ public sealed partial class MainWindow
         switch (command)
         {
             case "ui.read": return ReadTestUi();
+            case "network.schedule.check":
+                if (taskCancellation != null || activeTestDialog != null) throw new OperationException("当前状态不能检查后台计划。");
+                DispatcherQueue.TryEnqueue(async () => await PollNetworkSchedules());
+                return new() { ["accepted"] = true }; // The same application scheduler, without advancing its clock.
             case "ui.set":
             {
                 if (TestElement(args) is not TextBox field) throw new OperationException("目标不是文本输入框。");

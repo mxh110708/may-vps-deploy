@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 
 namespace Mxh.VpsDeploy.Core;
 
-public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFactory connections, IManagedKeyStore keys, IUserInteraction user, IProtocolValidation validation) : IOperationWorkflow
+public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFactory connections, IManagedKeyStore keys, IUserInteraction user, IProtocolValidation validation, INetworkMeasurement? network = null) : IOperationWorkflow
 {
     private readonly RemoteAssets assets = new(store.Paths);
     private ArchiveStore Store => store;
@@ -45,6 +45,8 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
                 case OperationKind.TunnelAccess: await VerifyTunnelAccess(context); break;
                 case OperationKind.Recover: await Recover(context); break;
                 case OperationKind.InstallComponent: await InstallComponent(context); break;
+                case OperationKind.MeasureNetwork: await MeasureNetwork(context); break;
+                case OperationKind.TuneNetwork: await TuneMeasuredNetwork(context); break;
                 default: await Maintain(context); break;
             }
             var outcome = context.Warnings ? TaskOutcome.CompletedWithWarnings : TaskOutcome.Completed;
@@ -74,6 +76,8 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
             }
             if (failure is OperationCanceledException) { context.Finish(TaskOutcome.Cancelled); throw; }
             var error = SafeFailures.Describe(failure, context.MutationStarted && context.Pending?.Text("Phase") != "RolledBack");
+            if (request.Kind == OperationKind.TuneNetwork && recovered && error.NeedsRecovery)
+                error = new OperationException(error.Message, false, error.Code, "本次网络运行参数、队列和管理连接已核对恢复；保留记录，重新采集并审阅后再执行。");
             context.Finish(error.NeedsRecovery ? TaskOutcome.NeedsRecovery : TaskOutcome.Failed, error); throw error;
         }
     }

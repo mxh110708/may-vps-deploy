@@ -45,6 +45,11 @@ if scope_has Network && [[ -f /etc/sysctl.d/99-mxh-vps-deploy.conf ]]; then
 elif scope_has Network; then
   touch "$backup_dir/sysctl-config-was-absent"
 fi
+if scope_has Network && [[ "${VPS_PARAM_NETWORK_SNAPSHOT:-false}" == true ]]; then
+  mxh_network snapshot "$backup_dir"
+  declare -f mxh_network > "$backup_dir/network-tools.sh"
+  chmod 0600 "$backup_dir/network-tools.sh"
+fi
 printf '%s\n' "$VPS_PARAM_SOURCE_ROLE" > "$backup_dir/source-role"
 printf '%s\n' "$VPS_PARAM_TARGET_ROLE" > "$backup_dir/target-role"
 
@@ -236,7 +241,14 @@ if scope_has Network; then
   elif [[ -f "$backup_dir/sysctl-config-was-absent" ]]; then
     rm -f /etc/sysctl.d/99-mxh-vps-deploy.conf
   fi
-  sysctl --system >/dev/null
+  if [[ -f "$backup_dir/network-state.json" ]]; then
+    [[ ! -L "$backup_dir/network-state.json" && -f "$backup_dir/network-tools.sh" && ! -L "$backup_dir/network-tools.sh" ]]
+    # shellcheck disable=SC1091
+    source "$backup_dir/network-tools.sh"
+    mxh_network restore "$backup_dir"
+  else
+    sysctl --system >/dev/null
+  fi
 fi
 systemctl daemon-reload
 

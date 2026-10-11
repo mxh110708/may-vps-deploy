@@ -53,6 +53,7 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
     public JsonObject HealthAudit { get; set; } = new() { ["SchemaVersion"] = 2, ["CollectedAt"] = DateTimeOffset.UtcNow, ["ChecksIncomplete"] = new JsonArray(), ["Services"] = new JsonObject { ["KomariAgent"] = HealthService(false), ["KomariController"] = HealthService(false), ["Cloudflared"] = HealthService(false) } };
     public JsonObject AgentConfiguration { get; set; } = new() { ["endpoint"] = "https://monitor.example.com", ["token"] = "synthetic-agent-token" };
     public JsonObject TunnelAccessAudit { get; set; } = new() { ["Passed"] = true, ["ConnectorReady"] = true, ["LocalVersion"] = "1.5.1", ["PublicVersion"] = "1.5.1", ["Code"] = "" };
+    public JsonObject NetworkAudit { get; set; } = NetworkTestData.Observation();
     public static JsonObject HealthService(bool installed, bool enabled = false, bool active = false, bool supported = true) => new() { ["Installed"] = installed, ["Enabled"] = enabled, ["Active"] = active, ["SupportedLayout"] = supported };
     public Task<IRemoteSession> OpenAsync(SshEndpoint endpoint, IUserInteraction interaction, CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); Endpoints.Add(endpoint); return Task.FromResult<IRemoteSession>(this); }
     public Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken cancellationToken) => Task.FromResult(new CommandResult(0, ArchiveStore.Digest(Encoding.UTF8.GetBytes("fixture-archive")) + "  file", ""));
@@ -71,6 +72,14 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
         if (asset == "maintenance-komari.sh") return Task.FromResult(new CommandResult(0, Parameter("ACTION") == "Status" ? string.Join('\n', new[] { "komari-agent.service", "komari.service", "cloudflared.service" }.Select(service => service + "=" + (MonitoringPresent ? "true,true,true" : "false,false,false"))) : "VPSDEPLOY_KOMARI_LIFECYCLE_OK\n", ""));
         if (asset == "maintenance-health-audit.sh") return Task.FromResult(new CommandResult(0, Marker("HEALTH_AUDIT", HealthAudit.ToJsonString()), ""));
         if (asset == "tunnel-public-audit.sh") return Task.FromResult(new CommandResult(0, Marker("TUNNEL_ACCESS", TunnelAccessAudit.ToJsonString()) + "VPSDEPLOY_TUNNEL_ACCESS_OK\n", ""));
+        if (asset == "network-audit.sh") return Task.FromResult(new CommandResult(0, Marker("NETWORK_AUDIT", NetworkAudit.ToJsonString()), ""));
+        if (asset == "network-preflight.sh") return Task.FromResult(new CommandResult(0, "VPSDEPLOY_NETWORK_PREFLIGHT_OK\n", ""));
+        if (asset == "network-apply.sh")
+        {
+            NetworkAudit["Sysctl"]!["net.core.default_qdisc"] = "fq";
+            NetworkAudit["Sysctl"]!["net.ipv4.tcp_congestion_control"] = "bbr";
+            return Task.FromResult(new CommandResult(0, "VPSDEPLOY_NETWORK_APPLIED\n", ""));
+        }
         if (asset == "component-install-preflight.sh")
         {
             var code = Parameter("VERIFY_ONLY") == "true" ? PostInstallationCheckCode : InstallationCheckCode;

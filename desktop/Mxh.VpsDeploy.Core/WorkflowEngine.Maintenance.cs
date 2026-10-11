@@ -43,7 +43,7 @@ public sealed partial class WorkflowEngine
         c.Pending = new JsonObject { ["TaskId"] = c.Id, ["Kind"] = c.Request.Kind.ToString(), ["Phase"] = "Arming", ["Components"] = new JsonArray(components.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray()), ["LocalBackup"] = "maintenance-backups/" + c.Id, ["OldPlan"] = c.Plan.DeepClone(), ["OldState"] = c.State.DeepClone() };
         store.WriteSecret(SafePath.Resolve(backup, "secrets.dotnet.private.json"), c.Secrets); c.Save();
         var role = DeploymentPlans.Roles.Contains(c.Plan.Text("Role")) ? c.Plan.Text("Role") : "MonitorOnly";
-        var result = await c.Run("protocol-migration-arm-rollback.sh", new() { ["SOURCE_ROLE"] = role, ["TARGET_ROLE"] = role, ["TIMEOUT_MINUTES"] = c.Request.Kind == OperationKind.InstallComponent ? "60" : "20", ["QUIESCE_KOMARI_CONTROLLER"] = Bool(components.Contains("KomariController")), ["COMPONENTS"] = string.Join(',', components), ["CONTROL_TASK_ID"] = c.Id }, true, 600);
+        var result = await c.Run("protocol-migration-arm-rollback.sh", new() { ["SOURCE_ROLE"] = role, ["TARGET_ROLE"] = role, ["TIMEOUT_MINUTES"] = c.Request.Kind == OperationKind.InstallComponent ? "60" : "20", ["QUIESCE_KOMARI_CONTROLLER"] = Bool(components.Contains("KomariController")), ["COMPONENTS"] = string.Join(',', components), ["CONTROL_TASK_ID"] = c.Id, ["NETWORK_SNAPSHOT"] = Bool(c.Request.Kind == OperationKind.TuneNetwork) }, true, 600);
         c.Pending["RemoteBackup"] = RemoteAssets.Marker(result.Output, "BACKUP_DIR"); c.Pending["Phase"] = "Armed"; c.Save();
         if (!Regex.IsMatch(c.Pending.Text("RemoteBackup"), @"^/root/vps-deploy-backups/[0-9]{8}-[0-9]{6}/protocol-lifecycle$")) throw new OperationException("远端恢复目录异常。", true);
         await using var session = await c.Session();
@@ -196,7 +196,6 @@ public sealed partial class WorkflowEngine
         await Arm(c, components);
         switch (kind)
         {
-            case OperationKind.TuneNetwork: await Tune(c, option.Number("BandwidthMbps"), option.Number("ReferenceRttMs")); break;
             case OperationKind.ProtocolState: await ProtocolState(c); break;
             case OperationKind.RotateCredentials: await Rotate(c); break;
             case OperationKind.Upgrade: await Upgrade(c); break;
@@ -220,7 +219,6 @@ public sealed partial class WorkflowEngine
             if (c.Request.Kind is OperationKind.RotateCredentials or OperationKind.Upgrade && !Enabled(c.Plan, role)) throw new OperationException("此项操作需要启用对应协议后独立验收。");
             if (c.Request.Kind == OperationKind.ProtocolState && options.Text("Action") == "Enable" && role is "RealityEntry" or "AnyTlsEntry" && Enabled(c.Plan, role == "RealityEntry" ? "AnyTlsEntry" : "RealityEntry") && ComponentInstallations.EntryPortsConflict(c.Plan)) throw new OperationException("共用端口的入口需要使用切换操作。");
         }
-        if (c.Request.Kind == OperationKind.TuneNetwork && options.Number("ReferenceRttMs") is < 0 or > 2000) throw new OperationException("参考 RTT 无效。");
         if (c.Request.Kind == OperationKind.Restore && options.Text("RestoreMode") is not ("ConfigOnly" or "Full")) throw new OperationException("恢复范围无效。");
     }
     private async Task VerifyRemoteArchive(Context c, string file, string expected)

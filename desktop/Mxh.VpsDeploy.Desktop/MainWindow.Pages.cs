@@ -23,12 +23,12 @@ public sealed partial class MainWindow
     private async Task OperationSheet(OperationKind kind, JsonObject plan)
     {
         if (kind == OperationKind.Upgrade) { await UpgradeCore(plan); return; }
+        if (kind == OperationKind.TuneNetwork) { SelectPage("network"); return; }
         if (kind == OperationKind.Komari) throw new OperationException("请从实例页选择具体的监控或访问组件。");
         var options = new JsonObject { ["Scope"] = kind == OperationKind.TuneNetwork ? "Network" : kind == OperationKind.Decommission ? "ManagedInstance" : "Protocol" };
         var panel = Column(Text("选择本次操作范围，再审阅执行。", 14, true));
         if (kind is OperationKind.ProtocolState or OperationKind.RotateCredentials) panel.Children.Add(Choice("协议", options, "Protocol", DeploymentPlans.Roles[..3].Where(role => plan.Flag("ProtocolInventory." + role + ".Installed", plan.Text("Role") == role)).Select(role => (role, RoleLabel(role)))));
         if (kind == OperationKind.ProtocolState) panel.Children.Add(Choice("操作", options, "Action", [("Switch", "切换到此入口"), ("Enable", "启用"), ("Disable", "停用备用"), ("Uninstall", "卸载此协议")]));
-        if (kind == OperationKind.TuneNetwork) { options["BandwidthMbps"] = plan.Number("NetworkTuning.BandwidthMbps"); options["ReferenceRttMs"] = plan.Number("NetworkTuning.ReferenceRttMs"); panel.Children.Add(Field("套餐标称带宽（Mbps）", options, "BandwidthMbps", numeric: true)); panel.Children.Add(Field("参考 RTT（ms，可选）", options, "ReferenceRttMs", numeric: true)); }
         if (kind == OperationKind.Restore)
         {
             var directory = SafePath.Resolve(paths.Instance(selectedInstance!), "maintenance-backups");

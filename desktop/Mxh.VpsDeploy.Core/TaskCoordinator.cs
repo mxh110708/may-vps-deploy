@@ -14,18 +14,22 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
     public ReviewedOperation Review(OperationRequest request)
     {
         var snapshot = request.Snapshot(); OperationPolicy.Validate(snapshot);
-        var planHash = ArchiveFingerprint(snapshot.InstanceRelativePath);
+        var planHash = ArchiveFingerprint(snapshot);
         return new(snapshot, Fingerprint(snapshot), planHash, OperationPolicy.Summary(snapshot));
     }
     public static string Fingerprint(OperationRequest request) => ArchiveStore.Fingerprint(new JsonObject
     {
         ["kind"] = request.Kind.ToString(), ["instance"] = request.InstanceRelativePath, ["options"] = request.Options.DeepClone()
     });
-    private string ArchiveFingerprint(string relative)
+    private string ArchiveFingerprint(OperationRequest request)
     {
-        var directory = store.Paths.Instance(relative); var files = new JsonObject();
+        var directory = store.Paths.Instance(request.InstanceRelativePath); var files = new JsonObject();
         foreach (var name in new[] { "deployment-plan.json", "deployment-state.json", "secrets.dotnet.private.json", "deployment-secrets.private.json", "operation-pending.dotnet.json" })
         { var path = SafePath.Resolve(directory, name); files[name] = ClientSchemes.SourceFingerprint(path); }
+        if (request.Kind == OperationKind.TuneNetwork && request.Options.Text("Profile") == "EntryMeasured")
+        {
+            var id = NetworkTuning.Id(request.Options.Text("MeasurementId")); files["Measurement"] = ClientSchemes.SourceFingerprint(SafePath.Resolve(directory, "network-measurements/" + id + ".json"));
+        }
         return ArchiveStore.Fingerprint(files);
     }
     public async Task<TaskRecord> ExecuteAsync(ReviewedOperation review, OperationRequest current, IProgress<TaskProgress> progress, CancellationToken cancellationToken)
@@ -35,7 +39,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         try
         {
             using var instanceLock = store.LockInstance(current.InstanceRelativePath);
-            var planHash = ArchiveFingerprint(current.InstanceRelativePath);
+            var planHash = ArchiveFingerprint(current);
             if (planHash != review.PlanFingerprint) throw new OperationException("实例归档在审阅后发生变化，请重新读取并审阅。");
             Current = new(Guid.NewGuid().ToString("N"), current.Kind, DateTimeOffset.UtcNow, null, TaskOutcome.Running, "准备", InstanceRelativePath: current.InstanceRelativePath, TargetLabel: OperationPolicy.TargetLabel(current));
             store.AppendHistory(Current);
@@ -80,7 +84,19 @@ public static class OperationPolicy
             if (!Enum.TryParse<ComponentScope>(request.Options.Text("Scope"), out var scope) || !Enum.IsDefined(scope)) throw new OperationException("请明确选择操作组件。");
             if (request.Kind == OperationKind.Restore && request.Options.Text("Backup") == "") throw new OperationException("请明确选择恢复归档。");
         }
-        if (request.Kind == OperationKind.TuneNetwork && request.Options.Number("BandwidthMbps") <= 0) throw new OperationException("请填写套餐标称带宽。");
+        if (request.Kind == OperationKind.MeasureNetwork) NetworkTuning.ValidateMeasurement(request.Options);
+        if (request.Kind == OperationKind.TuneNetwork)
+        {
+            var options = request.Options;
+            if (options.Text("Scope") != "Network" || options.Text("Profile") is not ("LandingBasic" or "EntryBasic" or "EntryMeasured")) throw new OperationException("请选择有效的独立网络配置。");
+            if (options.Any(p => !new[] { "Scope", "Profile", "MeasurementId", "MeasurementSha256" }.Contains(p.Key))) throw new OperationException("调优只接受由自动测量生成的建议；无需填写 RTT。");
+            if (options.Text("Profile") == "EntryMeasured")
+            {
+                NetworkTuning.Id(options.Text("MeasurementId"));
+                if (!System.Text.RegularExpressions.Regex.IsMatch(options.Text("MeasurementSha256"), "^[a-f0-9]{64}$")) throw new OperationException("测量摘要无效，请重新生成建议。");
+            }
+            else if (options.ContainsKey("MeasurementId") || options.ContainsKey("MeasurementSha256")) throw new OperationException("基础配置无需指定测速记录。");
+        }
         var scopeName = request.Options.Text("Scope", "Protocol");
         if (request.Kind == OperationKind.Upgrade && scopeName != "Protocol" || request.Kind == OperationKind.Restore && scopeName != "Protocol" || request.Kind == OperationKind.RotateCredentials && scopeName != "Protocol") throw new OperationException("任务与所选组件范围不匹配。监控组件请从对应的监控入口管理。");
         if (request.Kind == OperationKind.Komari && request.Options.ContainsKey("Protocol")) throw new OperationException("监控与访问操作不能混入代理协议。");
@@ -91,6 +107,8 @@ public static class OperationPolicy
     {
         OperationKind.InstallComponent => "追加安装 · " + ComponentInstallations.SelectionLabel(request.Options),
         OperationKind.TunnelAccess => "Cloudflare Tunnel · 公开访问验证",
+        OperationKind.MeasureNetwork => "入口线路测量",
+        OperationKind.TuneNetwork => request.Options.Text("Profile") == "LandingBasic" ? "落地机 · fq + BBR" : "入口机 · 网络调优",
         OperationKind.Upgrade => request.Options.Text("Protocol") switch { "RealityEntry" => "Xray · Reality 入口", "AnyTlsEntry" => "sing-box · AnyTLS / ECH 入口", "ShadowsocksLanding" => "sing-box · Shadowsocks 落地", _ => "代理核心" },
         OperationKind.Komari => (request.Options.Text("Scope") switch { "KomariAgent" => "Komari Agent", "KomariController" => "Komari 主控", _ => "Cloudflare Tunnel" }) + " · " + (request.Options.Text("Action") switch { "Upgrade" => "升级", "Remove" => "卸载", "Backup" => "一致性备份", "Restore" => "恢复备份", _ => "Token 轮换" }),
         _ => ""
@@ -103,7 +121,8 @@ public static class OperationPolicy
         OperationKind.HealthAudit => "只读健康与漂移检查；不重启或修改服务。",
         OperationKind.TunnelAccess => "从 VPS 核对 Tunnel 已连接、主控本机接口与公开 HTTPS 接口的响应和版本；保存检查结果，不修改 Cloudflare 路由或重启服务。\n公开网址：" + request.Options.Text("PublicUrl"),
         OperationKind.InstallComponent => "在现有实例上追加安装 " + ComponentInstallations.SelectionLabel(request.Options) + "。统一核对未安装状态和端口、建立本轮恢复快照，再逐项安装并统一验收；本轮失败或取消一并恢复新增组件，保留已有协议、SSH 和网络参数。",
-        OperationKind.TuneNetwork => "只修改部署器自己的网络参数文件，不重放协议、SSH 或防火墙。\n套餐标称带宽：" + request.Options.Number("BandwidthMbps") + " Mbps\n参考 RTT：" + (request.Options.Number("ReferenceRttMs") == 0 ? "不启用自适应估算" : request.Options.Number("ReferenceRttMs") + " ms") + "。",
+        OperationKind.MeasureNetwork => "只读采集 VPS 状态，并用隔离代理测试本机→所选入口→Cloudflare 的真实路径。无需填写 RTT；不修改系统代理。\n有效载荷上限：" + NetworkTuning.PayloadBudget(request.Options) / 1048576 + " MiB；路径采集最长 " + NetworkTuning.DurationSeconds(request.Options) + " 秒，另加有限 SSH 状态采集。\n标称下载/上传：" + request.Options.Number("BandwidthMbps") + "/" + request.Options.Number("UploadMbps") + " Mbps（0 表示未知）；套餐类型：" + request.Options.Text("CapacityType") + "。\n使用地时区：" + request.Options.Text("TimeZoneId") + "；晚高峰：" + request.Options.Number("PeakStartHour") + "–" + request.Options.Number("PeakEndHour") + " 时。结果只代表该测试路径与时段。",
+        OperationKind.TuneNetwork => request.Options.Text("Profile") == "EntryMeasured" ? "依据 24 小时内的自动测量建议，只调整受管网络参数及默认接口队列。先保存文件、运行参数与实际队列，再启用 fq 和当前内核可用 BBR，保留自动缓冲。\n随后以同一路径和流量档位复测；未确认明确收益时恢复原值。复测额外消耗与原测量相同的流量预算。不会自动安装内核或重启 VPS。" : "仅启用默认接口 fq 和当前内核可用的 BBR；保留缓冲、TFO 等其他运行参数。先备份文件和实际参数/队列，再核验生效与管理连接。无需公网测速。BBR 版本以已加载模块证据为准，当前内核不支持时明确提示；内核升级需另行维护。",
         OperationKind.Recover => "先核对未完成事务的真实状态，再按明确范围恢复。",
         OperationKind.Upgrade => "升级对象：" + TargetLabel(request) + "\n目标版本：" + request.Options.Text("TargetVersion") + "\n先核对状态并备份，再更新程序、重启所选服务并独立验收；失败按协议范围恢复。协议备份覆盖本机受管代理协议，恢复时须一并审阅。",
         OperationKind.Komari => "操作：" + TargetLabel(request) + (request.Options.Text("Action") == "Upgrade" ? "\n目标版本：" + request.Options.Text("TargetVersion") : "") + "\n" + (request.Options.Text("Scope") switch { "KomariAgent" => request.Options.Text("Action") == "Remove" ? "卸载当前 VPS 的 Agent，停止向主控上报；不删除主控历史数据。" : "备份并更新当前 VPS 的 Agent，保留连接配置和原启停状态。", "KomariController" => "先备份当前 VPS 的主控程序和数据；一致性备份、升级及恢复需要短暂停止主控，再恢复原启停状态。只处理主控专用备份，不包含 Tunnel。", _ => "只轮换当前 VPS 的 Tunnel 连接 Token 并重启 Tunnel；新 Token 在执行时输入，不修改 Cloudflare DNS 或主控数据。" }),
