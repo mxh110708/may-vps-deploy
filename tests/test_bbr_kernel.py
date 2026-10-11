@@ -104,13 +104,13 @@ class KernelContract(unittest.TestCase):
             root = pathlib.Path(directory)
             for name in ('xanmod.gpg', 'InRelease', 'Packages.gz'): (root/name).write_bytes((ROOT/'assets/kernel'/name).read_bytes())
             original = (root/'InRelease').read_bytes()
-            self.assertIn(b'Origin:', original)
+            self.assertIn(b'Codename: bookworm', original)
             for verifier in tools:
                 with mock.patch.dict(NS, {'signature_verifier': lambda: verifier}):
                     (root/'InRelease').write_bytes(original)
                     _, signed_at, _ = NS['signed_index'](root, cat['SigningFingerprint'])
                     self.assertEqual(signed_at, cat['SignedAt'])
-                    (root/'InRelease').write_bytes(original.replace(b'Origin:', b'Origjn:', 1))
+                    (root/'InRelease').write_bytes(original.replace(b'Codename: bookworm', b'Codename: tampered', 1))
                     with self.assertRaisesRegex(NS['KernelFailure'], 'KernelSignatureRejected'): NS['signed_index'](root, cat['SigningFingerprint'])
 
     def test_latest_reads_only_signed_compatible_lts_and_pins_its_hash(self):
