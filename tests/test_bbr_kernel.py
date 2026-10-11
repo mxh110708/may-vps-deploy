@@ -64,9 +64,11 @@ class KernelContract(unittest.TestCase):
             with self.assertRaises(RuntimeError): NS['entry'](kernel)
 
     def test_verifier_selection_does_not_require_installing_gpgv_on_debian13(self):
-        for tools, expected in [({'sqv'}, 'sqv'), ({'gpgv'}, 'gpgv'), ({'sqv', 'gpgv'}, 'sqv')]:
-            with mock.patch.object(NS['shutil'], 'which', side_effect=lambda tool: '/usr/bin/'+tool if tool in tools else None):
+        for tools, expected in [({'sqv'}, 'sqv'), ({'gpgv'}, 'gpgv'), ({'sqv', 'gpgv'}, 'gpgv')]:
+            with mock.patch.object(NS['shutil'], 'which', side_effect=lambda tool: '/usr/bin/'+tool if tool in tools else None), mock.patch.dict(NS, {'run': lambda *args, **kwargs: '--cleartext --output'}):
                 self.assertEqual(NS['signature_verifier'](), expected)
+        with mock.patch.object(NS['shutil'], 'which', side_effect=lambda tool: '/usr/bin/sqv' if tool == 'sqv' else None), mock.patch.dict(NS, {'run': lambda *args, **kwargs: 'legacy detached signatures only'}):
+            with self.assertRaisesRegex(NS['KernelFailure'], 'KernelVerifierMissing'): NS['signature_verifier']()
         with mock.patch.object(NS['shutil'], 'which', return_value=None):
             with self.assertRaisesRegex(NS['KernelFailure'], 'KernelVerifierMissing'): NS['signature_verifier']()
 
@@ -97,6 +99,7 @@ class KernelContract(unittest.TestCase):
                 with self.assertRaisesRegex(NS['KernelFailure'], 'KernelIndexHashMismatch'): NS['signed_index'](root, cat['SigningFingerprint'])
 
     def test_real_available_verifiers_accept_signed_fixture_and_refuse_tampering(self):
+        if sys.platform == 'win32': self.skipTest('VPS verification uses Linux tools; real cryptographic checks run in Debian CI and native VPS tests')
         tools = [tool for tool in ('sqv', 'gpgv') if NS['shutil'].which(tool)]
         if not tools: self.skipTest('OpenPGP verifier not installed on this runner; Debian CI and native VPS checks cover it')
         cat = json.loads((ROOT/'config/kernel-catalog.json').read_text())

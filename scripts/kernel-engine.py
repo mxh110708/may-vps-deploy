@@ -33,8 +33,12 @@ class KernelFailure(RuntimeError):
 
 
 def signature_verifier():
-    for tool in ('sqv', 'gpgv'):
-        if shutil.which(tool): return tool
+    if shutil.which('gpgv'): return 'gpgv'
+    if shutil.which('sqv'):
+        try:
+            help_text = run(['sqv', '--help'], timeout=10)
+            if '--cleartext' in help_text and '--output' in help_text: return 'sqv'
+        except (OSError, RuntimeError, subprocess.TimeoutExpired): pass
     raise KernelFailure('KernelVerifierMissing')
 
 
@@ -134,7 +138,7 @@ def audit():
         reasons.append('不支持此虚拟化或容器启动环境')
     if Path('/sys/firmware/efi').exists(): reasons.append('EFI / Secure Boot 启动布局尚未适配')
     try: result['SignatureVerifier'] = signature_verifier()
-    except KernelFailure: reasons.append('缺少签名验证工具（gpgv / sqv）')
+    except KernelFailure: reasons.append('缺少可用的签名验证工具（gpgv / 支持明文签名的 sqv）')
     for tool in ('grub-reboot', 'grub-set-default', 'grub-editenv', 'update-grub', 'dpkg-deb', 'apt-get', 'systemd-run', 'systemctl'):
         if not shutil.which(tool): reasons.append('缺少 '+tool)
     try:

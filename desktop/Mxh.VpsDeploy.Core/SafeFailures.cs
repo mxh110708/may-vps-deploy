@@ -26,7 +26,7 @@ public static class SafeFailures
             var code = RemoteAssets.Marker(result.Output, "KERNEL_FAILURE_CODE", false);
             var detail = code switch
             {
-                "KernelVerifierMissing" => "远端缺少内核签名验证工具，需要 gpgv 或 sqv。",
+                "KernelVerifierMissing" => "远端缺少可用的内核签名验证工具，需要 gpgv 或支持明文签名的 sqv。",
                 "KernelSignatureRejected" => "官方内核元数据的签名未通过验证，已停止操作。",
                 "KernelSigningKeyMismatch" => "内核元数据签名与应用固定的官方公钥指纹不一致，已停止操作。",
                 "KernelIndexHashMismatch" => "内核包索引与已验证签名中的摘要不一致，已停止操作。",
