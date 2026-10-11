@@ -37,11 +37,22 @@ def restore_args(device, q):
     args += [kind]
     values = q.get('options') or {}
     allowed = {'fq_codel': {'limit', 'flows', 'quantum', 'target', 'interval', 'memory_limit', 'ecn', 'drop_batch'},
-               'pfifo_fast': {'bands', 'priomap'},
+               'pfifo_fast': {'bands', 'priomap', 'multiqueue'},
                'fq': {'limit', 'flow_limit', 'buckets', 'orphan_mask', 'quantum', 'initial_quantum',
                       'maxrate', 'low_rate_threshold', 'refill_delay', 'pacing', 'horizon', 'horizon_drop'}}[kind]
     if any(k not in allowed for k in values):
         raise SystemExit('Unsupported queue options; refusing to discard them.')
+    if kind == 'pfifo_fast':
+        # sch_generic.c reports fixed bands/priomap; q_fifo.c has no option
+        # parser. q_prio.c also prints the absent multiqueue flag as false.
+        # Restore this built-in layout without passing read-only tc metadata.
+        mapping = [1, 2, 2, 2, 1, 2, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+        if ('bands' in values and (type(values['bands']) is not int or values['bands'] != 3)
+                or 'priomap' in values and (not isinstance(values['priomap'], list)
+                    or any(type(x) is not int for x in values['priomap']) or values['priomap'] != mapping)
+                or 'multiqueue' in values and values['multiqueue'] is not False):
+            raise SystemExit('Unsupported pfifo_fast layout; refusing to discard it.')
+        return args
     for name, value in values.items():
         if name == 'ecn': args += ['ecn' if value else 'noecn']
         elif name == 'pacing': args += ['pacing' if value else 'nopacing']

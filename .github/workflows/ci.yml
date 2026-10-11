@@ -45,6 +45,7 @@ jobs:
           python3 tests/test_komari_lifecycle.py --bash /bin/bash
           python3 tests/test_health_audit.py
           python3 tests/test_network_runtime.py
+          python3 tests/test_bbr_kernel.py
           python3 tests/test_tunnel_public_access.py
           python3 tests/test_certbot_source.py
           python3 tests/test_scoped_rollback.py --bash /bin/bash

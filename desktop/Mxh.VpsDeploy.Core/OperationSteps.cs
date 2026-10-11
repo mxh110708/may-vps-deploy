@@ -4,11 +4,22 @@ namespace Mxh.VpsDeploy.Core;
 
 public static class OperationSteps
 {
-    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork;
+    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel;
     public static IReadOnlyList<PlannedTaskStep> Create(OperationRequest request, JsonObject plan)
     {
         var steps = new List<PlannedTaskStep>();
         void Add(string id, string title, string description) => steps.Add(new(id, title, description));
+        if (request.Kind == OperationKind.BbrKernel)
+        {
+            var action = request.Options.Text("Action");
+            if (action is "Check" or "Install") Add("kernel-check", "检查 BBR 与内核兼容性", "只读核对运行版本、GRUB、驱动和可用空间。");
+            if (action == "Install") Add("kernel-install", "安装受管 BBR v3 内核", "核验已审阅版本的签名与包哈希，在 VPS 独立任务中安装；旧内核继续运行。");
+            if (action is "Activate" or "Rollback" or "Reconcile") Add("kernel-state", "核对原内核事务", "确认受管身份，沿用已有结果，不重放命令。");
+            if (action == "Activate") Add("kernel-reboot", "重启到新内核", "使用单次启动项，保留旧内核为验收前的默认项。");
+            if (action is "Activate" or "Reconcile") Add("kernel-accept", "验收并提交", "核验 BBR v3、原服务及管理连接，确认后才设为默认。");
+            if (action == "Rollback") Add("kernel-rollback", "回到旧内核", "只恢复受管启动设置，必要时重启并核对管理连接。");
+            return steps;
+        }
         if (request.Kind == OperationKind.MeasureNetwork)
         {
             Add("network-connection", "核对管理连接", "使用已归档的连接读取 VPS。");

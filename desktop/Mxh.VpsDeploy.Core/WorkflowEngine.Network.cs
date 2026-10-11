@@ -68,6 +68,8 @@ public sealed partial class WorkflowEngine
                 before["Analysis"] = analysis;
             }
             current = await NetworkObservation(c, before?["Options"] as JsonObject);
+            if (c.Request.Options.Text("BbrVersion", "Current") == "v3" && current.Text("BbrVersion") != "v3") throw new OperationException("已选择 BBR v3，但当前内核尚未确认支持。请先检查并完成 BBR v3 内核升级与验收。");
+            if (c.Request.Options.Text("BbrVersion", "Current") == "Current" && c.State.Text("KernelUpgrade.Phase") == "Committed" && current.Text("Kernel") != c.State.Text("KernelUpgrade.OldKernel")) throw new OperationException("已选择 VPS 原有内核版本，请先审阅回退旧内核；当前运行的是升级后的内核。");
             if (before != null && (current.Text("Kernel") != before.Text("ServerAfter.Kernel") || current.Long("MemoryKiB") != before.Long("ServerAfter.MemoryKiB") || ArchiveStore.Fingerprint(current["Sysctl"]!) != ArchiveStore.Fingerprint(before.At("ServerAfter.Sysctl")!) || NetworkTuning.QueueFingerprint(current) != NetworkTuning.QueueFingerprint(before["ServerAfter"]!.AsObject()))) throw new OperationException("远端内核、参数或队列在测速后发生变化，请重新采集。");
             await c.Run("network-preflight.sh", timeout: 60, marker: "NETWORK_PREFLIGHT_OK");
         });
@@ -77,6 +79,7 @@ public sealed partial class WorkflowEngine
             await c.Run("network-apply.sh", new() { ["PROFILE"] = profile,
                 ["BUFFER_TARGET_BYTES"] = before?.Text("Analysis.BufferTargetBytes", "0") ?? "0", ["BUFFER_CAP_BYTES"] = before?.Text("Analysis.BufferCapBytes", "0") ?? "0" }, true, 120, "NETWORK_APPLIED");
             current = await NetworkObservation(c, before?["Options"] as JsonObject);
+            if (c.Request.Options.Text("BbrVersion", "Current") == "v3" && current.Text("BbrVersion") != "v3") throw new OperationException("应用后未确认 BBR v3 运行版本，请核对内核事务。");
             if (NetworkTuning.Sysctl(current, "net.core.default_qdisc") != "fq") throw new OperationException("默认队列未确认生效。");
             if (NetworkTuning.Sysctl(current, "net.ipv4.tcp_available_congestion_control").Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("bbr") && NetworkTuning.Sysctl(current, "net.ipv4.tcp_congestion_control") != "bbr") throw new OperationException("可用 BBR 未确认生效。");
             await VerifyManagement(c);

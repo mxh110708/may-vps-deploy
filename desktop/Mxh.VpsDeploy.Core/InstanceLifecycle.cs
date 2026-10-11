@@ -10,7 +10,7 @@ public static class InstanceLifecycle
         pending != null && pending.Text("Phase") is not ("Committed" or "RolledBack") ||
         state.Text("DeploymentTransaction.Status") is "Arming" or "Armed" or "LocalPrepared" ||
         state.At("MaintenanceTransaction") != null && !state.Flag("MaintenanceTransaction.Committed") ||
-        state.Flag("Migration.RollbackArmed") && !state.Flag("Migration.Committed");
+        state.Flag("Migration.RollbackArmed") && !state.Flag("Migration.Committed") || BbrKernels.Pending(state);
 
     public static InstanceStatus Read(ArchiveStore store, string relative, JsonObject plan)
     {

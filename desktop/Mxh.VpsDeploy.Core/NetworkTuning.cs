@@ -45,11 +45,23 @@ public static class NetworkTuning
             if (options.Text(key).Trim() != "" && !int.TryParse(options.Text(key), NumberStyles.Integer, CultureInfo.InvariantCulture, out _)) throw new OperationException("带宽与高峰时间请填写整数；带宽未知可留空。");
         if (options.Number("BandwidthMbps") is < 0 or > 100000 || options.Number("UploadMbps") is < 0 or > 100000) throw new OperationException("标称带宽应为 1–100000 Mbps；未知可留空。");
         if (options.Text("CapacityType") is not ("Unknown" or "Shared" or "Dedicated" or "Burst") || options.Text("Protocol") is not ("RealityEntry" or "AnyTlsEntry") || options.Text("Family") is not ("IPv4" or "IPv6") || options.Text("TestSize") is not ("Light" or "Full")) throw new OperationException("请选择有效的测速用途、协议和测试档位。");
-        if (options.Number("PeakStartHour") is < 0 or > 23 || options.Number("PeakEndHour") is < 0 or > 23 || options.Number("PeakStartHour") == options.Number("PeakEndHour")) throw new OperationException("晚高峰时间应在 0–23 时，开始与结束不能相同。");
+        if (options.Text("PeakStartHour").Trim() == "" || options.Text("PeakEndHour").Trim() == "" || options.Number("PeakStartHour") is < 0 or > 23 || options.Number("PeakEndHour") is < 0 or > 24 || options.Number("PeakStartHour") == options.Number("PeakEndHour")) throw new OperationException("高峰开始应在 0–23 时，结束应在 0–24 时，且不能相同；24 表示次日零点。");
         _ = Zone(options.Text("TimeZoneId"));
+    }
+    public static string TimeDescription(JsonObject options)
+    {
+        try
+        {
+            var zone = Zone(options.Text("TimeZoneId"));
+            if (!int.TryParse(options.Text("PeakStartHour"), out var start) || !int.TryParse(options.Text("PeakEndHour"), out var end) || start is < 0 or > 23 || end is < 0 or > 24 || start == end) return "请填写有效高峰时段：开始 0–23 时，结束 0–24 时，且不能相同。";
+            var suffix = end == 24 ? "24:00（次日零点）" : (end < start ? "次日 " : "") + end.ToString("00") + ":00";
+            return "当前高峰：" + start.ToString("00") + ":00–" + suffix + " · " + zone.Id + "。其他时段的结果不代表此高峰；缺少该时段样本时保留余量。时间按主要使用地计算。";
+        }
+        catch (OperationException) { return "此时区无法识别。请选择常用时区，或填写有效的 IANA / Windows 时区 ID。"; }
     }
     public static TimeZoneInfo Zone(string id)
     {
+        if (string.IsNullOrWhiteSpace(id)) throw new OperationException("主要使用地时区无效。");
         try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
         catch (Exception error) when (error is TimeZoneNotFoundException or InvalidTimeZoneException) { throw new OperationException("主要使用地时区无效。"); }
     }

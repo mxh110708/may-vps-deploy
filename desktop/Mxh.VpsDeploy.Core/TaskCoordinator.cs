@@ -30,6 +30,11 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         {
             var id = NetworkTuning.Id(request.Options.Text("MeasurementId")); files["Measurement"] = ClientSchemes.SourceFingerprint(SafePath.Resolve(directory, "network-measurements/" + id + ".json"));
         }
+        if (request.Kind == OperationKind.BbrKernel)
+        {
+            foreach (var name in new[] { "config/kernel-catalog.json", "scripts/kernel-engine.py", "scripts/bbr-runtime.py", "assets/kernel/xanmod.gpg", "assets/kernel/InRelease", "assets/kernel/Packages.gz", "assets/remote/kernel-audit.sh", "assets/remote/kernel-latest.sh", "assets/remote/kernel-prepare.sh", "assets/remote/kernel-status.sh", "assets/remote/kernel-boot.sh", "assets/remote/kernel-confirm.sh", "assets/remote/kernel-rollback.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
+            if (request.Options.Text("Source") == "Latest") files["LatestKernelCandidate"] = ClientSchemes.SourceFingerprint(SafePath.Resolve(directory, "kernel-latest-candidate.json"));
+        }
         return ArchiveStore.Fingerprint(files);
     }
     public async Task<TaskRecord> ExecuteAsync(ReviewedOperation review, OperationRequest current, IProgress<TaskProgress> progress, CancellationToken cancellationToken)
@@ -70,6 +75,7 @@ public static class OperationPolicy
     public static void Validate(OperationRequest request)
     {
         if (!Enum.IsDefined(request.Kind)) throw new OperationException("未知任务类型。");
+        if (request.Kind == OperationKind.BbrKernel) BbrKernels.Validate(request.Options);
         if (request.Kind == OperationKind.InstallComponent) ComponentInstallations.ValidateOptions(request.Options);
         if (request.Kind == OperationKind.TunnelAccess)
         {
@@ -89,7 +95,8 @@ public static class OperationPolicy
         {
             var options = request.Options;
             if (options.Text("Scope") != "Network" || options.Text("Profile") is not ("LandingBasic" or "EntryBasic" or "EntryMeasured")) throw new OperationException("请选择有效的独立网络配置。");
-            if (options.Any(p => !new[] { "Scope", "Profile", "MeasurementId", "MeasurementSha256" }.Contains(p.Key))) throw new OperationException("调优只接受由自动测量生成的建议；无需填写 RTT。");
+            if (options.Any(p => !new[] { "Scope", "Profile", "MeasurementId", "MeasurementSha256", "BbrVersion" }.Contains(p.Key))) throw new OperationException("调优只接受由自动测量生成的建议；无需填写 RTT。");
+            if (options.Text("BbrVersion", "Current") is not ("Current" or "v3")) throw new OperationException("请选择当前内核自带版本或 BBR v3。");
             if (options.Text("Profile") == "EntryMeasured")
             {
                 NetworkTuning.Id(options.Text("MeasurementId"));
@@ -108,6 +115,7 @@ public static class OperationPolicy
         OperationKind.InstallComponent => "追加安装 · " + ComponentInstallations.SelectionLabel(request.Options),
         OperationKind.TunnelAccess => "Cloudflare Tunnel · 公开访问验证",
         OperationKind.MeasureNetwork => "入口线路测量",
+        OperationKind.BbrKernel => BbrKernels.Label(request.Options.Text("Action")),
         OperationKind.TuneNetwork => request.Options.Text("Profile") == "LandingBasic" ? "落地机 · fq + BBR" : "入口机 · 网络调优",
         OperationKind.Upgrade => request.Options.Text("Protocol") switch { "RealityEntry" => "Xray · Reality 入口", "AnyTlsEntry" => "sing-box · AnyTLS / ECH 入口", "ShadowsocksLanding" => "sing-box · Shadowsocks 落地", _ => "代理核心" },
         OperationKind.Komari => (request.Options.Text("Scope") switch { "KomariAgent" => "Komari Agent", "KomariController" => "Komari 主控", _ => "Cloudflare Tunnel" }) + " · " + (request.Options.Text("Action") switch { "Upgrade" => "升级", "Remove" => "卸载", "Backup" => "一致性备份", "Restore" => "恢复备份", _ => "Token 轮换" }),
@@ -119,6 +127,14 @@ public static class OperationPolicy
         OperationKind.ResumeImport => "继续接入草稿：重新只读识别现有配置，完成应用内归档。",
         OperationKind.Deploy => "新机部署：先审计系统与已有服务，建立备份后配置双 SSH 入口和所选用途；最后独立验收。网络调优由部署后另行手动发起。",
         OperationKind.HealthAudit => "只读健康与漂移检查；不重启或修改服务。",
+        OperationKind.BbrKernel => "操作：" + TargetLabel(request) + "\n" + (request.Options.Text("Action") switch
+        {
+            "Check" => "只读检查运行中的 BBR 版本、系统、虚拟化、磁盘、GRUB 和驱动兼容性；不会安装或重启。" + (request.Options.Text("Source") == "Latest" ? "联网查询官方最新兼容 LTS，并核验签名后保存具体版本。" : "使用应用随附的固定版本。"),
+            "Install" => "来源：" + (request.Options.Text("Source") == "Latest" ? "官方最新兼容 LTS（本次查询已锁定）" : "应用固定版本") + "\n安装版本：" + request.Options.Text("CatalogId") + "\n包 SHA256：" + request.Options.Text("CatalogSha256", "随附目录中已固定") + "\n核验官方仓库签名和包 SHA256，只安装单个内核包，不添加长期仓库、不删除旧内核。安装后继续运行旧内核，需要另行审阅重启。",
+            "Activate" => "VPS 将重启，连接会暂时中断。单次启动新内核，重新核验 BBR v3、原服务及主/救援 SSH 后设为默认。新系统进入用户空间但 5 分钟未提交会回到旧内核；若无法启动用户空间，需要服务商控制台重启，下一次默认仍是旧内核。",
+            "Rollback" => "只处理本轮受管内核启动设置，保留两个内核包。必要时重启到已保留的旧内核，并重新核验管理连接；网络参数和应用服务配置保留。",
+            _ => "读取原事务状态与启动身份，沿用独立安装任务的结果，不重复安装或重启。新内核已启动时核验 BBR v3 与管理连接，确认通过后提交。"
+        }),
         OperationKind.TunnelAccess => "从 VPS 核对 Tunnel 已连接、主控本机接口与公开 HTTPS 接口的响应和版本；保存检查结果，不修改 Cloudflare 路由或重启服务。\n公开网址：" + request.Options.Text("PublicUrl"),
         OperationKind.InstallComponent => "在现有实例上追加安装 " + ComponentInstallations.SelectionLabel(request.Options) + "。统一核对未安装状态和端口、建立本轮恢复快照，再逐项安装并统一验收；本轮失败或取消一并恢复新增组件，保留已有协议、SSH 和网络参数。",
         OperationKind.MeasureNetwork => "只读采集 VPS 状态，并用隔离代理测试本机→所选入口→Cloudflare 的真实路径。无需填写 RTT；不修改系统代理。\n有效载荷上限：" + NetworkTuning.PayloadBudget(request.Options) / 1048576 + " MiB；路径采集最长 " + NetworkTuning.DurationSeconds(request.Options) + " 秒，另加有限 SSH 状态采集。\n标称下载/上传：" + request.Options.Number("BandwidthMbps") + "/" + request.Options.Number("UploadMbps") + " Mbps（0 表示未知）；套餐类型：" + request.Options.Text("CapacityType") + "。\n使用地时区：" + request.Options.Text("TimeZoneId") + "；晚高峰：" + request.Options.Number("PeakStartHour") + "–" + request.Options.Number("PeakEndHour") + " 时。结果只代表该测试路径与时段。",

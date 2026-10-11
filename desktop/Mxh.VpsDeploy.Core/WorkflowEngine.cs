@@ -26,7 +26,12 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         var secretsFile = SafePath.Resolve(directory, "secrets.dotnet.private.json");
         var secrets = File.Exists(secretsFile) ? store.ReadSecret(secretsFile) : File.Exists(SafePath.Resolve(directory, "deployment-secrets.private.json")) ? ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-secrets.private.json")) : new JsonObject();
         await using var context = new Context(this, request, taskId, directory, plan, state, secrets, progress, cancellationToken);
-        if (request.Kind != OperationKind.Recover && context.HasPending()) throw new OperationException("存在未完成事务，请先核对并恢复。", true, "PendingTransaction", "先在实例页核对事务状态，再按明确范围恢复。");
+        var kernelRecovery = request.Kind == OperationKind.Recover && BbrKernels.Pending(state);
+        var nonKernelState = state.DeepClone().AsObject(); nonKernelState.Remove("KernelUpgrade");
+        var otherPending = InstanceLifecycle.HasPending(nonKernelState, context.Pending);
+        if (kernelRecovery && otherPending) throw new OperationException("存在其他未完成事务，不能混合内核恢复范围。请先核对其他事务。", true, "PendingTransaction");
+        if (request.Kind == OperationKind.BbrKernel && (otherPending || BbrKernels.Pending(state) && request.Options.Text("Action") == "Install")) throw new OperationException("存在未完成事务，请先核对；不能开始另一轮内核安装。", true, "PendingTransaction");
+        if (request.Kind != OperationKind.Recover && request.Kind != OperationKind.BbrKernel && context.HasPending()) throw new OperationException("存在未完成事务，请先核对并恢复。", true, "PendingTransaction", "先在实例页核对事务状态，再按明确范围恢复。");
         if (initial) { context.State["Engine"] = "dotnet-v1"; context.Save(); }
         context.State["LastTask"] = new JsonObject { ["Id"] = taskId, ["Kind"] = request.Kind.ToString(), ["Outcome"] = "Running", ["StartedAt"] = DateTimeOffset.UtcNow };
         context.Save();
@@ -43,7 +48,10 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
                 case OperationKind.Resume: await Deploy(context); break;
                 case OperationKind.HealthAudit: await Health(context); break;
                 case OperationKind.TunnelAccess: await VerifyTunnelAccess(context); break;
-                case OperationKind.Recover: await Recover(context); break;
+                case OperationKind.Recover:
+                    if (kernelRecovery) { context.Request.Options["Action"] = "Reconcile"; await ManageBbrKernel(context); }
+                    else await Recover(context); break;
+                case OperationKind.BbrKernel: await ManageBbrKernel(context); break;
                 case OperationKind.InstallComponent: await InstallComponent(context); break;
                 case OperationKind.MeasureNetwork: await MeasureNetwork(context); break;
                 case OperationKind.TuneNetwork: await TuneMeasuredNetwork(context); break;
@@ -55,6 +63,12 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         catch (Exception failure)
         {
             var interruptedStage = context.CurrentStage;
+            if (request.Kind == OperationKind.BbrKernel || kernelRecovery)
+            {
+                var kernelError = SafeFailures.Describe(failure, BbrKernels.Pending(context.State));
+                context.Finish(kernelError.NeedsRecovery ? TaskOutcome.NeedsRecovery : failure is OperationCanceledException ? TaskOutcome.Cancelled : TaskOutcome.Failed, kernelError);
+                throw kernelError;
+            }
             var recovered = false;
             if (context.Pending != null && context.Pending.Text("Phase") is not ("Committed" or "RolledBack"))
             {
@@ -170,7 +184,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         public async Task<CommandResult> Run(string asset, Dictionary<string, string>? parameters = null, bool mutation = false, int timeout = 600, string? marker = null, int? port = null, bool bootstrap = false)
         {
             Cancellation.ThrowIfCancellationRequested(); parameters ??= [];
-            if (mutation && asset is not ("protocol-migration-trigger-rollback.sh" or "maintenance-transaction-commit.sh" or "maintenance-transaction-status.sh") && Pending?.Text("RemoteBackup") is { Length: > 0 } backup) parameters["EXPECTED_TRANSACTION"] = backup;
+            if (mutation && !asset.StartsWith("kernel-", StringComparison.Ordinal) && asset is not ("protocol-migration-trigger-rollback.sh" or "maintenance-transaction-commit.sh" or "maintenance-transaction-status.sh") && Pending?.Text("RemoteBackup") is { Length: > 0 } backup) parameters["EXPECTED_TRANSACTION"] = backup;
             Report(asset[..^3], mutation ? "正在执行受管步骤，取消将在安全边界处理。" : "正在读取远端状态。");
             await using var session = await Session(port, bootstrap: bootstrap);
             if (mutation) { MutationStarted = true; if (Pending != null) { Pending["Stage"] = asset; Save(); } }

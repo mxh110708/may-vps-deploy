@@ -21,6 +21,7 @@ BACKUP = '/root/vps-deploy-backups/20000101-000000/protocol-lifecycle'
 KEYS = {'net.core.default_qdisc': 'fq_codel', 'net.ipv4.tcp_congestion_control': 'cubic',
         'net.ipv4.tcp_rmem': '4096 131072 6291456', 'net.ipv4.tcp_wmem': '4096 16384 4194304',
         'net.core.rmem_max': '212992', 'net.core.wmem_max': '212992', 'net.ipv4.tcp_moderate_rcvbuf': '1'}
+PFIFO_OPTIONS = {'bands': 3, 'priomap': [1, 2, 2, 2, 1, 2, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1], 'multiqueue': False}
 
 
 class VirtualPath:
@@ -78,6 +79,9 @@ class Model:
             handle = '8001:' if self.generated_handles else '0:'
             if args[start] == 'handle': handle = args[start+1]; start += 2
             kind = args[start]; opts = {}; rest = iter(args[start+1:])
+            if kind == 'pfifo_fast':
+                if args[start+1:]: raise AssertionError('pfifo_fast has no tc option parser')
+                opts = copy.deepcopy(PFIFO_OPTIONS)
             for name in rest:
                 if name in ('ecn', 'noecn'): opts['ecn'] = name == 'ecn'; continue
                 value = next(rest); opts[name] = int(value.removesuffix('us'))
@@ -98,6 +102,37 @@ class Model:
 
 
 class NetworkRuntimeTests(unittest.TestCase):
+    def test_builtin_pfifo_fast_metadata_does_not_become_tc_arguments(self):
+        model = Model(); model.queues[0] = {'kind': 'pfifo_fast', 'root': True, 'handle': '0:', 'options': copy.deepcopy(PFIFO_OPTIONS)}
+        original = copy.deepcopy(model.queues)
+        model.execute('preflight')
+        self.assertEqual(model.queues, original)
+        self.assertFalse(any(c[:3] == ['tc', 'qdisc', 'replace'] for c in model.calls))
+        model.execute('snapshot'); model.execute('apply'); model.execute('verify'); model.execute('restore')
+        self.assertEqual(model.queues, original)
+        self.assertEqual(model.values, KEYS)
+        restores = [c for c in model.calls if c[:3] == ['tc', 'qdisc', 'replace'] and 'pfifo_fast' in c]
+        self.assertEqual(restores, [['tc', 'qdisc', 'replace', 'dev', 'eth0', 'root', 'pfifo_fast']])
+
+    def test_unreproducible_pfifo_fast_layout_is_refused_before_mutation(self):
+        for change in ({'bands': 2}, {'bands': 3.0}, {'multiqueue': True}, {'multiqueue': 0},
+                       {'priomap': [0] * 16}, {'priomap': [True] * 16}, {'unknown': 1}):
+            with self.subTest(change=change):
+                model = Model(); values = copy.deepcopy(PFIFO_OPTIONS); values.update(change)
+                model.queues[0] = {'kind': 'pfifo_fast', 'root': True, 'handle': '0:', 'options': values}
+                with self.assertRaises(SystemExit): model.execute('preflight')
+                self.assertEqual(model.values, KEYS)
+                self.assertNotIn(BACKUP + '/network-state.json', model.files)
+                self.assertFalse(any(c[:3] == ['tc', 'qdisc', 'replace'] for c in model.calls))
+
+    def test_pfifo_fast_multiqueue_leaf_restore_keeps_root_and_other_leaf(self):
+        model = Model(); model.queues = [{'kind': 'mq', 'root': True, 'handle': '0:', 'options': {}},
+            {'kind': 'pfifo_fast', 'parent': ':1', 'handle': '0:', 'options': copy.deepcopy(PFIFO_OPTIONS)},
+            {'kind': 'fq', 'parent': ':2', 'handle': '8001:', 'options': {'timer_slack': 10000}}]
+        original = copy.deepcopy(model.queues)
+        model.execute('snapshot'); model.execute('apply'); model.execute('verify'); model.execute('restore')
+        self.assertEqual(model.queues, original)
+
     def test_preflight_does_not_change_runtime_or_create_snapshot(self):
         model = Model(); original = copy.deepcopy(model.values)
         model.execute('preflight')

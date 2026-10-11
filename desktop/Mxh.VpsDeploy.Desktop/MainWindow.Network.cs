@@ -11,7 +11,7 @@ public sealed partial class MainWindow
     private readonly Dictionary<string, JsonObject> networkForms = new();
     private void NetworkPage()
     {
-        var instances = store.ListInstances().Where(instance => { var status = InstanceLifecycle.Read(store, instance.RelativePath, instance.Plan); return status.Managed && !status.NeedsRecovery; }).ToArray();
+        var instances = store.ListInstances().Where(instance => { var status = InstanceLifecycle.Read(store, instance.RelativePath, instance.Plan); return status.Managed; }).ToArray();
         if (instances.Length == 0) { page.Children.Add(Card(Column(SectionHeading("选择已部署的实例", Symbol.Globe, "部署完成或接入已有 VPS 后，可以单独进行网络配置。"), Action("查看实例", () => { SelectPage("instances"); return Task.CompletedTask; })))); return; }
         var selection = new JsonObject { ["Instance"] = instances.Any(i => i.RelativePath == selectedInstance) ? selectedInstance : instances[0].RelativePath };
         var picker = Choice("目标实例", selection, "Instance", instances.Select(i => (i.RelativePath, i.Plan.Text("Provider") + " / " + i.Plan.Text("Instance"))), preventWheelSelection: true);
@@ -24,11 +24,12 @@ public sealed partial class MainWindow
             panel.Children.Add(Card(SectionHeading(plan.Text("NodeName"), Symbol.World, entry ? "入口机：自动采集实际线路，结合套餐与时段生成建议，应用后复测。" : "落地机：只启用 fq 和当前内核可用的 BBR，无需精细测速。")));
             var runtime = state.At("LastNetworkComparison.VerifiedRuntime") as JsonObject ?? state.At("NetworkTuning.AppliedRuntime") as JsonObject;
             if (runtime != null) panel.Children.Add(Card(Column(Text("上次已核验的运行配置", 17), Text("拥塞控制：" + NetworkTuning.Sysctl(runtime, "net.ipv4.tcp_congestion_control") + " · BBR 版本：" + (runtime.Text("BbrVersion") == "VersionUnverified" ? "未确认" : runtime.Text("BbrVersion"))), Text("记录时间：" + NetworkTime(state.Text("LastNetworkComparison.At", state.Text("NetworkTuning.At"))) + "；当前状态可通过重新采集核对。", 13, true))));
-            panel.Children.Add(Text("BBR v3 只有在运行内核已支持且加载版本证据为 v3 时才显示确认。这里不会自动替换内核或重启 VPS。", 14, true));
+            KernelPanel(panel, relative, state);
+            if (InstanceLifecycle.Read(store, relative, plan).NeedsRecovery) { pageAction.Content = null; return; }
             if (!entry)
             {
                 panel.Children.Add(Card(Column(SectionHeading("基础网络配置", Symbol.Setting), Text("启用 fq 与可用 BBR，核验真实接口队列，并保留恢复点。缓冲区、TFO 等参数沿用当前值。", 14, true))));
-                pageAction.Content = Action("审阅并启用 fq + BBR", () => Submit(new(OperationKind.TuneNetwork, relative, new JsonObject { ["Scope"] = "Network", ["Profile"] = "LandingBasic" })), true); return;
+                pageAction.Content = Action("审阅并启用 fq + BBR", () => Submit(new(OperationKind.TuneNetwork, relative, new JsonObject { ["Scope"] = "Network", ["Profile"] = "LandingBasic", ["BbrVersion"] = BbrChoice(relative) })), true); return;
             }
             if (!networkForms.TryGetValue(relative, out var options)) networkForms[relative] = options = NetworkTuning.Defaults(plan);
             var protocols = DeploymentPlans.Roles[..2].Where(role => plan.Flag("ProtocolInventory." + role + ".Enabled", DeploymentPlans.InitiallyEnabled(plan, role))).Select(role => (role, RoleLabel(role))).ToArray();
@@ -37,9 +38,7 @@ public sealed partial class MainWindow
                 Fields(Field("标称下载带宽（Mbps，未知留空）", options, "BandwidthMbps", numeric: true), Field("标称上传带宽（Mbps，未知留空）", options, "UploadMbps", numeric: true)),
                 Fields(Choice("带宽类型", options, "CapacityType", [("Unknown", "未知"), ("Shared", "共享"), ("Dedicated", "独享"), ("Burst", "突发")]), Choice("所选入口协议", options, "Protocol", protocols)),
                 Fields(Choice("入口连接地址族", options, "Family", plan.Text("Server.IPv6") == "" ? [("IPv4", "IPv4")] : [("IPv4", "IPv4"), ("IPv6", "IPv6")]), Choice("测试流量档位", options, "TestSize", [("Light", "轻量 · 最多 32 MiB"), ("Full", "完整 · 最多 256 MiB")])))));
-            panel.Children.Add(Card(Column(SectionHeading("使用时间", Symbol.Clock, "白天结果不代表晚高峰。没有晚高峰样本时采用保守建议，并明确注明覆盖不足。"),
-                Field("主要使用地时区", options, "TimeZoneId"), Fields(Field("晚高峰开始（0–23 时）", options, "PeakStartHour", numeric: true), Field("晚高峰结束（0–23 时）", options, "PeakEndHour", numeric: true)),
-                Text("默认使用本机时区；支持跨午夜。时间按主要使用地计算。", 13, true))));
+            panel.Children.Add(NetworkTimeFields(options));
             panel.Children.Add(Row(Action("采集并生成建议", () => Submit(new(OperationKind.MeasureNetwork, relative, options)), true), Action("审阅晚高峰补测", () => ScheduleNetwork(relative, options))));
             panel.Children.Add(Text("测速会产生有限流量，走本机→所选代理→Cloudflare 测试点；VPS 自身出口测速另列。UDP 仅采集 5 个样本，超时如实记录。结果不代表所有网站或线路。", 14, true));
             ShowNetworkSchedule(panel, directory);
@@ -50,8 +49,10 @@ public sealed partial class MainWindow
                 report["Analysis"] = NetworkTuning.Analyze(report, NetworkTuning.History(directory));
             }
             if (report != null) panel.Children.Add(NetworkReportCard(report));
+            var kernelChanged = report != null && state.Text("KernelUpgrade.Runtime.Kernel") != "" && state.Text("KernelUpgrade.Runtime.Kernel") != report.Text("ServerAfter.Kernel");
+            if (kernelChanged) panel.Children.Add(Text("内核已经更换，此记录不能继续用于精细建议。请重新采集；现在仍可审阅 fq + BBR 基础配置。", 14, true));
             var apply = new JsonObject { ["Scope"] = "Network", ["Profile"] = "EntryBasic" };
-            if (report != null && report.Text("Analysis.Profile") == "EntryMeasured")
+            if (report != null && !kernelChanged && report.Text("Analysis.Profile") == "EntryMeasured")
             {
                 apply["Profile"] = "EntryMeasured"; apply["MeasurementId"] = report.Text("Id");
                 apply["MeasurementSha256"] = ClientSchemes.SourceFingerprint(SafePath.Resolve(directory, "network-measurements/" + report.Text("Id") + ".json"));
@@ -63,7 +64,7 @@ public sealed partial class MainWindow
                 var before = NetworkTuning.ReadReport(directory, beforeId); var after = NetworkTuning.ReadReport(directory, afterId);
                 panel.Children.Add(Card(Column(Text("应用前后对比", 17), NetworkMetrics(before, after), Text(ComparisonLabel(comparison.Text("Result")) + (comparison.Flag("RestoredOriginal") ? "；已恢复原运行值与队列。" : "；已保留本次配置。"), 14))));
             }
-            pageAction.Content = Action(apply.Text("Profile") == "EntryMeasured" ? "审阅并应用建议" : "审阅基础配置", () => Submit(new(OperationKind.TuneNetwork, relative, apply)), true);
+            pageAction.Content = Action(apply.Text("Profile") == "EntryMeasured" ? "审阅并应用建议" : "审阅基础配置", () => { apply["BbrVersion"] = BbrChoice(relative); return Submit(new(OperationKind.TuneNetwork, relative, apply)); }, true);
         }
         picker.SelectionChanged += (_, _) => Refresh(); Refresh();
     }

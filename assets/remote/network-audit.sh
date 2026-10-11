@@ -50,6 +50,10 @@ for key in ('net.core.default_qdisc', 'net.ipv4.tcp_congestion_control', 'net.ip
 version = read('/sys/module/tcp_bbr/version').strip()
 # The loaded module is authoritative. A module on disk may belong to a different running build.
 bbr = 'v3' if version == '3' else 'v1' if version == '1' else 'VersionUnverified'
+runtime_bbr = {'BbrVersion': bbr, 'BbrVersionEvidence': 'LoadedModule' if version else 'Unavailable'}
+if os.environ.get('VPS_BBR_PROGRAM'):
+    exec(os.environ['VPS_BBR_PROGRAM'])
+    runtime_bbr = bbr_runtime()
 tcp = {}
 snmp = read('/proc/net/snmp').splitlines()
 for index in range(len(snmp)-1):
@@ -85,6 +89,7 @@ result = {'Kernel': command(['uname', '-r']), 'MemoryKiB': int(memory.group(1)) 
           'Devices': devices, 'Tcp': {'RttMs': rtts, 'Scope': 'SelectedInboundAndSshPeer'},
           'Counters': {'TcpRetransSegs': tcp.get('RetransSegs', 0), 'TcpOutSegs': tcp.get('OutSegs', 0)},
           'SoftnetDropped': sum(int(line.split()[1], 16) for line in read('/proc/net/softnet_stat').splitlines() if len(line.split()) > 1)}
+result.update(runtime_bbr)
 if os.environ.get('VPS_PARAM_ACTION') == 'Outbound':
     amount = int(os.environ.get('VPS_PARAM_BYTES', '1048576'))
     if not 65536 <= amount <= 8388608:

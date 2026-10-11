@@ -1,0 +1,22 @@
+{
+  "SchemaVersion": 1,
+  "Id": "xanmod-lts-6.18.55-x64v1",
+  "Vendor": "XanMod LTS",
+  "Kernel": "6.18.55-x64v1-xanmod1",
+  "Package": "linux-image-6.18.55-x64v1-xanmod1",
+  "PackageVersion": "6.18.55-x64v1-xanmod1-0~20261003.g9c4e23d",
+  "Architecture": "amd64",
+  "BbrVersion": 3,
+  "Repository": "https://deb.xanmod.org/",
+  "Filename": "pool/main/l/linux-upstream/linux-image-6.18.55-x64v1-xanmod1_6.18.55-x64v1-xanmod1-0~20261003.g9c4e23d_amd64.deb",
+  "Bytes": 100956868,
+  "Sha256": "0531ef8baa655b8fa6f50e3872e173c430b22ca3a8d7c2053a361b4a4af4a8a6",
+  "SignedAt": "2026-10-07T23:59:26Z",
+  "SigningFingerprint": "D38D7D1DA1349567ADED882D86F7D09EE734E623",
+  "Source": "https://gitlab.com/xanmod/linux/-/tree/6.18.55-xanmod1",
+  "SourceFiles": {
+    "xanmod.gpg": "58d4d6d3ce3a53b12037250a24b7ade62bbf9828c2346ff7ddc8ea1bc84388d6",
+    "InRelease": "69bee73014a570958195e4f8c95bd2cc1e0da11c472bfb175a190a9e731f591e",
+    "Packages.gz": "2dc022f6ed5da1d9f0633490ce42164c1db259ea890ef73e377af55fae8beb45"
+  }
+}

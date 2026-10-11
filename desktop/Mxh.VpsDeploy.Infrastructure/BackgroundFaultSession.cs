@@ -7,7 +7,7 @@ namespace Mxh.VpsDeploy.Infrastructure;
 // own SSH transport or exits its own app; it never changes machine-wide networking.
 internal sealed class BackgroundFaultSession(BackgroundTestSession test, IRemoteSession inner) : IRemoteSession
 {
-    private static readonly string[] Assets = ["audit.sh", "ssh-transition.sh", "nftables-apply.sh", "xray-install.sh", "deployment-snapshot-delete.sh", "network-apply.sh"];
+    private static readonly string[] Assets = ["audit.sh", "ssh-transition.sh", "nftables-apply.sh", "xray-install.sh", "deployment-snapshot-delete.sh", "network-apply.sh", "kernel-prepare.sh", "kernel-boot.sh", "kernel-confirm.sh", "kernel-rollback.sh"];
     public Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken cancellationToken) => inner.RunAsync(command, timeout, cancellationToken);
     public Task<byte[]> ReadFileAsync(string path, CancellationToken cancellationToken) => inner.ReadFileAsync(path, cancellationToken);
     public Task DownloadAsync(string path, string destination, CancellationToken cancellationToken) => inner.DownloadAsync(path, destination, cancellationToken);

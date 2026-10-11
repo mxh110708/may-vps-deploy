@@ -85,6 +85,10 @@ public sealed partial class MainWindow
         "network-connection" => "核对管理连接", "network-measurement" => "测量实际线路", "network-analysis" => "生成网络建议",
         "network-preflight" => "核对网络布局", "network-backup" => "建立网络恢复点", "network-apply" => "应用网络参数",
         "network-retest" => "复测实际线路", "network-completion" => "确认网络结果", "network-audit" => "采集网络状态",
+        "kernel-check" => "检查 BBR 与启动兼容性", "kernel-install" => "安装受管 BBR v3 内核", "kernel-state" => "核对内核事务",
+        "kernel-latest" => "核验官方最新兼容 LTS",
+        "kernel-wait" => "等待内核任务", "kernel-ready" => "内核安装完成，待重启", "kernel-reboot" => "单次重启到 BBR v3",
+        "kernel-accept" => "验收运行内核与管理入口", "kernel-rollback" => "回退原有内核",
         _ when stage.StartsWith("component-install-", StringComparison.Ordinal) && ComponentInstallations.Components.Contains(stage[18..]) => "安装 " + ComponentInstallations.Label(stage[18..]),
         _ when stage.StartsWith("target-audit-", StringComparison.Ordinal) => "审计 Reality 目标",
         _ when stage.StartsWith("certbot-dns-", StringComparison.Ordinal) => "申请 AnyTLS 可信证书", _ => stage

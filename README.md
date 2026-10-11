@@ -2,7 +2,9 @@
 
 面向个人 Debian VPS 的中文部署与运维工具，由 Windows 控制端统一管理部署计划、远端操作、私有归档和客户端配置。
 
-正式版为 [v0.9.15](https://github.com/mxh110708/mxh-vps-deploy/releases/tag/v0.9.15)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+正式版为 [v0.9.16](https://github.com/mxh110708/mxh-vps-deploy/releases/tag/v0.9.16)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+
+v0.9.16 增加可选 BBR v3 内核管理，默认沿用 VPS 原有内核；v3 可选择应用固定版本或联网核验的官方最新兼容 LTS。独立审阅安装与重启，通过运行版本、原服务和主/救援 SSH 验收后才提交，保留旧内核及回退入口。时区支持常用选项和自定义输入，高峰说明实时更新，支持结束时间 24 和跨午夜。详见[网络调优与内核流程](docs/NETWORK-TUNING.zh-CN.md)及[实测范围](docs/TESTING-0.9.16.zh-CN.md)。
 
 v0.9.15 重构网络调优：入口机自动采集 RTT、吞吐、延迟和资源，结合套餐与时段生成建议，应用后复测，未确认收益时恢复；落地机仅启用 fq 与可用 BBR。加入应用内一次性晚高峰补测，测量和配置进度直接显示在主页面。详见[使用说明](docs/NETWORK-TUNING.zh-CN.md)与[实测结果及边界](docs/TESTING-0.9.15.zh-CN.md)。
 
@@ -68,7 +70,7 @@ dotnet run --project .\desktop\Mxh.VpsDeploy.Tests -c Release -- $PWD
 
 ### 3. 启动工具
 
-在正式发行页下载 `mxh-vps-deploy-v0.9.15-windows-amd64-setup.exe`，按同页 `SHA256SUMS.txt` 核对后安装，通过桌面／开始菜单启动。便携 ZIP 解压后双击 `MXH-VPS-Deploy.exe`；需要应用内原位更新时使用安装版。源码可先构建预览：
+在正式发行页下载 `mxh-vps-deploy-v0.9.16-windows-amd64-setup.exe`，按同页 `SHA256SUMS.txt` 核对后安装，通过桌面／开始菜单启动。便携 ZIP 解压后双击 `MXH-VPS-Deploy.exe`；需要应用内原位更新时使用安装版。源码可先构建预览：
 
 ```powershell
 pwsh -NoProfile -File .\scripts\New-VpsReleasePackage.ps1 -Development -Destination '<预览输出目录>'
