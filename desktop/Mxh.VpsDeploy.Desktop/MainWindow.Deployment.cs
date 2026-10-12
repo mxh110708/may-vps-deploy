@@ -38,6 +38,7 @@ public sealed partial class MainWindow
             }
             var monitor = Flag("Komari 监控 Agent", deploymentForm, "KomariEnabled"); monitor.Checked += (_, _) => Navigate("deploy"); monitor.Unchecked += (_, _) => Navigate("deploy"); selection.Add(monitor);
             page.Children.Add(Card(Column(SectionHeading("用途组合", Symbol.Setting, "可以同时选择入口、落地与监控；不选代理协议时只做基础维护。"), Fields(selection.Cast<FrameworkElement>().ToArray()))));
+            page.Children.Add(Card(InstallationVersionFields(deploymentForm, "InstallationSource")));
             if (roles.Contains("RealityEntry") && roles.Contains("AnyTlsEntry"))
                 page.Children.Add(Card(Column(Choice("默认启用的入口", deploymentForm, "ActiveEntry", [("RealityEntry", "Reality"), ("AnyTlsEntry", "AnyTLS / ECH")]), Text("两个入口都会安装并归档。当前只启用所选入口，之后可在实例页切换。", 14, true))));
             if (roles.Contains("RealityEntry"))
@@ -58,6 +59,13 @@ public sealed partial class MainWindow
         pageAction.Content = Action("审阅计划", async () =>
         {
             var plan = DeploymentPlans.Create(deploymentForm, ArchiveStore.ReadJson(paths.Resolve("config/versions.json")), paths, existing);
+            if (!existing)
+            {
+                var components = InstallationVersions.DeploymentComponents(plan);
+                var selection = await SelectInstallationVersions(deploymentForm.Text("InstallationSource", "Fixed"), components);
+                plan["InstallationVersions"] = selection;
+                InstallationVersions.ApplyPlan(plan, InstallationVersions.Resolve(selection, components, ArchiveStore.ReadJson(paths.Resolve("config/versions.json"))), components, selection.Text("Source"));
+            }
             var relative = plan.Text("Provider") + "/" + plan.Text("Instance") + "/MXH-VPS-Deploy";
             await Submit(new(existing ? OperationKind.ConnectExisting : OperationKind.Deploy, relative, new JsonObject { ["Plan"] = plan }));
         }, true);

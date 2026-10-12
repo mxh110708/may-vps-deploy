@@ -2,7 +2,9 @@
 
 面向个人 Debian VPS 的中文部署与运维工具，由 Windows 控制端统一管理部署计划、远端操作、私有归档和客户端配置。
 
-正式版为 [v0.9.18](https://github.com/mxh110708/mxh-vps-deploy/releases/tag/v0.9.18)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+正式版为 [v0.9.19](https://github.com/mxh110708/mxh-vps-deploy/releases/tag/v0.9.19)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+
+v0.9.19 补齐新部署和追加安装的固定版/官方最新版选择，在审阅前锁定版本与 SHA256；补齐网络回退的原文件权限，后台测试沿用正常启动的计划核对。AnyTLS 完整调优、无收益回退、主动取消、定时计划分支及官方最新版主控追加安装已实测，详见[本轮记录与边界](docs/TESTING-0.9.19.zh-CN.md)。
 
 v0.9.18 为 Xray、sing-box、Komari Agent/主控及 cloudflared 增加固定版与官方最新稳定版选择，查询后锁定版本、资产及 SHA256，再审阅升级。受管 BBR v3 可以直接升级到更新的兼容 LTS，并分别回退上一版或 VPS 原有内核；修正 Reality 备用端口为 0 时的安装与验收。详见[组件版本维护](docs/COMPONENT-UPGRADES.zh-CN.md)与[实测记录](docs/TESTING-0.9.18.zh-CN.md)。
 

@@ -11,7 +11,8 @@ if not re.fullmatch(r'/root/vps-deploy-backups/[0-9]{8}-[0-9]{6}/protocol-lifecy
     raise SystemExit('Invalid network snapshot scope.')
 keys = ('net.core.default_qdisc', 'net.ipv4.tcp_congestion_control', 'net.ipv4.tcp_rmem',
         'net.ipv4.tcp_wmem', 'net.core.rmem_max', 'net.core.wmem_max', 'net.ipv4.tcp_moderate_rcvbuf')
-files = ('/usr/local/libexec/mxh-network-queue', '/etc/systemd/system/mxh-network-queue.service')
+files = ('/usr/local/libexec/mxh-network-queue', '/etc/systemd/system/mxh-network-queue.service',
+         '/etc/sysctl.d/99-mxh-vps-deploy.conf')
 
 def run(args):
     return subprocess.run(args, check=True, capture_output=True, text=True).stdout.strip()
@@ -137,7 +138,10 @@ elif action in ('apply', 'restore', 'verify', 'ensure'):
     if state.get('Version') != 1 or set(state['Sysctl']) != set(keys):
         raise SystemExit('Invalid saved network runtime state.')
     if action == 'restore':
-        if set(state.get('Files', {})) != set(files): raise SystemExit('Invalid persistence snapshot.')
+        # Earlier owned snapshots recorded only the queue files; their sysctl
+        # content is restored by the enclosing rollback script.
+        if set(state.get('Files', {})) not in (set(files), set(files[:2])):
+            raise SystemExit('Invalid persistence snapshot.')
         for name in files:
             path = Path(name); regular(path)
             for parent in path.parents:
@@ -180,7 +184,8 @@ elif action in ('apply', 'restore', 'verify', 'ensure'):
             run(['sysctl', '-w', key+'='+value])
             if run(['sysctl', '-n', key]).split() != value.split(): raise SystemExit('Runtime restore was not confirmed.')
         subprocess.run(['systemctl', 'disable', '--now', 'mxh-network-queue.service'], capture_output=True, check=False)
-        if set(state.get('Files', {})) != set(files): raise SystemExit('Invalid persistence snapshot.')
+        if set(state.get('Files', {})) not in (set(files), set(files[:2])):
+            raise SystemExit('Invalid persistence snapshot.')
         for name, original in state['Files'].items():
             path = Path(name); regular(path)
             if path.exists() and b'# Managed by MXH VPS Deploy.' not in path.read_bytes()[:256]:
@@ -188,7 +193,10 @@ elif action in ('apply', 'restore', 'verify', 'ensure'):
             if original is None:
                 path.unlink(missing_ok=True)
             else:
-                path.write_bytes(base64.b64decode(original['Content'], validate=True)); os.chmod(path, original['Mode'])
+                content = base64.b64decode(original['Content'], validate=True)
+                path.write_bytes(content); os.chmod(path, original['Mode'])
+                if path.read_bytes() != content or stat.S_IMODE(path.stat().st_mode) != original['Mode']:
+                    raise SystemExit('Persistence restore was not confirmed.')
         run(['systemctl', 'daemon-reload'])
         if state['UnitEnabled']: run(['systemctl', 'enable', 'mxh-network-queue.service'])
         if state['UnitActive']: run(['systemctl', 'start', 'mxh-network-queue.service'])

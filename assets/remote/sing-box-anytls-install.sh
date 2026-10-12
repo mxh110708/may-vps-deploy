@@ -16,6 +16,9 @@ archive="$(mktemp)"
 stage="$(mktemp -d)"
 trap 'rm -f "$archive"; rm -rf "$stage"' EXIT
 url="https://github.com/SagerNet/sing-box/releases/download/v${VPS_PARAM_VERSION#v}/${VPS_PARAM_ASSET_NAME}"
+url="${VPS_PARAM_DOWNLOAD_URL:-$url}"
+base='https://github.com/SagerNet/sing-box/releases/download'
+[[ "$url" == "${base}/v${VPS_PARAM_VERSION#v}/${VPS_PARAM_ASSET_NAME}" || "$url" == "${base}/${VPS_PARAM_VERSION#v}/${VPS_PARAM_ASSET_NAME}" ]]
 curl --fail --location --silent --show-error --connect-timeout 15 --max-time 180 --retry 3 --output "$archive" "$url"
 printf '%s  %s\n' "$VPS_PARAM_SHA256" "$archive" | sha256sum --check --status
 tar -xzf "$archive" -C "$stage"

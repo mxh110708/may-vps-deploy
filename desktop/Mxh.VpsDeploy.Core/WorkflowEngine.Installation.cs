@@ -7,8 +7,9 @@ public sealed partial class WorkflowEngine
     private async Task InstallComponent(Context c)
     {
         var selected = ComponentInstallations.Selected(c.Request.Options);
-        var versions = Versions;
-        var prepared = ComponentInstallations.Prepare(c.Plan, c.State, c.Request.Options, versions);
+        var fixedVersions = Versions;
+        var versions = InstallationVersions.Additional(c.Request.Options, fixedVersions);
+        var prepared = ComponentInstallations.Prepare(c.Plan, c.State, c.Request.Options, fixedVersions);
         var protocols = selected.Where(DeploymentPlans.Roles[..3].Contains).ToArray();
         var before = new JsonObject();
         Dictionary<string, string> PreflightParameters(bool verify) => new()
@@ -63,7 +64,10 @@ public sealed partial class WorkflowEngine
                     var token = await user.SecretAsync("Komari Agent Token（从主控中创建节点后取得）", c.Cancellation) ?? throw new OperationCanceledException();
                     if (token == "" || token.Any(char.IsWhiteSpace)) throw new OperationException("Agent Token 不能为空或含空白。");
                     var v = versions;
-                    await c.Run("komari-agent.sh", new() { ["ENDPOINT"] = c.Plan.Text("Komari.Endpoint"), ["TOKEN"] = token, ["NODE_NAME"] = c.Plan.Text("NodeName"), ["VERSION"] = v.Text("komari_agent.version"), ["ASSET_NAME"] = v.Text("komari_agent.assets.amd64.name"), ["SHA256"] = v.Text("komari_agent.assets.amd64.sha256"), ["INSTALL_COMPONENT"] = component }, true, 1200);
+                    var parameters = new Dictionary<string, string> { ["ENDPOINT"] = c.Plan.Text("Komari.Endpoint"), ["TOKEN"] = token, ["NODE_NAME"] = c.Plan.Text("NodeName"), ["VERSION"] = v.Text("komari_agent.version"), ["ASSET_NAME"] = v.Text("komari_agent.assets.amd64.name"), ["SHA256"] = v.Text("komari_agent.assets.amd64.sha256"), ["INSTALL_COMPONENT"] = component };
+                    if (v.Text("komari_agent.assets.amd64.url") != "") parameters["DOWNLOAD_URL"] = v.Text("komari_agent.assets.amd64.url");
+                    await c.Run("komari-agent.sh", parameters, true, 1200);
+                    RecordInstalledProgram(c, "komari_agent", versions);
                     c.Secrets["KomariAgent"] = new JsonObject { ["Token"] = token, ["Endpoint"] = c.Plan.Text("Komari.Endpoint") }; c.State["KomariInstalled"] = true;
                 }
                 else
@@ -71,7 +75,10 @@ public sealed partial class WorkflowEngine
                     var v = versions; var prefix = component == "KomariController" ? "komari_controller" : "cloudflared";
                     var secret = await user.SecretAsync(component == "KomariController" ? "新 Komari 主控管理员密码（用户名 admin，至少 12 位）" : "Cloudflare Tunnel 连接 Token（在 Cloudflare 创建 Tunnel 后取得）", c.Cancellation) ?? throw new OperationCanceledException();
                     if (component == "KomariController" ? secret.Length is < 12 or > 256 || secret.Any(char.IsControl) || !secret.Any(char.IsUpper) || !secret.Any(char.IsLower) || !secret.Any(char.IsDigit) : secret == "" || secret.Any(char.IsWhiteSpace)) throw new OperationException("主控密码需要 12–256 位，包含大写、小写字母和数字；Tunnel Token 不能为空或含空白。");
-                    await c.Run("monitoring-component-install.sh", new() { ["COMPONENT"] = component, ["INSTALL_COMPONENT"] = component, ["VERSION"] = v.Text(prefix + ".version"), ["ASSET_NAME"] = v.Text(prefix + ".assets.amd64.name"), ["SHA256"] = v.Text(prefix + ".assets.amd64.sha256"), ["PORT"] = component == "KomariController" ? c.Plan.Text("KomariController.Port") : "20241", ["PORTS"] = string.Join(',', ComponentInstallations.ListeningPorts(c.Plan, component)), ["SECRET"] = secret }, true, 1200, "MONITORING_INSTALLED");
+                    var parameters = new Dictionary<string, string> { ["COMPONENT"] = component, ["INSTALL_COMPONENT"] = component, ["VERSION"] = v.Text(prefix + ".version"), ["ASSET_NAME"] = v.Text(prefix + ".assets.amd64.name"), ["SHA256"] = v.Text(prefix + ".assets.amd64.sha256"), ["PORT"] = component == "KomariController" ? c.Plan.Text("KomariController.Port") : "20241", ["PORTS"] = string.Join(',', ComponentInstallations.ListeningPorts(c.Plan, component)), ["SECRET"] = secret };
+                    if (v.Text(prefix + ".assets.amd64.url") != "") parameters["DOWNLOAD_URL"] = v.Text(prefix + ".assets.amd64.url");
+                    await c.Run("monitoring-component-install.sh", parameters, true, 1200, "MONITORING_INSTALLED");
+                    RecordInstalledProgram(c, prefix, versions);
                     c.Secrets[component == "KomariController" ? "KomariController" : "Cloudflared"] = component == "KomariController" ? new JsonObject { ["Username"] = "admin", ["Password"] = secret } : new JsonObject { ["Token"] = secret };
                 }
             });

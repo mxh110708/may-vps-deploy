@@ -31,8 +31,11 @@ esac
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 phase='download'
+base="https://github.com/${repository}/releases/download"
+url="${VPS_PARAM_DOWNLOAD_URL:-${base}/${VPS_PARAM_VERSION}/${VPS_PARAM_ASSET_NAME}}"
+[[ "$url" == "${base}/v${VPS_PARAM_VERSION#v}/${VPS_PARAM_ASSET_NAME}" || "$url" == "${base}/${VPS_PARAM_VERSION#v}/${VPS_PARAM_ASSET_NAME}" ]]
 curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 300 \
-  "https://github.com/${repository}/releases/download/${VPS_PARAM_VERSION}/${VPS_PARAM_ASSET_NAME}" -o "$work/binary"
+  "$url" -o "$work/binary"
 printf '%s  %s\n' "$VPS_PARAM_SHA256" "$work/binary" | sha256sum -c - >/dev/null
 phase='binary-check'
 chmod 0755 "$work/binary"

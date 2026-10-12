@@ -40,7 +40,7 @@ class VirtualPath:
     def read_bytes(self): return self.model.files[self.value]
     def read_text(self): return self.read_bytes().decode()
     def write_bytes(self, data): self.model.files[self.value] = data
-    def stat(self): return types.SimpleNamespace(st_mode=0o100600)
+    def stat(self): return types.SimpleNamespace(st_mode=0o100000 | self.model.modes.get(self.value, 0o600))
     def unlink(self, missing_ok=False): self.model.files.pop(self.value, None)
     def open(self, mode):
         if mode != 'x' or self.exists(): raise FileExistsError(self.value)
@@ -55,6 +55,7 @@ class VirtualPath:
 class Model:
     def __init__(self):
         self.files = {'/proc/self/status': b'CapEff:\t0000000000001000\n'}
+        self.modes = {}
         self.links = set()
         self.values = copy.deepcopy(KEYS)
         self.queues = [{'kind': 'fq_codel', 'root': True, 'handle': '0:',
@@ -95,13 +96,35 @@ class Model:
         with mock.patch.object(pathlib, 'Path', lambda value: VirtualPath(self, value)), \
              mock.patch.object(subprocess, 'run', self.run), \
              mock.patch.object(sys, 'argv', ['network-runtime', action, BACKUP]), \
-             mock.patch('os.chmod'), contextlib.redirect_stdout(io.StringIO()):
+             mock.patch('os.chmod', side_effect=lambda path, mode: self.modes.__setitem__(str(path), mode)), contextlib.redirect_stdout(io.StringIO()):
             try: exec(compile(CODE, 'network-runtime', 'exec'), {})
             except SystemExit as error:
                 if error.code != 0: raise
 
 
 class NetworkRuntimeTests(unittest.TestCase):
+    def test_private_backup_does_not_change_restored_sysctl_permissions(self):
+        model = Model()
+        filename = '/etc/sysctl.d/99-mxh-vps-deploy.conf'
+        original = b'# Managed by MXH VPS Deploy.\nnet.core.default_qdisc = fq_codel\n'
+        model.files[filename] = original
+        model.modes[filename] = 0o644
+        model.execute('snapshot')
+        model.files[filename] = b'# Managed by MXH VPS Deploy.\nnet.core.default_qdisc = fq\n'
+        model.modes[filename] = 0o600
+        model.execute('restore')
+        self.assertEqual(model.files[filename], original)
+        self.assertEqual(model.modes[filename], 0o644)
+
+    def test_previous_owned_queue_snapshot_remains_recoverable(self):
+        model = Model(); model.execute('snapshot')
+        filename = BACKUP + '/network-state.json'
+        state = json.loads(model.files[filename])
+        state['Files'].pop('/etc/sysctl.d/99-mxh-vps-deploy.conf')
+        model.files[filename] = json.dumps(state).encode()
+        model.execute('apply'); model.execute('restore')
+        self.assertEqual(model.values, KEYS)
+
     def test_builtin_pfifo_fast_metadata_does_not_become_tc_arguments(self):
         model = Model(); model.queues[0] = {'kind': 'pfifo_fast', 'root': True, 'handle': '0:', 'options': copy.deepcopy(PFIFO_OPTIONS)}
         original = copy.deepcopy(model.queues)

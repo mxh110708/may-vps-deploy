@@ -31,7 +31,7 @@ public static class ComponentInstallations
     {
         var selected = Selected(options);
         var batch = options.ContainsKey("Components");
-        if (options["Settings"] is not JsonObject allSettings || options.Any(item => item.Key is not ("Component" or "Components" or "Settings" or "AssetPin")) || batch && (options["Components"] is not JsonArray || options.ContainsKey("Component")) || !Regex.IsMatch(options.Text("AssetPin"), "^[a-f0-9]{64}$")) throw new OperationException("追加安装只接受所选组件的参数与已审阅的版本清单。");
+        if (options["Settings"] is not JsonObject allSettings || options.Any(item => item.Key is not ("Component" or "Components" or "Settings" or "AssetPin" or "VersionSource" or "InstallationVersions")) || batch && (options["Components"] is not JsonArray || options.ContainsKey("Component")) || !Regex.IsMatch(options.Text("AssetPin"), "^[a-f0-9]{64}$")) throw new OperationException("追加安装只接受所选组件的参数与已审阅的版本清单。");
         if (batch && (allSettings.Count != selected.Length || allSettings.Any(item => !selected.Contains(item.Key) || item.Value is not JsonObject))) throw new OperationException("组件选择与填写参数不一致，请重新审阅。");
         foreach (var component in selected)
         {
@@ -55,6 +55,7 @@ public static class ComponentInstallations
     {
         ValidateOptions(options);
         if (ArchiveStore.Fingerprint(versions) != options.Text("AssetPin")) throw new OperationException("组件版本清单在填写或审阅后发生变化，请重新打开安装表单并审阅。", code: "InstallationVersionsChanged");
+        versions = InstallationVersions.Additional(options, versions);
         if (!InstanceLifecycle.Describe(current, state, null).Managed) throw new OperationException("请先完成部署或接入，再追加安装。");
         var prepared = current.DeepClone().AsObject();
         foreach (var component in Selected(options)) prepared = PrepareOne(prepared, state, component, Settings(options, component), versions);

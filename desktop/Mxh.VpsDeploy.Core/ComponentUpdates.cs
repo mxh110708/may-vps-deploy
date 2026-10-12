@@ -45,11 +45,11 @@ public static class ComponentUpdates
         if (verified != "") return verified;
         return scope switch { "KomariAgent" => plan.Text("Komari.AgentVersion"), "KomariController" => state.Text("KomariController.Version", plan.Text("KomariController.Version")), "Tunnel" => state.Text("Cloudflared.Version", plan.Text("Cloudflared.Version")), _ => throw new OperationException("未知监控组件。") };
     }
-    public static void ValidateCandidate(JsonObject candidate, string component)
+    public static void ValidateCandidate(JsonObject candidate, string component, bool checkAge = true)
     {
         var version = candidate.Text("Version"); var tag = candidate.Text("Tag");
         if (candidate.Number("SchemaVersion") != 1 || candidate.Text("Component") != component || candidate.Text("Repository") != Repository(component) || candidate.Text("Architecture") != "amd64" || candidate.Text("DigestSource") != "GitHubAssetDigest" || version.Length > 64 || !Regex.IsMatch(version, "^[0-9]+\\.[0-9]+\\.[0-9]+$") || tag != version && tag != "v" + version || candidate.Text("AssetName") != AssetName(component, version) || candidate.Text("Url") != "https://github.com/" + Repository(component) + "/releases/download/" + tag + "/" + AssetName(component, version) || !Regex.IsMatch(candidate.Text("Sha256"), "^[a-f0-9]{64}$") || candidate.Long("Bytes") is < 1 or > 536870912 || candidate.Long("ReleaseId") <= 0 || candidate.Long("AssetId") <= 0) throw new OperationException("官方候选版本、来源或资产身份不匹配。");
-        if (!DateTimeOffset.TryParse(candidate.Text("FetchedAt"), out var at) || at > DateTimeOffset.UtcNow.AddMinutes(1) || at < DateTimeOffset.UtcNow.AddHours(-24)) throw new OperationException("版本查询超过 24 小时，请重新查询并审阅。");
+        if (!DateTimeOffset.TryParse(candidate.Text("FetchedAt"), out var at) || at > DateTimeOffset.UtcNow.AddMinutes(1) || checkAge && at < DateTimeOffset.UtcNow.AddHours(-24)) throw new OperationException("版本查询超过 24 小时，请重新查询并审阅。");
     }
     public static JsonObject Candidate(AppPaths paths, string relative, string component)
     {

@@ -47,6 +47,16 @@ public sealed partial class WorkflowEngine
     }
     private async Task Deploy(Context c)
     {
+        var selection = c.Plan["InstallationVersions"] as JsonObject;
+        var components = InstallationVersions.DeploymentComponents(c.Plan);
+        var accepted = c.Request.Kind == OperationKind.Resume && selection != null && c.State.Text("InstallationVersionPin") == ArchiveStore.Fingerprint(selection);
+        var versions = InstallationVersions.Resolve(selection, components, Versions, accepted);
+        if (selection != null)
+        {
+            if (c.Request.Kind == OperationKind.Resume && c.State.Text("InstallationVersionPin") != "" && !accepted) throw new OperationException("草稿的已锁定安装版本发生变化，不能继续部署。", code: "InstallationVersionsChanged");
+            InstallationVersions.ApplyPlan(c.Plan, versions, components, selection.Text("Source"));
+            c.State["InstallationVersionPin"] = ArchiveStore.Fingerprint(selection);
+        }
         if (c.Request.Kind == OperationKind.Resume && c.State.Text("Engine") != "dotnet-v1") throw new OperationException("旧驱动的未完成计划需由维护者核对转换，不能直接重放。");
         if (c.Request.Kind == OperationKind.Resume && InstanceLifecycle.Describe(c.Plan, c.State, c.Pending).Managed) throw new OperationException("该实例已完成部署或接入，不能作为草稿重放。", code: "DeploymentAlreadyComplete", nextAction: "在实例页选择具体维护操作。");
         if (c.Request.Kind == OperationKind.Resume && c.State.Text("DeploymentTransaction.Status") == "RolledBack")
@@ -123,7 +133,7 @@ public sealed partial class WorkflowEngine
         if (DeploymentPlans.Uses(c.Plan, "RealityEntry") && c.Plan.Text("Reality.TargetMode") == "LocalOwnedTls") await Step("local-https-target", async () => { await c.Run("local-https-target.sh", new() { ["DOMAIN"] = c.Plan.Text("Reality.ServerName"), ["PORT"] = c.Plan.Text("Reality.LocalHttpsPort"), ["CERT_NAME"] = c.Plan.Text("TrustedTls.RealityCertificateName") }, true, 1200, "LOCAL_HTTPS_OK"); });
         // AnyTLS configuration temporarily stops Xray; always install it after Reality.
         foreach (var role in DeploymentPlans.Roles[..3].Where(r => DeploymentPlans.Uses(c.Plan, r)))
-            await Step(c.Plan["Roles"] == null ? "protocol-install" : "protocol-install-" + role, () => InstallProtocol(c, role, false));
+            await Step(c.Plan["Roles"] == null ? "protocol-install" : "protocol-install-" + role, () => InstallProtocol(c, role, false, versions));
         if (DeploymentPlans.Purposes(c.Plan).Count(r => r != "MonitorOnly") > 1) await Step("protocol-selection", async () =>
         {
             foreach (var role in DeploymentPlans.Purposes(c.Plan).Where(r => r != "MonitorOnly")) c.Plan.Put("ProtocolInventory." + role, new JsonObject { ["Installed"] = true, ["Enabled"] = DeploymentPlans.InitiallyEnabled(c.Plan, role) });
@@ -134,8 +144,11 @@ public sealed partial class WorkflowEngine
         if (c.Plan.Flag("Komari.Enabled")) await Step("komari-agent", async () =>
         {
             var token = await user.SecretAsync("Komari Agent Token", c.Cancellation) ?? throw new OperationCanceledException();
-            var version = Versions;
-            await c.Run("komari-agent.sh", new() { ["ENDPOINT"] = c.Plan.Text("Komari.Endpoint"), ["TOKEN"] = token, ["NODE_NAME"] = c.Plan.Text("NodeName"), ["VERSION"] = version.Text("komari_agent.version"), ["ASSET_NAME"] = version.Text("komari_agent.assets.amd64.name"), ["SHA256"] = version.Text("komari_agent.assets.amd64.sha256") }, true, 900, "KOMARI_OK");
+            var version = versions;
+            var parameters = new Dictionary<string, string> { ["ENDPOINT"] = c.Plan.Text("Komari.Endpoint"), ["TOKEN"] = token, ["NODE_NAME"] = c.Plan.Text("NodeName"), ["VERSION"] = version.Text("komari_agent.version"), ["ASSET_NAME"] = version.Text("komari_agent.assets.amd64.name"), ["SHA256"] = version.Text("komari_agent.assets.amd64.sha256") };
+            if (version.Text("komari_agent.assets.amd64.url") != "") parameters["DOWNLOAD_URL"] = version.Text("komari_agent.assets.amd64.url");
+            await c.Run("komari-agent.sh", parameters, true, 900, "KOMARI_OK");
+            RecordInstalledProgram(c, "komari_agent", versions);
             c.Secrets["KomariAgent"] = new JsonObject { ["Token"] = token }; c.State["KomariInstalled"] = true;
         });
         await Step("final-validation", async () => { await RefreshInventory(c); await ServerGate(c); await VerifyManagement(c); await ValidateProtocols(c); });

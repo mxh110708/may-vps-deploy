@@ -41,6 +41,10 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
             files["UpgradeProgram"] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(request.Kind == OperationKind.Upgrade ? "assets/remote/proxy-core-upgrade.sh" : "assets/remote/maintenance-komari.sh"));
             if (request.Options.Text("Source", "Fixed") == "Latest") files["ComponentRelease"] = ClientSchemes.SourceFingerprint(ComponentUpdates.CandidateFile(store.Paths, request.InstanceRelativePath, ComponentUpdates.Component(request)));
         }
+        if (request.Kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent)
+        {
+            foreach (var name in new[] { "config/versions.json", "scripts/component-releases.py", "assets/remote/xray-install.sh", "assets/remote/sing-box-install.sh", "assets/remote/sing-box-anytls-install.sh", "assets/remote/komari-agent.sh", "assets/remote/monitoring-component-install.sh" }) files["InstallationAsset:" + name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
+        }
         return ArchiveStore.Fingerprint(files);
     }
     public async Task<TaskRecord> ExecuteAsync(ReviewedOperation review, OperationRequest current, IProgress<TaskProgress> progress, CancellationToken cancellationToken)
@@ -147,7 +151,7 @@ public static class OperationPolicy
             _ => "读取原事务状态与启动身份，沿用独立安装任务的结果，不重复安装或重启。新内核已启动时核验 BBR v3 与管理连接，确认通过后提交。"
         }),
         OperationKind.TunnelAccess => "从 VPS 核对 Tunnel 已连接、主控本机接口与公开 HTTPS 接口的响应和版本；保存检查结果，不修改 Cloudflare 路由或重启服务。\n公开网址：" + request.Options.Text("PublicUrl"),
-        OperationKind.InstallComponent => "在现有实例上追加安装 " + ComponentInstallations.SelectionLabel(request.Options) + "。统一核对未安装状态和端口、建立本轮恢复快照，再逐项安装并统一验收；本轮失败或取消一并恢复新增组件，保留已有协议、SSH 和网络参数。",
+        OperationKind.InstallComponent => (request.Options["InstallationVersions"] is JsonObject selection ? "本轮安装版本：\n" + InstallationVersions.Summary(selection, InstallationVersions.AdditionalComponents(request.Options)) + "\n\n" : "") + "在现有实例上追加安装 " + ComponentInstallations.SelectionLabel(request.Options) + "。统一核对未安装状态和端口、建立本轮恢复快照，再逐项安装并统一验收；本轮失败或取消一并恢复新增组件，保留已有协议、SSH 和网络参数。",
         OperationKind.MeasureNetwork => "只读采集 VPS 状态，并用隔离代理测试本机→所选入口→Cloudflare 的真实路径。无需填写 RTT；不修改系统代理。\n有效载荷上限：" + NetworkTuning.PayloadBudget(request.Options) / 1048576 + " MiB；路径采集最长 " + NetworkTuning.DurationSeconds(request.Options) + " 秒，另加有限 SSH 状态采集。\n标称下载/上传：" + request.Options.Number("BandwidthMbps") + "/" + request.Options.Number("UploadMbps") + " Mbps（0 表示未知）；套餐类型：" + request.Options.Text("CapacityType") + "。\n使用地时区：" + request.Options.Text("TimeZoneId") + "；晚高峰：" + request.Options.Number("PeakStartHour") + "–" + request.Options.Number("PeakEndHour") + " 时。结果只代表该测试路径与时段。",
         OperationKind.TuneNetwork => request.Options.Text("Profile") == "EntryMeasured" ? "依据 24 小时内的自动测量建议，只调整受管网络参数及默认接口队列。先保存文件、运行参数与实际队列，再启用 fq 和当前内核可用 BBR，保留自动缓冲。\n随后以同一路径和流量档位复测；未确认明确收益时恢复原值。复测额外消耗与原测量相同的流量预算。不会自动安装内核或重启 VPS。" : "仅启用默认接口 fq 和当前内核可用的 BBR；保留缓冲、TFO 等其他运行参数。先备份文件和实际参数/队列，再核验生效与管理连接。无需公网测速。BBR 版本以已加载模块证据为准，当前内核不支持时明确提示；内核升级需另行维护。",
         OperationKind.Recover => "先核对未完成事务的真实状态，再按明确范围恢复。",

@@ -50,7 +50,11 @@ public sealed partial class MainWindow
         var relative = selectedInstance!;
         var (dialog, options) = BuildInstallationDialog(plan, relative, components);
         if (await ShowDialog(dialog) != ContentDialogResult.Primary) return;
-        ComponentInstallations.Prepare(plan, InstanceState(relative), options, ArchiveStore.ReadJson(paths.Resolve("config/versions.json")));
+        var fixedVersions = ArchiveStore.ReadJson(paths.Resolve("config/versions.json"));
+        var validation = options.DeepClone().AsObject(); validation["VersionSource"] = "Fixed";
+        ComponentInstallations.Prepare(plan, InstanceState(relative), validation, fixedVersions);
+        options["InstallationVersions"] = await SelectInstallationVersions(options.Text("VersionSource", "Fixed"), InstallationVersions.AdditionalComponents(options));
+        ComponentInstallations.Prepare(plan, InstanceState(relative), options, fixedVersions);
         await Submit(new(OperationKind.InstallComponent, relative, options));
     }
     private (ContentDialog Dialog, JsonObject Options) BuildInstallationDialog(JsonObject plan, string relative, string component) => BuildInstallationDialog(plan, relative, [component]);
@@ -60,6 +64,7 @@ public sealed partial class MainWindow
         var options = new JsonObject { ["Components"] = new JsonArray(components.Select(component => (JsonNode?)JsonValue.Create(component)).ToArray()), ["Settings"] = allSettings, ["AssetPin"] = ArchiveStore.Fingerprint(ArchiveStore.ReadJson(paths.Resolve("config/versions.json"))) };
         var panel = Column(SectionHeading(plan.Text("NodeName"), Symbol.World, plan.Text("Provider") + " / " + plan.Text("Instance")),
             Text("沿用管理连接：" + plan.Text("Server.IPv4") + " · SSH " + InstanceState(relative).Number("CurrentManagementPort", plan.Number("Ports.SshPrimary")), 14, true));
+        panel.Children.Add(InstallationVersionFields(options, "VersionSource"));
         var usedPorts = DeploymentPlans.Roles[..3].Where(role => ComponentInstallations.ProtocolInstalled(plan, role)).SelectMany(role => ComponentInstallations.ListeningPorts(plan, role)).Concat(new[] { plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue"), plan.Number("Server.BootstrapSshPort"), plan.Number("KomariController.Port"), plan.Number("Cloudflared.MetricsPort"), plan.Text("Reality.TargetMode") == "LocalOwnedTls" ? plan.Number("Reality.LocalHttpsPort") : 0 }).ToHashSet();
         int Port(int preferred) { while (usedPorts.Contains(preferred)) preferred = preferred == 443 ? 8443 : preferred + 1; usedPorts.Add(preferred); return preferred; }
         foreach (var component in ComponentInstallations.Selected(options))
@@ -109,8 +114,9 @@ public sealed partial class MainWindow
     {
         var plan = ArchiveStore.ReadJson(SafePath.Resolve(paths.Instance(request.InstanceRelativePath), "deployment-plan.json"));
         var prepared = ComponentInstallations.Prepare(plan, InstanceState(request.InstanceRelativePath), request.Options, ArchiveStore.ReadJson(paths.Resolve("config/versions.json")));
-        var selected = ComponentInstallations.Selected(request.Options); var versions = ArchiveStore.ReadJson(paths.Resolve("config/versions.json"));
+        var selected = ComponentInstallations.Selected(request.Options); var versions = InstallationVersions.Additional(request.Options, ArchiveStore.ReadJson(paths.Resolve("config/versions.json")));
         var panel = Column(Card(Column(Text(plan.Text("Provider") + " / " + plan.Text("Instance"), 17), Text("本轮新增：" + ComponentInstallations.SelectionLabel(request.Options)), Text("管理连接：" + plan.Text("Server.IPv4") + " · SSH " + InstanceState(request.InstanceRelativePath).Number("CurrentManagementPort", plan.Number("Ports.SshPrimary"))))));
+        if (request.Options["InstallationVersions"] is JsonObject selection) panel.Children.Add(Card(Column(Text("本轮安装版本", 17), Text(InstallationVersions.Summary(selection, InstallationVersions.AdditionalComponents(request.Options)), 14, true))));
         var labels = new Dictionary<string, string> { ["RealityTarget"] = "Reality 目标 / SNI", ["RealityPort"] = "主入口端口", ["RealityBackupPort"] = "备用端口", ["AnyTlsName"] = "AnyTLS 服务器名称", ["EchPublicName"] = "ECH public name", ["AnyTlsPort"] = "新入口端口", ["ZoneName"] = "证书区域", ["CertbotEmail"] = "证书联系邮件", ["CloudflareTokenFile"] = "证书 Token 文件", ["LandingPort"] = "落地端口", ["TrustedEntries"] = "可信入口", ["TransitGroup"] = "客户端入口组", ["SecondaryIpv6Enabled"] = "IPv6 第二用户", ["SecondaryIpv6Address"] = "IPv6 源地址", ["SecondaryBindInterface"] = "绑定网卡", ["KomariEndpoint"] = "Agent 主控地址", ["ControllerPort"] = "主控本机端口", ["PublicUrl"] = "公开访问网址" };
         foreach (var component in selected)
         {

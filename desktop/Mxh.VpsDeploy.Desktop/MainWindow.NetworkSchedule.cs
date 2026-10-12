@@ -30,7 +30,7 @@ public sealed partial class MainWindow
     }
     private void StartNetworkScheduler()
     {
-        if (networkTimer != null || testSession != null) return;
+        if (networkTimer != null) return;
         foreach (var instance in store.ListInstances())
         {
             try
@@ -42,6 +42,9 @@ public sealed partial class MainWindow
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or OperationException or System.Text.Json.JsonException)
             { taskText.Text = "部分晚高峰计划无法读取，未执行；请在网络调优页面核对。"; }
         }
+        // Test sessions normalize startup state exactly as ordinary launches,
+        // but only an explicit test command may dispatch a network job.
+        if (testSession != null) return;
         networkTimer = DispatcherQueue.CreateTimer(); networkTimer.Interval = TimeSpan.FromSeconds(30);
         networkTimer.Tick += async (_, _) => await PollNetworkSchedules(); networkTimer.Start();
     }

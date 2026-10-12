@@ -19,6 +19,9 @@ config_dir='/etc/komari-agent'
 state_dir='/var/lib/komari-agent'
 config_file="${config_dir}/config.json"
 url="https://github.com/komari-monitor/komari-agent/releases/download/${VPS_PARAM_VERSION}/${VPS_PARAM_ASSET_NAME}"
+url="${VPS_PARAM_DOWNLOAD_URL:-$url}"
+base='https://github.com/komari-monitor/komari-agent/releases/download'
+[[ "$url" == "${base}/v${VPS_PARAM_VERSION#v}/${VPS_PARAM_ASSET_NAME}" || "$url" == "${base}/${VPS_PARAM_VERSION#v}/${VPS_PARAM_ASSET_NAME}" ]]
 binary="$(mktemp)"
 config="$(mktemp)"
 trap 'rm -f "$binary" "$config"' EXIT

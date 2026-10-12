@@ -9,6 +9,8 @@ public sealed partial class WorkflowEngine
     {
         var version = Versions;
         var releases = new JsonObject { [version.Text("komari_agent.assets.amd64.sha256")] = version.Text("komari_agent.version") };
+        var installedAgent = c.State.At("InstalledProgramVersions.komari_agent");
+        if (installedAgent?.Text("Sha256").Length == 64) releases[installedAgent.Text("Sha256")] = installedAgent.Text("Version");
         var agentUpgrade = c.State.At("ComponentUpgrades.KomariAgent");
         if (Regex.IsMatch(agentUpgrade.Text("Sha256"), "^[a-f0-9]{64}$") && Regex.IsMatch(agentUpgrade.Text("Version"), @"^[0-9]+\.[0-9]+\.[0-9]+$")) releases[agentUpgrade.Text("Sha256")] = agentUpgrade.Text("Version");
         var r = await c.Run("maintenance-health-audit.sh", new() { ["AGENT_RELEASES_JSON"] = releases.ToJsonString() }, timeout: 300);
@@ -114,6 +116,12 @@ public sealed partial class WorkflowEngine
             {
                 if (oldState["ComponentUpgrades"] is JsonObject oldUpgrades && oldUpgrades.ContainsKey(scope)) upgrades[scope] = oldUpgrades[scope]?.DeepClone();
                 else upgrades.Remove(scope);
+            }
+            if (c.State["InstalledProgramVersions"] is JsonObject installed)
+            {
+                var key = scope switch { "KomariAgent" => "komari_agent", "KomariController" => "komari_controller", "Tunnel" => "cloudflared", _ => scope };
+                if (oldState["InstalledProgramVersions"] is JsonObject oldInstalled && oldInstalled.ContainsKey(key)) installed[key] = oldInstalled[key]?.DeepClone();
+                else installed.Remove(key);
             }
         }
         if (components.Contains("Protocols"))
@@ -261,12 +269,16 @@ public sealed partial class WorkflowEngine
         }
         Dictionary<string, string> InstallationGuard(Dictionary<string, string> parameters)
         {
+            var component = ComponentUpdates.ProtocolComponent(role);
+            if (version.Text(component + ".assets.amd64.url") != "") parameters["DOWNLOAD_URL"] = version.Text(component + ".assets.amd64.url");
             if (c.Request.Kind == OperationKind.InstallComponent) { parameters["INSTALL_COMPONENT"] = role; parameters["PORTS"] = string.Join(',', ComponentInstallations.ListeningPorts(c.Plan, role)); if (role == "AnyTlsEntry") parameters["CERTIFICATE_PREPARED"] = "true"; }
             return parameters;
         }
         if (role == "RealityEntry")
         {
-            await c.Run("xray-install.sh", InstallationGuard(new() { ["VERSION"] = version.Text("xray.version"), ["INSTALLER_URL"] = version.Text("xray.installer_url"), ["INSTALLER_SHA256"] = version.Text("xray.installer_sha256") }), true, 1200);
+            var parameters = new Dictionary<string, string> { ["VERSION"] = version.Text("xray.version"), ["INSTALLER_URL"] = version.Text("xray.installer_url"), ["INSTALLER_SHA256"] = version.Text("xray.installer_sha256") };
+            if (version.Text("xray.assets.amd64.sha256") != "") { parameters["ASSET_NAME"] = version.Text("xray.assets.amd64.name"); parameters["SHA256"] = version.Text("xray.assets.amd64.sha256"); }
+            await c.Run("xray-install.sh", InstallationGuard(parameters), true, 1200);
             c.Plan.Put("Reality.XrayVersion", JsonValue.Create(version.Text("xray.version")));
             if (c.Secrets.At("Xray") == null) c.Secrets["Xray"] = JsonNode.Parse(RemoteAssets.Marker((await c.Run("xray-generate-credentials.sh")).Output, "XRAY_SECRET"));
             c.Save(); var config = ServerConfigurations.Xray(c.Plan, c.Secrets);
@@ -295,6 +307,7 @@ public sealed partial class WorkflowEngine
             }
         }
         else throw new OperationException("不支持的协议。");
+        RecordInstalledProgram(c, ComponentUpdates.ProtocolComponent(role), version, role);
     }
     private async Task ProtocolState(Context c)
     {

@@ -1,4 +1,5 @@
 """Read official stable release identities; no package or service mutations."""
+import argparse
 import base64
 import datetime
 import json
@@ -6,6 +7,7 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 REPOSITORIES = {'xray': 'XTLS/Xray-core', 'sing_box': 'SagerNet/sing-box', 'komari_agent': 'komari-monitor/komari-agent', 'komari_controller': 'komari-monitor/komari', 'cloudflared': 'cloudflare/cloudflared'}
@@ -41,13 +43,16 @@ def parse_release(component, release):
             'AssetId': asset['id'], 'DigestSource': 'GitHubAssetDigest', 'FetchedAt': datetime.datetime.now(datetime.timezone.utc).isoformat()}
 
 
-def query(component):
+def query(component, proxy=None):
     if component not in REPOSITORIES:
         raise ReleaseFailure('ComponentReleaseUnsupported')
     url = 'https://api.github.com/repos/'+REPOSITORIES[component]+'/releases/latest'
     request = urllib.request.Request(url, headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'mxh-vps-deploy-component-version-check', 'X-GitHub-Api-Version': '2022-11-28'})
     try:
-        with urllib.request.urlopen(request, timeout=25) as response:
+        if proxy is not None:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({'http': proxy, 'https': proxy} if proxy else {}))
+        response = opener.open(request, timeout=25) if proxy is not None else urllib.request.urlopen(request, timeout=25)
+        with response:
             if response.geturl() != url:
                 raise ReleaseFailure('ComponentReleaseUnsupported')
             data = response.read(4194305)
@@ -62,7 +67,15 @@ def query(component):
 
 if __name__ == '__main__':
     try:
-        result = query(os.environ['VPS_PARAM_COMPONENT'])
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--component', default=os.environ.get('VPS_PARAM_COMPONENT', ''))
+        parser.add_argument('--proxy', default=None)
+        args = parser.parse_args()
+        if args.proxy:
+            parsed = urllib.parse.urlparse(args.proxy)
+            if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+                raise ReleaseFailure('ComponentReleaseProxyInvalid')
+        result = query(args.component, args.proxy)
         print('VPSDEPLOY_COMPONENT_RELEASE_B64='+base64.b64encode(json.dumps(result, sort_keys=True).encode()).decode())
     except Exception as error:
         code = str(error) if isinstance(error, ReleaseFailure) else 'ComponentReleaseUnsupported'
