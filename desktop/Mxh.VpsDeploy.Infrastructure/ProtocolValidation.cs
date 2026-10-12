@@ -36,6 +36,7 @@ public sealed class ProtocolValidation(IValidationAssets assets, IExternalToolRu
                 using var process = Process.Start(start) ?? throw new OperationException("验证核心无法启动。");
                 // Drain private diagnostic streams without displaying or persisting credential-bearing output.
                 var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+                var stage = "回环监听"; var httpsPassed = false; var egressPassed = false;
                 try
                 {
                     var ready = false;
@@ -48,18 +49,22 @@ public sealed class ProtocolValidation(IValidationAssets assets, IExternalToolRu
                     if (!ready) throw new OperationException("验证核心回环监听未就绪。");
                     using var handler = new HttpClientHandler { Proxy = new WebProxy("http://127.0.0.1:" + port), UseProxy = true };
                     using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(25) };
+                    stage = "HTTPS";
                     var http = await client.GetAsync("https://cp.cloudflare.com/generate_204", cancellationToken);
                     if (http.StatusCode != HttpStatusCode.NoContent) throw new OperationException("协议 HTTPS 验收未返回预期结果。");
+                    httpsPassed = true; stage = "出口地址";
                     var egress = (await client.GetStringAsync(node.EgressFamily == "IPv6" ? "https://api64.ipify.org" : "https://api.ipify.org", cancellationToken)).Trim();
                     var expected = node.EgressFamily == "IPv6" ? plan.Text("Shadowsocks.SecondaryIpv6Address") : plan.Text("Server.IPv4");
                     if (!IPAddress.TryParse(egress, out var address) || address.ToString() != IPAddress.Parse(expected).ToString()) throw new OperationException("协议出口与计划不一致，未计为通过。");
+                    egressPassed = true; stage = "UDP DNS";
                     await SocksUdpProbe(port, node.EgressFamily == "IPv6", cancellationToken);
                     items.Add(new JsonObject { ["Core"] = core, ["Node"] = node.Name, ["Status"] = "Passed", ["Https"] = "Passed", ["Egress"] = egress, ["Udp"] = "Passed" });
                 }
-                catch (Exception error) when (error is not OperationCanceledException)
+                catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                 {
-                    if (!await user.ConfirmAsync(new("协议验收未完成", "此项连接测试失败。是否明确跳过并保留记录？跳过不会显示为通过。"), cancellationToken)) throw new OperationException("协议验收未完成，受管变更将恢复。");
-                    items.Add(new JsonObject { ["Core"] = core, ["Node"] = node.Name, ["Status"] = "SkippedByUser" }); incomplete = true;
+                    var failure = SafeFailures.Describe(error is OperationCanceledException ? new TimeoutException() : error);
+                    if (!await user.ConfirmAsync(new("协议验收未完成", node.Name + " · " + core + " / " + node.Family + "\n失败阶段：" + stage + "\n" + failure.Message + "\n是否明确跳过并保留记录？跳过不会显示为通过。"), cancellationToken)) throw new OperationException("协议验收未完成（" + core + " / " + node.Family + "，阶段：" + stage + "），受管变更将恢复。", code: "ProtocolValidationIncomplete");
+                    items.Add(new JsonObject { ["Core"] = core, ["Node"] = node.Name, ["Status"] = "SkippedByUser", ["FailedStage"] = stage, ["ErrorCode"] = failure.Code, ["Https"] = httpsPassed ? "Passed" : "Incomplete", ["Egress"] = egressPassed ? "Passed" : "Incomplete", ["Udp"] = "Incomplete" }); incomplete = true;
                 }
                 finally
                 {

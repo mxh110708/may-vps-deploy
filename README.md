@@ -2,7 +2,11 @@
 
 面向个人 Debian VPS 的中文部署与运维工具，由 Windows 控制端统一管理部署计划、远端操作、私有归档和客户端配置。
 
-正式版为 [v0.9.16](https://github.com/mxh110708/mxh-vps-deploy/releases/tag/v0.9.16)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+正式版为 [v0.9.18](https://github.com/mxh110708/mxh-vps-deploy/releases/tag/v0.9.18)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+
+v0.9.18 为 Xray、sing-box、Komari Agent/主控及 cloudflared 增加固定版与官方最新稳定版选择，查询后锁定版本、资产及 SHA256，再审阅升级。受管 BBR v3 可以直接升级到更新的兼容 LTS，并分别回退上一版或 VPS 原有内核；修正 Reality 备用端口为 0 时的安装与验收。详见[组件版本维护](docs/COMPONENT-UPGRADES.zh-CN.md)与[实测记录](docs/TESTING-0.9.18.zh-CN.md)。
+
+v0.9.17 补齐 Debian 13 的 sqv 签名验证及含 `+` 的 GRUB 内核标识，保留兼容性与仓库错误的具体原因。详见[实测记录](docs/TESTING-0.9.17.zh-CN.md)。
 
 v0.9.16 增加可选 BBR v3 内核管理，默认沿用 VPS 原有内核；v3 可选择应用固定版本或联网核验的官方最新兼容 LTS。独立审阅安装与重启，通过运行版本、原服务和主/救援 SSH 验收后才提交，保留旧内核及回退入口。时区支持常用选项和自定义输入，高峰说明实时更新，支持结束时间 24 和跨午夜。详见[网络调优与内核流程](docs/NETWORK-TUNING.zh-CN.md)及[实测范围](docs/TESTING-0.9.16.zh-CN.md)。
 

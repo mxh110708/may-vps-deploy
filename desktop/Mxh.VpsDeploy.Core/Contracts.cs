@@ -2,7 +2,7 @@ using System.Text.Json.Nodes;
 
 namespace Mxh.VpsDeploy.Core;
 
-public enum OperationKind { ConnectExisting, Deploy, Resume, HealthAudit, TuneNetwork, ProtocolState, RotateCredentials, Upgrade, Restore, Recover, Komari, Decommission, ResumeImport, InstallComponent, TunnelAccess, MeasureNetwork, BbrKernel }
+public enum OperationKind { ConnectExisting, Deploy, Resume, HealthAudit, TuneNetwork, ProtocolState, RotateCredentials, Upgrade, Restore, Recover, Komari, Decommission, ResumeImport, InstallComponent, TunnelAccess, MeasureNetwork, BbrKernel, CheckComponentUpdate }
 public enum TaskOutcome { Running, Completed, CompletedWithWarnings, Cancelled, Failed, NeedsRecovery }
 public enum ComponentScope { Protocol, Network, Firewall, Ssh, KomariAgent, KomariController, Tunnel, ManagedInstance }
 public sealed record HostIdentity(string Host, int Port, string Algorithm, string Sha256Fingerprint, bool Changed);

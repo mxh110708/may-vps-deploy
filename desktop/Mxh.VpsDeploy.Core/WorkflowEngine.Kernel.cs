@@ -16,7 +16,13 @@ public sealed partial class WorkflowEngine
         {
             var expected = c.State["KernelUpgrade"]!.AsObject();
             if (remote.Number("SchemaVersion") != 1 || remote.Text("Owner") != "mxh-dotnet-kernel-v1" || remote.Text("Id") != expected.Text("Id") || remote.Text("Catalog.Id") != expected.Text("Catalog.Id") || remote.Text("Catalog.Sha256") != expected.Text("Catalog.Sha256")) throw new OperationException("远端内核事务身份或版本不一致，拒绝写入。", true, "KernelIdentityMismatch");
-            c.State["KernelUpgrade"] = remote.DeepClone();
+            if (remote.Flag("NoMutationConfirmed") && expected.Text("PreviousTransaction") != "")
+            {
+                var previous = ArchiveStore.ReadJson(c.File("kernel-history/" + expected.Text("PreviousTransaction") + ".json"));
+                if (previous.Text("Id") != expected.Text("PreviousTransaction") || previous.Text("Owner") != "mxh-dotnet-kernel-v1") throw new OperationException("上一内核事务记录身份不一致。", true);
+                c.State["KernelUpgrade"] = previous; remote = previous;
+            }
+            else c.State["KernelUpgrade"] = remote.DeepClone();
         }
         c.Save(); return remote;
     }
@@ -75,13 +81,22 @@ public sealed partial class WorkflowEngine
             await c.TrackStep("kernel-check", async () =>
             {
                 await VerifyManagement(c); var audit = await KernelRun(c, "audit");
-                if (audit.Text("BbrVersion") == "v3") throw new OperationException("运行内核已经支持 BBR v3，无需更换内核。");
                 if (!audit.Flag("Compatible")) throw new OperationException("内核兼容性检查未通过：" + string.Join("；", audit.Strings("Reasons")));
+                if (audit.Text("Kernel") != catalog.Text("Kernel") && !BbrKernels.CanUpgrade(c.State["KernelUpgrade"] as JsonObject, audit, catalog)) throw new OperationException("当前 v3 内核或事务不支持此升级目标。仅支持从已验收的受管版本升级到更新版本；降级请使用明确的回退操作。", code: "KernelUpgradeTargetRefused");
             });
+            if (c.State.Text("LastKernelCheck.Kernel") == catalog.Text("Kernel")) { c.Report("kernel-ready", "目标内核已运行，无需重复安装或重启。"); return; }
             await c.TrackStep("kernel-install", async () =>
             {
-                c.State["KernelUpgrade"] = new JsonObject { ["SchemaVersion"] = 1, ["Owner"] = "mxh-dotnet-kernel-v1", ["Id"] = c.Id, ["Phase"] = "Preparing", ["Catalog"] = catalog.DeepClone() }; c.Save();
+                var previous = c.State["KernelUpgrade"] as JsonObject;
+                var previousId = previous?.Text("Id", "") ?? "";
+                if (previousId != "")
+                {
+                    if (!System.Text.RegularExpressions.Regex.IsMatch(previousId, "^[a-f0-9]{32}$")) throw new OperationException("上一内核事务身份无效。");
+                    ArchiveStore.WriteJson(c.File("kernel-history/" + previousId + ".json"), previous!);
+                }
+                c.State["KernelUpgrade"] = new JsonObject { ["SchemaVersion"] = 1, ["Owner"] = "mxh-dotnet-kernel-v1", ["Id"] = c.Id, ["Phase"] = "Preparing", ["Catalog"] = catalog.DeepClone(), ["PreviousTransaction"] = previousId }; c.Save();
                 var parameters = new Dictionary<string, string> { ["CATALOG"] = catalog.ToJsonString() };
+                if (previousId != "") parameters["PREVIOUS_TRANSACTION"] = previousId;
                 foreach (var name in new[] { "xanmod.gpg", "InRelease", "Packages.gz" }) parameters["SOURCE_" + name.Replace('.', '_').ToUpperInvariant()] = candidate["Sources"] == null ? Convert.ToBase64String(File.ReadAllBytes(store.Paths.Resolve("assets/kernel/" + name))) : candidate["Sources"]![name]!.ToString();
                 await KernelRun(c, "prepare", true, parameters);
                 var installed = await WaitKernel(c, false);
@@ -96,14 +111,15 @@ public sealed partial class WorkflowEngine
             await c.TrackStep("kernel-reboot", async () => { c.State.Put("KernelUpgrade.Phase", JsonValue.Create("BootRequested")); c.Save(); await KernelRun(c, "boot", true); await WaitKernel(c, true); });
             await c.TrackStep("kernel-accept", () => KernelAccept(c)); return;
         }
-        if (action == "Rollback")
+        if (action is "Rollback" or "RollbackOriginal")
         {
             await c.TrackStep("kernel-rollback", async () =>
             {
                 c.State.Put("KernelUpgrade.Phase", JsonValue.Create("RollbackRequested")); c.Save();
-                await KernelRun(c, "rollback", true);
+                await KernelRun(c, "rollback", true, new() { ["ROLLBACK_TARGET"] = action == "RollbackOriginal" ? "Original" : "Previous" });
                 var status = c.State.Text("KernelUpgrade.Phase") == "RollbackRequested" ? await WaitKernel(c, true) : await KernelRun(c, "status");
-                if (status.Text("Phase") is not ("RolledBack" or "Aborted") || status.Text("Runtime.Kernel") != status.Text("OldKernel")) throw new OperationException("旧内核尚未确认启动。", true, "KernelRollbackUnconfirmed");
+                var target = action == "RollbackOriginal" ? status.Text("OriginalKernel", status.Text("OldKernel")) : status.Text("OldKernel");
+                if (status.Text("Phase") is not ("RolledBack" or "Aborted") || status.Text("Runtime.Kernel") != target) throw new OperationException("所选回退内核尚未确认启动。", true, "KernelRollbackUnconfirmed");
                 await VerifyManagement(c);
             }); return;
         }

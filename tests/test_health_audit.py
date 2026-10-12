@@ -23,7 +23,7 @@ class HealthAuditTests(unittest.TestCase):
             for prefix in ('/usr/local','/usr/bin','/etc','/opt','/var/lib','/proc'):
                 body=body.replace(prefix,root.as_posix()+prefix)
             body=body.replace('os.uname().machine','"x86_64"')
-            for relative in ('usr/local/bin/komari-agent','etc/komari-agent/config.json','etc/mxh-tls/anytls/fullchain.pem','etc/mxh-tls/reality-target/fullchain.pem','opt/komari/komari'):
+            for relative in ('usr/local/bin/komari-agent','usr/local/bin/cloudflared','etc/komari-agent/config.json','etc/mxh-tls/anytls/fullchain.pem','etc/mxh-tls/reality-target/fullchain.pem','opt/komari/komari'):
                 file=root/relative;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('fixture');file.chmod(0o755)
             calls=[]
             def run(args,**kwargs):
@@ -41,7 +41,7 @@ class HealthAuditTests(unittest.TestCase):
                         elif '--property=WorkingDirectory' in args:
                             out=(root/'opt/komari').as_posix()
                         else:
-                            binary='usr/local/bin/komari-agent' if args[-1]=='komari-agent.service' else 'opt/komari/komari' if supported_controller else 'custom/komari'
+                            binary='usr/local/bin/komari-agent' if args[-1]=='komari-agent.service' else 'usr/local/bin/cloudflared' if args[-1]=='cloudflared.service' else 'opt/komari/komari' if supported_controller else 'custom/komari'
                             out='{ path='+(root/binary).as_posix()+' ; argv[]=fixture ; }'
                     elif args[1] in ('is-active','is-enabled'):
                         code=0 if args[-1] in ('komari-agent.service','komari.service','mxh-certbot-renew.timer') else 1
@@ -55,6 +55,7 @@ class HealthAuditTests(unittest.TestCase):
                     out='notAfter='+ (datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=60)).strftime('%b %d %H:%M:%S %Y GMT')
                 elif Path(args[0]).name=='komari':
                     out='Komari Monitor 1.5.1'
+                elif Path(args[0]).name=='cloudflared':out='cloudflared version 2026.10.0 (built 2026-10-01)'
                 return subprocess.CompletedProcess(args,code,out,'')
             digest=hashlib.sha256(b'fixture').hexdigest()
             env={'VPS_PARAM_AGENT_RELEASES_JSON':json.dumps({digest:'1.5.11'} if known else {})}
@@ -81,6 +82,11 @@ class HealthAuditTests(unittest.TestCase):
         audit,_=self.audit(known=False)
         self.assertIsNone(audit['Versions']['KomariAgent'])
         self.assertFalse(audit['AgentVersionEvidence']['Identified'])
+
+    def test_cloudflared_actual_version_is_available_for_upgrade_selection(self):
+        audit,calls=self.audit()
+        self.assertEqual(audit['Versions']['Cloudflared'],'2026.10.0')
+        self.assertTrue(any(Path(args[0]).name=='cloudflared' and args[-1]=='--version' for args in calls))
 
     def test_audit_timeout_is_bounded_and_marked_incomplete(self):
         audit,_=self.audit(timeout_command='sshd')

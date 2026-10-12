@@ -175,6 +175,41 @@ systemctl(){
         self.assertFalse((self.root / 'calls').exists())
         self.assertTrue((self.root / 'active-xray.service').is_file())
 
+    def test_disabled_reality_backup_port_is_skipped_during_apply_and_final_validation(self):
+        if not BASH:self.skipTest('Bash unavailable')
+        binary=self.write('usr/local/bin/xray','#!/usr/bin/env bash\nexit 0\n')
+        self.write('usr/local/etc/xray/config.json','{}')
+        (self.root/'tmp').mkdir()
+        preamble=r'''
+systemctl(){ case "$1" in show) echo fixture;; is-active|is-enabled) [[ "${@: -1}" == xray.service ]];; *) return 0;; esac; }
+id(){ echo fixture; }
+chown(){ return 0; }
+sleep(){ return 0; }
+timeout(){ return 0; }
+timedatectl(){ echo yes; }
+sshd(){ if [[ "$1" == -T ]];then printf 'port 45003\nport 45004\npasswordauthentication no\nkbdinteractiveauthentication no\npubkeyauthentication yes\n';fi; }
+ss(){ echo "$*" >> "$TEST_ROOT/listener-calls";[[ "$*" != *'sport = :0' ]] && echo xray; }
+install(){ if [[ " $* " == *' -d '* ]];then mkdir -p "${@: -1}";return;fi;local args=();while (($#));do case "$1" in -o|-g) shift 2;; *) args+=("$1");shift;; esac;done;command install "${args[@]}"; }
+python3(){ local args=();for value in "$@";do args+=("${value//$TEST_ROOT/$TEST_NATIVE_ROOT}");done;"$TEST_PYTHON" "${args[@]}"; }
+'''
+        for name in ('xray-apply-config.sh','final-validate.sh'):
+            for backup in ('','0','45002'):
+                with self.subTest(script=name,backup=backup):
+                    source=(ROOT/'assets/remote'/name).read_text()
+                    source=re.sub(r'(?<![\w/])/(?:usr/local|etc|root|var/log)(?=/|[\'"\s])',lambda match:shell_path(self.root)+match[0],source)
+                    calls=self.root/'listener-calls'
+                    if calls.exists():calls.unlink()
+                    env=dict(self.env,TEST_ROOT=shell_path(self.root),TEST_NATIVE_ROOT=self.root.as_posix(),TEST_PYTHON=shell_path(sys.executable),TMPDIR=shell_path(self.root/'tmp'),
+                             VPS_PARAM_CONFIG_JSON='{}',VPS_PARAM_PRIMARY_PORT='45001',VPS_PARAM_BACKUP_PORT=backup,VPS_PARAM_TARGET='example.invalid:443',
+                             VPS_PARAM_ROLE='RealityEntry',VPS_PARAM_SSH_PRIMARY='45003',VPS_PARAM_SSH_RESCUE='45004',VPS_PARAM_XRAY_PRIMARY='45001',VPS_PARAM_XRAY_BACKUP=backup,
+                             VPS_PARAM_REALITY_ENABLED='true',VPS_PARAM_ANYTLS_ENABLED='false',VPS_PARAM_SHADOWSOCKS_ENABLED='false',VPS_PARAM_KOMARI_ENABLED='false',VPS_PARAM_FIREWALL_MODE='PreserveExisting')
+                    result=subprocess.run([BASH,'--noprofile','--norc','-s'],input=preamble+source,text=True,encoding='utf-8',errors='replace',capture_output=True,env=env,timeout=20)
+                    self.assertEqual(result.returncode,0,result.stderr+result.stdout)
+                    observed=calls.read_text()
+                    self.assertNotIn('sport = :0',observed)
+                    self.assertEqual(observed.count('sport = :45001'),1)
+                    self.assertEqual('sport = :45002' in observed,backup=='45002')
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(); parser.add_argument('--bash'); options, remaining = parser.parse_known_args()
     BASH = options.bash or ('/bin/bash' if os.name != 'nt' else None)

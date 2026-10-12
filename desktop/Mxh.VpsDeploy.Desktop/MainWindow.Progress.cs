@@ -88,7 +88,7 @@ public sealed partial class MainWindow
     private void FinishExecution(TaskRecord record)
     {
         executionResult = record; executionTimer.Stop();
-        heading.Text = record.Kind switch { OperationKind.InstallComponent => "追加安装结果", OperationKind.MeasureNetwork => "线路测量结果", OperationKind.TuneNetwork => "网络配置结果", OperationKind.BbrKernel => "BBR 内核任务结果", _ => "部署结果" };
+        heading.Text = record.Kind switch { OperationKind.CheckComponentUpdate => "组件版本查询结果", OperationKind.InstallComponent => "追加安装结果", OperationKind.MeasureNetwork => "线路测量结果", OperationKind.TuneNetwork => "网络配置结果", OperationKind.BbrKernel => "BBR 内核任务结果", _ => "部署结果" };
         foreach (var row in executionRows.Values.Where(row => row.State == TaskStepState.Running))
         {
             row.State = record.Outcome == TaskOutcome.Cancelled ? TaskStepState.Cancelled : TaskStepState.Failed; row.Detail.Text = TaskMessage(record); row.Finished = record.FinishedAt; PaintExecutionRow(row);

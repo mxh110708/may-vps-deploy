@@ -69,7 +69,7 @@ public sealed partial class WorkflowEngine
             }
             current = await NetworkObservation(c, before?["Options"] as JsonObject);
             if (c.Request.Options.Text("BbrVersion", "Current") == "v3" && current.Text("BbrVersion") != "v3") throw new OperationException("已选择 BBR v3，但当前内核尚未确认支持。请先检查并完成 BBR v3 内核升级与验收。");
-            if (c.Request.Options.Text("BbrVersion", "Current") == "Current" && c.State.Text("KernelUpgrade.Phase") == "Committed" && current.Text("Kernel") != c.State.Text("KernelUpgrade.OldKernel")) throw new OperationException("已选择 VPS 原有内核版本，请先审阅回退旧内核；当前运行的是升级后的内核。");
+            if (c.Request.Options.Text("BbrVersion", "Current") == "Current" && c.State["KernelUpgrade"] is JsonObject kernel && current.Text("Kernel") != kernel.Text("OriginalKernel", kernel.Text("OldKernel"))) throw new OperationException("已选择 VPS 原有内核版本，请先审阅回到 VPS 原有内核；当前运行的是升级后的内核。");
             if (before != null && (current.Text("Kernel") != before.Text("ServerAfter.Kernel") || current.Long("MemoryKiB") != before.Long("ServerAfter.MemoryKiB") || ArchiveStore.Fingerprint(current["Sysctl"]!) != ArchiveStore.Fingerprint(before.At("ServerAfter.Sysctl")!) || NetworkTuning.QueueFingerprint(current) != NetworkTuning.QueueFingerprint(before["ServerAfter"]!.AsObject()))) throw new OperationException("远端内核、参数或队列在测速后发生变化，请重新采集。");
             await c.Run("network-preflight.sh", timeout: 60, marker: "NETWORK_PREFLIGHT_OK");
         });

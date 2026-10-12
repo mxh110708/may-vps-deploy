@@ -33,7 +33,7 @@ public static class MaintenanceTargets
     }
     public static string TargetVersion(string scope, JsonObject versions) => scope switch
     {
-        "KomariAgent" => versions.Text("komari_agent.version"), "KomariController" => versions.Text("komari_controller.version"), _ => ""
+        "KomariAgent" => versions.Text("komari_agent.version"), "KomariController" => versions.Text("komari_controller.version"), "Tunnel" => versions.Text("cloudflared.version"), _ => ""
     };
     public static void Validate(OperationRequest request, JsonObject plan, JsonObject state, JsonObject versions)
     {

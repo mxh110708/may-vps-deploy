@@ -27,6 +27,7 @@ public sealed class RemoteAssets(AppPaths paths)
         }
         if (asset == "network-audit.sh" || asset.StartsWith("kernel-", StringComparison.Ordinal)) Program("VPS_BBR_PROGRAM", "scripts/bbr-runtime.py");
         if (asset.StartsWith("kernel-", StringComparison.Ordinal)) Program("VPS_KERNEL_PROGRAM", "scripts/kernel-engine.py");
+        if (asset == "component-release-latest.sh") Program("VPS_COMPONENT_RELEASE_PROGRAM", "scripts/component-releases.py");
         if (asset is "network-preflight.sh" or "network-apply.sh" || asset == "protocol-migration-arm-rollback.sh" && parameters.TryGetValue("NETWORK_SNAPSHOT", out var network) && network == "true") text.Append(Read("network-tools.sh")).Append('\n');
         if (parameters.ContainsKey("EXPECTED_TRANSACTION")) text.Append(Read("maintenance-mutation-guard.sh")).Append("\nvps_begin_mutation || exit 1\n");
         if (parameters.TryGetValue("INSTALL_COMPONENT", out var component))

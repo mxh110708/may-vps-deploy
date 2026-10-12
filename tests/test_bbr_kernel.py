@@ -202,6 +202,56 @@ class KernelContract(unittest.TestCase):
         with mock.patch.dict(NS, {'config_fingerprint': lambda: 'a', 'digest': lambda _: 'b', 'boot_environment': lambda: {'saved_entry': 'foreign'}}):
             with self.assertRaises(RuntimeError): NS['owned_boot'](s)
 
+    def test_upgrade_only_accepts_current_committed_identity_and_newer_kernel(self):
+        cat=json.loads((ROOT/'config/kernel-catalog.json').read_text())
+        old=cat['Kernel'];new='6.19.1-x64v1-xanmod1';cat['Kernel']=new;cat['Package']='linux-image-'+new
+        prior={'Id':'a'*32,'Phase':'Committed','Catalog':{'Kernel':old},'OwnedDefaultSha256':'hash','NewImageSha256':'image','NewInitrdSha256':'initrd'}
+        with tempfile.TemporaryDirectory() as folder:
+            root=pathlib.Path(folder);(root/'current.json').write_text('{"Id":"'+'a'*32+'"}')
+            def digest(p):return 'initrd' if 'initrd' in str(p) else 'image'
+            defaults={'BASE':root,'DEFAULT':root/'default','UNIT':root/'unit','audit':lambda:{'Compatible':True,'BbrVersion':'v3','Kernel':old},
+                      'load':lambda _:prior,'owned_boot':mock.Mock(),'catalog_validate':lambda _:None,'digest':digest}
+            env={'VPS_PARAM_CATALOG':json.dumps(cat),'VPS_PARAM_PREVIOUS_TRANSACTION':'b'*32}
+            with mock.patch.dict(NS,defaults),mock.patch.dict(NS['os'].environ,env):
+                with self.assertRaisesRegex(RuntimeError,'identity mismatch'):NS['prepare']('c'*32)
+                self.assertFalse((root/('c'*32)).exists())
+            env['VPS_PARAM_PREVIOUS_TRANSACTION']='a'*32
+            for changed in [('Phase','RolledBack'),('NewImageSha256','drift')]:
+                invalid=copy.deepcopy(prior);invalid[changed[0]]=changed[1]
+                with mock.patch.dict(NS,{**defaults,'load':lambda _:invalid}),mock.patch.dict(NS['os'].environ,env):
+                    with self.assertRaises(RuntimeError):NS['prepare']('c'*32)
+                    self.assertFalse((root/('c'*32)).exists())
+            cat['Kernel']='6.1.1-x64v1-xanmod1';env['VPS_PARAM_CATALOG']=json.dumps(cat)
+            with mock.patch.dict(NS,defaults),mock.patch.dict(NS['os'].environ,env):
+                with self.assertRaisesRegex(RuntimeError,'downgrade'):NS['prepare']('c'*32)
+                self.assertFalse((root/('c'*32)).exists())
+
+    def test_original_rollback_and_previous_rollback_have_distinct_targets(self):
+        original='6.12.74+deb13+1-cloud-amd64';previous='6.18.55-x64v1-xanmod1';current='6.18.56-x64v1-xanmod1'
+        base={'Id':'a'*32,'Phase':'Committed','Catalog':{'Kernel':current},'OldKernel':previous,'OldEntry':'previous',
+              'OldImageSha256':'hash','OldInitrdSha256':'hash','OriginalKernel':original,'OriginalEntry':'original',
+              'OriginalImageSha256':'hash','OriginalInitrdSha256':'hash','OwnedDefaultSha256':'owned','Runtime':{'Kernel':current}}
+        for original_target,expected,expected_entry in [(False,previous,'previous'),(True,original,'original')]:
+            state=copy.deepcopy(base);writes=mock.Mock();commands=mock.Mock()
+            with mock.patch.dict(NS,{'status':lambda _:state,'digest':lambda _:'hash','owned_boot':lambda _:None,'set_default':writes,
+                                   'run':commands,'save':lambda _:None,'remove_guard':lambda _:None,'runtime':lambda:{'BootId':'new'}}),mock.patch.object(NS['platform'],'release',return_value=current):
+                result=NS['rollback'](state,original_target)
+            self.assertEqual(result['RollbackKernel'],expected);self.assertEqual(result['Phase'],'RollbackRequested')
+            writes.assert_called_once_with(state,expected_entry)
+            self.assertEqual(sum(call.args[0][0]=='systemd-run' for call in commands.call_args_list),1)
+            state['Runtime']={'Kernel':expected,'BootId':'rebooted'};state['OldBootId']='old';state['Services']=[]
+            with mock.patch.dict(NS,{'runtime':lambda:state['Runtime'],'run':lambda *a,**k:'','save':lambda _:None}):
+                self.assertEqual(NS['status'](state)['Phase'],'RolledBack')
+
+    def test_upgrade_after_abort_or_rollback_requires_committed_running_history(self):
+        committed={'Id':'a'*32,'Phase':'Committed','Catalog':{'Kernel':'6.18.55-x64v1-xanmod1'}}
+        for phase in ('Aborted','RolledBack'):
+            latest={'Id':'b'*32,'Phase':phase,'Catalog':{'Kernel':'6.18.56-x64v1-xanmod1'},'PreviousTransaction':committed['Id']}
+            with mock.patch.dict(NS,{'load':lambda _:committed}):
+                self.assertEqual(NS['committed_running_kernel'](latest,committed['Catalog']['Kernel'])['Id'],committed['Id'])
+            with mock.patch.dict(NS,{'load':lambda _:latest}):
+                with self.assertRaises(RuntimeError):NS['committed_running_kernel'](latest,committed['Catalog']['Kernel'])
+
 
 if __name__ == '__main__':
     unittest.main()

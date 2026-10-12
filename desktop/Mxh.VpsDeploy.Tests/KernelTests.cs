@@ -97,6 +97,18 @@ internal sealed partial class BoundaryTests
         options["TimeZoneId"] = ""; Check(NetworkTuning.TimeDescription(options).Contains("无法识别"), "clearing custom zone crashed description");
         options["TimeZoneId"] = "UTC"; options["PeakEndHour"] = ""; Refuses(() => NetworkTuning.ValidateMeasurement(options), "blank peak time silently accepted as midnight");
         var latestCatalog = catalog.DeepClone().AsObject(); latestCatalog["Selection"] = "Latest";
+        var runningCatalog = catalog.DeepClone().AsObject(); runningCatalog["Kernel"] = "6.18.54-x64v1-xanmod1";
+        var committed = new JsonObject { ["Phase"] = "Committed", ["Catalog"] = runningCatalog };
+        var running = new JsonObject { ["Compatible"] = true, ["BbrVersion"] = "v3", ["Kernel"] = "6.18.54-x64v1-xanmod1" };
+        Check(BbrKernels.CanUpgrade(committed, running, latestCatalog), "committed v3 cannot upgrade to newer target");
+        Check(!BbrKernels.CanUpgrade(null, running, latestCatalog), "unmanaged v3 upgrade accepted");
+        committed["Phase"] = "Prepared"; Check(!BbrKernels.CanUpgrade(committed, running, latestCatalog), "unfinished v3 upgraded again");
+        committed["Phase"] = "Aborted"; committed["OldKernel"] = running.Text("Kernel"); committed["PreviousTransaction"] = new string('a',32);
+        Check(BbrKernels.CanUpgrade(committed, running, latestCatalog), "aborted upgrade cannot retry from retained committed v3");
+        committed["Phase"] = "RolledBack"; Check(BbrKernels.CanUpgrade(committed, running, latestCatalog), "rolled-back v3 cannot upgrade from retained history");
+        committed["Phase"] = "Committed"; running["Kernel"] = latestCatalog.Text("Kernel"); Check(!BbrKernels.CanUpgrade(committed, running, latestCatalog), "same v3 target reinstalled");
+        BbrKernels.Validate(new() { ["Action"] = "RollbackOriginal" });
+        Check(OperationPolicy.Summary(new(OperationKind.BbrKernel, relative, new() { ["Action"] = "RollbackOriginal" })).Contains("VPS 原有内核"), "original rollback scope missing from review");
         var sources = new JsonObject(); foreach (var name in new[] { "xanmod.gpg", "InRelease", "Packages.gz" }) sources[name] = Convert.ToBase64String(File.ReadAllBytes(f.Paths.Resolve("assets/kernel/" + name)));
         var candidate = new JsonObject { ["Catalog"] = latestCatalog, ["Sources"] = sources, ["FetchedAt"] = DateTimeOffset.UtcNow.ToString("O") };
         BbrKernels.ValidateCandidate(candidate, catalog);

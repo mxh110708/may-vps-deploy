@@ -280,17 +280,45 @@ def latest_candidate():
         return {'Catalog': cat, 'Sources': sources, 'FetchedAt': datetime.datetime.now(datetime.timezone.utc).isoformat()}
 
 
+def committed_running_kernel(previous, kernel):
+    visited = set()
+    while previous and previous['Id'] not in visited and len(visited) < 16:
+        visited.add(previous['Id'])
+        if previous['Phase'] == 'Committed' and previous['Catalog']['Kernel'] == kernel: return previous
+        identity = previous.get('PreviousTransaction', '')
+        if not identity: break
+        previous = load(identity)
+    raise RuntimeError('Running BBR v3 has no committed managed history')
+
+
 def prepare(identity):
     cat = json.loads(os.environ['VPS_PARAM_CATALOG']); catalog_validate(cat); a = audit()
     if not a['Compatible']: raise RuntimeError('Kernel preflight refused')
-    if a['BbrVersion'] == 'v3': raise RuntimeError('BBR v3 already available')
     current = BASE/'current.json'; previous = None
     if current.exists():
         regular(current); previous = load(json.loads(current.read_text())['Id'])
         if previous['Phase'] not in TERMINAL: raise RuntimeError('Unfinished kernel transaction refused')
+        if os.environ.get('VPS_PARAM_PREVIOUS_TRANSACTION', '') != previous['Id']: raise RuntimeError('Previous kernel identity mismatch')
+        if 'OwnedDefaultSha256' in previous: owned_boot(previous)
+        else:
+            if config_fingerprint() != previous['BootConfigFingerprint'] or (DEFAULT.read_bytes() if DEFAULT.exists() else None) != (base64.b64decode(previous['OriginalDefault']) if previous['OriginalDefault'] else None) or boot_environment().get('saved_entry', '') != previous['SavedEntry']:
+                raise RuntimeError('Previous preparation boot drift')
+    elif os.environ.get('VPS_PARAM_PREVIOUS_TRANSACTION', ''): raise RuntimeError('Previous kernel transaction missing')
+    if cat['Kernel'] == a['Kernel']: raise RuntimeError('Target kernel already running')
+    if a['BbrVersion'] == 'v3':
+        if not previous or previous['Phase'] not in TERMINAL:
+            raise RuntimeError('Unmanaged BBR v3 upgrade refused')
+        accepted = committed_running_kernel(previous, a['Kernel'])
+        if digest(Path('/boot/vmlinuz-'+a['Kernel'])) != accepted.get('NewImageSha256') or digest(Path('/boot/initrd.img-'+a['Kernel'])) != accepted.get('NewInitrdSha256'):
+            raise RuntimeError('Previous committed kernel image drift')
+        version = lambda kernel: tuple(int(p) for p in kernel.split('-')[0].split('.'))
+        if version(cat['Kernel']) <= version(a['Kernel']): raise RuntimeError('Kernel downgrade refused; use explicit rollback')
     target = BASE/identity
     if target.exists(): raise RuntimeError('Kernel transaction already exists; reconcile only')
-    if DEFAULT.exists() and (not previous or digest(DEFAULT) != previous.get('OwnedDefaultSha256')):
+    expected_default = previous.get('OwnedDefaultSha256') if previous else None
+    if previous and not expected_default and previous.get('OriginalDefault'):
+        expected_default = hashlib.sha256(base64.b64decode(previous['OriginalDefault'])).hexdigest()
+    if DEFAULT.exists() and digest(DEFAULT) != expected_default:
         raise RuntimeError('Unmanaged boot default collision')
     if UNIT.exists(): raise RuntimeError('Existing kernel boot guard refused')
     target.mkdir(mode=0o700); env = boot_environment()
@@ -300,6 +328,9 @@ def prepare(identity):
          'BootConfigFingerprint': config_fingerprint(), 'SavedEntry': env.get('saved_entry', ''), 'InstallInvocations': 0,
          'Services': [unit for unit in ('ssh.service', 'sshd.service', 'xray.service', 'sing-box.service', 'sing-box-anytls.service', 'sing-box-shadowsocks.service', 'komari-agent.service', 'komari.service', 'cloudflared.service') if run(['systemctl', 'is-active', unit], allow=True) == 'active']}
     s['OldImageSha256'] = digest(Path('/boot/vmlinuz-'+s['OldKernel'])); s['OldInitrdSha256'] = digest(Path('/boot/initrd.img-'+s['OldKernel']))
+    s['PreviousTransaction'] = previous['Id'] if previous else ''
+    for field in ('Kernel', 'Entry', 'ImageSha256', 'InitrdSha256'):
+        s['Original'+field] = previous.get('Original'+field, previous['Old'+field]) if previous else s['Old'+field]
     save(s); put(current, json.dumps({'Id': identity}).encode())
     put(target/'engine.py', (os.environ['VPS_BBR_PROGRAM']+'\n'+os.environ['VPS_KERNEL_PROGRAM']).encode())
     for name in ('xanmod.gpg', 'InRelease', 'Packages.gz'):
@@ -360,7 +391,7 @@ def status(s):
         active = run(['systemctl', 'is-active', 'mxh-kernel-install-'+s['Id']], allow=True)
         if active not in ('active', 'activating'): s['Phase'] = 'InstallFailed'; save(s)
     if s['Phase'] in ('BootRequested', 'RollbackRequested') and s['Runtime']['BootId'] != s['OldBootId']:
-        expected = s['Catalog']['Kernel'] if s['Phase'] == 'BootRequested' else s['OldKernel']
+        expected = s['Catalog']['Kernel'] if s['Phase'] == 'BootRequested' else s.get('RollbackKernel', s['OldKernel'])
         if s['Runtime']['Kernel'] == expected:
             s['Phase'] = 'Booted' if expected == s['Catalog']['Kernel'] else 'RolledBack'; save(s)
         elif s['Runtime']['Kernel'] == s['OldKernel']:
@@ -370,13 +401,18 @@ def status(s):
 
 
 def boot(s):
-    if s['Phase'] not in ('Prepared', 'RolledBack', 'Aborted') or not s.get('NewImageSha256') or platform.release() != s['OldKernel']: raise RuntimeError('Kernel boot phase refused')
+    running = platform.release()
+    if s['Phase'] not in ('Prepared', 'RolledBack', 'Aborted') or not s.get('NewImageSha256') or running not in (s['OldKernel'], s.get('OriginalKernel', s['OldKernel'])): raise RuntimeError('Kernel boot phase refused')
     owned_boot(s)
+    fallback_original = running != s['OldKernel']
+    prefix = 'Original' if fallback_original else 'Old'
+    if digest(Path('/boot/vmlinuz-'+running)) != s[prefix+'ImageSha256'] or digest(Path('/boot/initrd.img-'+running)) != s[prefix+'InitrdSha256']: raise RuntimeError('Activation fallback image drift')
     if digest(Path('/boot/vmlinuz-'+s['Catalog']['Kernel'])) != s['NewImageSha256'] or digest(Path('/boot/initrd.img-'+s['Catalog']['Kernel'])) != s['NewInitrdSha256']:
         raise RuntimeError('Installed boot image drift')
     guard = '[Unit]\nDescription=MXH bounded kernel boot acceptance\nAfter=network.target\n[Service]\nType=simple\nExecStart=/usr/bin/python3 '+str(BASE/s['Id']/'engine.py')+' Watchdog '+s['Id']+'\n[Install]\nWantedBy=multi-user.target\n'
     put(UNIT, guard.encode(), 0o644); s['GuardSha256'] = digest(UNIT)
     run(['systemctl', 'daemon-reload']); run(['systemctl', 'enable', 'mxh-kernel-boot-guard.service'])
+    s['ActivationFallbackOriginal'] = fallback_original
     s['OldBootId'] = runtime()['BootId']; s['Phase'] = 'BootRequested'; s['NextEntry'] = s['NewEntry']; save(s)
     run(['grub-reboot', s['NewEntry']])
     if boot_environment().get('next_entry') != s['NewEntry']: raise RuntimeError('One-shot boot verification failed')
@@ -401,11 +437,14 @@ def confirm(s):
     return s
 
 
-def rollback(s):
+def rollback(s, original=False):
     s = status(s)
     if s['Phase'] == 'Installing': raise RuntimeError('Package installer still active; reconcile first')
-    if s['Phase'] in ('RollbackRequested', 'RolledBack', 'Aborted'): return s
-    if digest(Path('/boot/vmlinuz-'+s['OldKernel'])) != s['OldImageSha256'] or digest(Path('/boot/initrd.img-'+s['OldKernel'])) != s['OldInitrdSha256']:
+    if s['Phase'] == 'RollbackRequested': return s
+    prefix = 'Original' if original else 'Old'
+    target = {field: s.get(prefix+field, s['Old'+field]) for field in ('Kernel', 'Entry', 'ImageSha256', 'InitrdSha256')}
+    if s['Phase'] in ('RolledBack', 'Aborted') and platform.release() == target['Kernel']: return s
+    if digest(Path('/boot/vmlinuz-'+target['Kernel'])) != target['ImageSha256'] or digest(Path('/boot/initrd.img-'+target['Kernel'])) != target['InitrdSha256']:
         raise RuntimeError('Old boot image drift; refuse reboot')
     if 'OwnedDefaultSha256' not in s:
         # Preparation failed before touching GRUB: exact original state must still match.
@@ -413,9 +452,10 @@ def rollback(s):
         if config_fingerprint() != s['BootConfigFingerprint'] or (DEFAULT.read_bytes() if DEFAULT.exists() else None) != original:
             raise RuntimeError('Preparing transaction boot drift')
         s['Phase'] = 'Aborted'; save(s); return s
-    owned_boot(s); set_default(s, s['OldEntry']); run(['grub-editenv', '/boot/grub/grubenv', 'unset', 'next_entry'])
+    owned_boot(s); set_default(s, target['Entry']); run(['grub-editenv', '/boot/grub/grubenv', 'unset', 'next_entry'])
+    s['RollbackKernel'] = target['Kernel']; s['RollbackToOriginal'] = original
     s['NextEntry'] = ''; save(s); remove_guard(s)
-    if platform.release() == s['OldKernel']:
+    if platform.release() == target['Kernel']:
         s['Phase'] = 'Aborted' if s['Phase'] in ('Preparing', 'InstallFailed', 'Prepared') else 'RolledBack'; save(s)
     else:
         s['OldBootId'] = runtime()['BootId']; s['Phase'] = 'RollbackRequested'; save(s)
@@ -430,7 +470,7 @@ def watchdog(identity):
     time.sleep(300)
     with (BASE/'lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX); s = load(identity)
-        if s['Phase'] in ('BootRequested', 'Booted'): rollback(s)
+        if s['Phase'] in ('BootRequested', 'Booted'): rollback(s, s.get('ActivationFallbackOriginal', False))
 
 
 def main():
@@ -476,7 +516,7 @@ def main():
                 if action == 'Status': result = status(s)
                 elif action == 'Boot': result = boot(s)
                 elif action == 'Confirm': result = confirm(s)
-                elif action == 'Rollback': result = rollback(s)
+                elif action == 'Rollback': result = rollback(s, os.environ.get('VPS_PARAM_ROLLBACK_TARGET', 'Previous') == 'Original')
                 else: raise RuntimeError('Unknown kernel action')
     print('VPSDEPLOY_KERNEL_RESULT_B64='+base64.b64encode(json.dumps(result, sort_keys=True).encode()).decode())
 

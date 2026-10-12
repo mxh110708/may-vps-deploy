@@ -218,11 +218,11 @@ Assert-True ($backupPrune -match 'mxh-protocol-migration-rollback\.timer' -and $
 $komariMaintenance = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'assets\remote\maintenance-komari.sh')
 $agentUpgradeSection = [regex]::Match($komariMaintenance, '(?s)\n  AgentUpgrade\).*?\n    ;;').Value
 Assert-True (-not [string]::IsNullOrWhiteSpace($agentUpgradeSection) -and $agentUpgradeSection -notmatch '--version') 'Agent upgrade never invokes the unsupported version interface'
-Assert-True ([regex]::Matches($agentUpgradeSection, 'sha256sum --check --status').Count -eq 3) 'Agent upgrade verifies downloaded, installed and running binary checksums'
-Assert-True ($agentUpgradeSection -match 'MainPID' -and $agentUpgradeSection -match '"/proc/\$\{pid\}/exe" -ef /usr/local/bin/komari-agent') 'Agent upgrade checks the active service process uses the replaced binary'
-Assert-True ($agentUpgradeSection -match 'for _ in \{1\.\.10\}' -and $agentUpgradeSection -match 'if \[\[ "\$was_active" == true \]\]') 'Agent process verification is bounded and never starts an inactive service'
+Assert-True ([regex]::Matches($agentUpgradeSection, 'sha256sum --check --status').Count -eq 2 -and $komariMaintenance -match '"\$expected" "/proc/\$\{pid\}/exe"') 'Agent upgrade verifies downloaded, installed and running binary checksums'
+Assert-True ($agentUpgradeSection -match 'verify_running_binary komari-agent.service' -and $komariMaintenance -match '"/proc/\$\{pid\}/exe" -ef "\$binary"') 'Agent upgrade checks the active service process uses the replaced binary'
+Assert-True ($komariMaintenance -match 'for _ in \{1\.\.20\}' -and $agentUpgradeSection -match 'if \[\[ "\$was_active" == true \]\]') 'Agent process verification is bounded and never starts an inactive service'
 Assert-True ($komariMaintenance -match 'tunnel_was_enabled=false; tunnel_was_active=false' -and $komariMaintenance -match '\[\[ "\$tunnel_was_active" == false \]\] \|\| systemctl start cloudflared\.service') 'Controller restore rollback returns cloudflared to its pre-restore enabled and active state'
-Assert-True ($komariMaintenance -match 'for _ in \{1\.\.30\}; do grep -Fq ''127\.0\.0\.1:25774''' -and $komariMaintenance -match "curl --silent --output /dev/null --write-out '%\{http_code\}'") 'Controller restore waits for the real listener and validates loopback HTTP before committing'
+Assert-True ($komariMaintenance -match 'for _ in \{1\.\.30\}; do grep -Fq "127\.0\.0\.1:\$\{controller_port\}"' -and $komariMaintenance -match "curl --silent --output /dev/null --write-out '%\{http_code\}'") 'Controller restore waits for the actual archived listener and validates loopback HTTP before committing'
 $localHttpsSetup = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'assets\remote\local-https-target.sh')
 Assert-True ($localHttpsSetup -match 'mask nginx\.service') 'nginx is masked while the package default site could start'
 Assert-True ($localHttpsSetup -match 'unmask nginx\.service') 'nginx is unmasked only after package installation checks'
@@ -1743,7 +1743,9 @@ if($pythonCommandForClient){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_network_runtime.py')
     if($LASTEXITCODE -ne 0){throw 'Network runtime snapshot regressions failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_bbr_kernel.py')
-    if($LASTEXITCODE -ne 0){throw 'BBR kernel lifecycle contract tests failed.'}
+    if ($LASTEXITCODE -ne 0) { throw 'BBR kernel contracts failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_component_releases.py')
+    if($LASTEXITCODE -ne 0){throw 'Official component release contracts failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_tunnel_public_access.py')
     if ($LASTEXITCODE -ne 0) { throw 'Tunnel public access probe regressions failed.' }
 }

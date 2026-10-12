@@ -50,6 +50,7 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
     public string StatusBackup { get; set; } = Backup;
     public bool VerifyUnownedAllowed { get; set; } = true;
     public bool MonitoringPresent { get; set; } = true;
+    public JsonObject ComponentRelease { get; set; } = new();
     public JsonObject HealthAudit { get; set; } = new() { ["SchemaVersion"] = 2, ["CollectedAt"] = DateTimeOffset.UtcNow, ["ChecksIncomplete"] = new JsonArray(), ["Services"] = new JsonObject { ["KomariAgent"] = HealthService(false), ["KomariController"] = HealthService(false), ["Cloudflared"] = HealthService(false) } };
     public JsonObject AgentConfiguration { get; set; } = new() { ["endpoint"] = "https://monitor.example.com", ["token"] = "synthetic-agent-token" };
     public JsonObject TunnelAccessAudit { get; set; } = new() { ["Passed"] = true, ["ConnectorReady"] = true, ["LocalVersion"] = "1.5.1", ["PublicVersion"] = "1.5.1", ["Code"] = "" };
@@ -70,6 +71,8 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
             return match.Success ? Encoding.UTF8.GetString(Convert.FromBase64String(match.Groups[1].Value)) : "";
         }
         if (asset == "maintenance-komari.sh") return Task.FromResult(new CommandResult(0, Parameter("ACTION") == "Status" ? string.Join('\n', new[] { "komari-agent.service", "komari.service", "cloudflared.service" }.Select(service => service + "=" + (MonitoringPresent ? "true,true,true" : "false,false,false"))) : "VPSDEPLOY_KOMARI_LIFECYCLE_OK\n", ""));
+        if (asset == "component-release-latest.sh") return Task.FromResult(new CommandResult(0, Marker("COMPONENT_RELEASE", ComponentRelease.ToJsonString()), ""));
+        if (asset == "proxy-core-upgrade.sh") return Task.FromResult(new CommandResult(0, "VPSDEPLOY_PROXY_CORE_UPDATED\n", ""));
         if (asset == "maintenance-health-audit.sh") return Task.FromResult(new CommandResult(0, Marker("HEALTH_AUDIT", HealthAudit.ToJsonString()), ""));
         if (asset == "tunnel-public-audit.sh") return Task.FromResult(new CommandResult(0, Marker("TUNNEL_ACCESS", TunnelAccessAudit.ToJsonString()) + "VPSDEPLOY_TUNNEL_ACCESS_OK\n", ""));
         if (asset == "network-audit.sh") return Task.FromResult(new CommandResult(0, Marker("NETWORK_AUDIT", NetworkAudit.ToJsonString()), ""));

@@ -218,15 +218,16 @@ public sealed partial class MainWindow : Window, IUserInteraction
         }
         var picker = new global::Windows.Storage.Pickers.FileOpenPicker(); picker.FileTypeFilter.Add("*"); WinRT.Interop.InitializeWithWindow.Initialize(picker, handle); return (await picker.PickSingleFileAsync())?.Path;
     }
-    private async Task Submit(OperationRequest request)
+    private async Task<bool> Submit(OperationRequest request)
     {
         if (taskCancellation != null) throw new OperationException("已有任务运行，请等待结束。");
-        var prepared = await ResolveExistingDraft(request); if (prepared == null) return; request = prepared;
+        var prepared = await ResolveExistingDraft(request); if (prepared == null) return false; request = prepared;
         var review = coordinator.Review(request);
-        if (!await ReviewOperation(review)) return;
+        if (!await ReviewOperation(review)) return false;
         activeOperation = request;
         if (OperationSteps.HasDeploymentProgress(request.Kind)) ShowExecution(request);
-        try { await RunBackground("准备任务", async token => { var progress = new Progress<TaskProgress>(ExecutionProgress); var record = await Task.Run(() => coordinator.ExecuteAsync(review, request, progress, token)); taskText.Text = OutcomeLabel(record.Outcome) + " · " + StageLabel(record.Stage); if (ShowingExecution) FinishExecution(record); Show(TaskMessage(record), record.Outcome is TaskOutcome.Failed or TaskOutcome.NeedsRecovery ? InfoBarSeverity.Error : record.Outcome == TaskOutcome.Completed ? InfoBarSeverity.Success : InfoBarSeverity.Warning); }); }
+        var completed = false;
+        try { await RunBackground("准备任务", async token => { var progress = new Progress<TaskProgress>(ExecutionProgress); var record = await Task.Run(() => coordinator.ExecuteAsync(review, request, progress, token)); completed = record.Outcome is TaskOutcome.Completed or TaskOutcome.CompletedWithWarnings; taskText.Text = OutcomeLabel(record.Outcome) + " · " + StageLabel(record.Stage); if (ShowingExecution) FinishExecution(record); Show(TaskMessage(record), record.Outcome is TaskOutcome.Failed or TaskOutcome.NeedsRecovery ? InfoBarSeverity.Error : record.Outcome == TaskOutcome.Completed ? InfoBarSeverity.Success : InfoBarSeverity.Warning); }); }
         catch (Exception error)
         {
             if (ShowingExecution && executionResult == null)
@@ -238,6 +239,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
             throw;
         }
         finally { activeOperation = null; RefreshTaskResultPage(); }
+        return completed;
     }
     private void RefreshTaskResultPage()
     {

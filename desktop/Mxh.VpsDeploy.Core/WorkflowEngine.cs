@@ -52,6 +52,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
                     if (kernelRecovery) { context.Request.Options["Action"] = "Reconcile"; await ManageBbrKernel(context); }
                     else await Recover(context); break;
                 case OperationKind.BbrKernel: await ManageBbrKernel(context); break;
+                case OperationKind.CheckComponentUpdate: await CheckComponentUpdate(context); break;
                 case OperationKind.InstallComponent: await InstallComponent(context); break;
                 case OperationKind.MeasureNetwork: await MeasureNetwork(context); break;
                 case OperationKind.TuneNetwork: await TuneMeasuredNetwork(context); break;

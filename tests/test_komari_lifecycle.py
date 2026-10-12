@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -71,7 +72,7 @@ systemctl(){
     *) return 0 ;;
   esac
 }
-ss(){ echo 'LISTEN 0 128 127.0.0.1:25774 0.0.0.0:*'; }
+ss(){ echo "LISTEN 0 128 127.0.0.1:${VPS_PARAM_CONTROLLER_PORT:-25774} 0.0.0.0:*"; }
 sleep(){ echo "sleep $*" >> "$CALLS"; }
 install(){
   local args=()
@@ -111,20 +112,22 @@ class KomariLifecycleTests(unittest.TestCase):
                  extra_db_arguments='', version_code='200', version_body=None, binary_location='opt/komari/komari', stale_pid=False,
                  bad_checksum=False, corrupt_install=False, service_start_fails=False, unsafe_archive=False, service_stop_still_active=False,
                  tunnel=False, include_tunnel=False, incomplete_tunnel=False, tunnel_active=True, tunnel_enabled=True,
-                 tunnel_start_fails=False, project_backup=False, final_active=True, token_file=False):
+                 tunnel_start_fails=False, project_backup=False, final_active=True, token_file=False, download_url=None, controller_port='25774'):
         with tempfile.TemporaryDirectory(prefix='komari-lifecycle-', dir=ROOT / '.tmp') as folder:
             root = Path(folder)
             script = (ROOT / 'assets/remote/maintenance-komari.sh').read_text(encoding='utf-8')
             for prefix in ('/usr/local', '/usr/bin', '/etc', '/var/lib', '/opt', '/root', '/proc'):
                 script = script.replace(prefix, shell_path(root) + prefix)
+            # Fixture ownership belongs to the test runner; production requires root.
+            script = script.replace('st.st_uid!=0', 'st.st_uid!='+str(os.getuid() if hasattr(os,'getuid') else 0))
             script = script.replace('"/$p"', '"$TEST_ROOT/$p"')
             for relative in ('opt/komari/data/plugin', 'opt/komari/data/plguin-data', 'opt/komari/data/theme', 'root/vps-deploy-backups', 'etc/komari-agent', 'etc/systemd/system', 'usr/local/bin', 'proc/123', 'proc/234', 'tmp'):
                 (root / relative).mkdir(parents=True, exist_ok=True)
             (root / 'active').write_text(str(active).lower())
-            (root / 'tunnel-active').write_text(str(tunnel_active and (tunnel or action == 'TunnelRotate')).lower())
+            (root / 'tunnel-active').write_text(str(tunnel_active and (tunnel or action in ('TunnelRotate','TunnelUpgrade'))).lower())
             (root / 'opt/komari/data/komari.db').write_text('old-db')
             (root / 'opt/komari/data/plugin/fixture').write_text('old-plugin')
-            old_binary = root / ('usr/local/bin/komari-agent' if action == 'AgentUpgrade' else 'usr/local/bin/cloudflared' if action=='TunnelRotate' else binary_location)
+            old_binary = root / ('usr/local/bin/komari-agent' if action == 'AgentUpgrade' else 'usr/local/bin/cloudflared' if action in ('TunnelRotate','TunnelUpgrade') else binary_location)
             old_binary.write_text('#!/usr/bin/env bash\necho "Komari Monitor 1.4.3"\n[[ "$1" == --help ]] || exit 1\n')
             old_binary.chmod(0o755)
             tunnel_binary = root / 'usr/local/bin/cloudflared'
@@ -141,12 +144,14 @@ class KomariLifecycleTests(unittest.TestCase):
             token_config = root / 'etc/komari-agent/config.json'
             token_config.write_text('{"token":"fixture-token","disable_web_ssh":true}')
             before_token = token_config.read_bytes()
-            version = '1.5.11' if action == 'AgentUpgrade' else '1.5.1'
+            version = '1.5.11' if action == 'AgentUpgrade' else '2026.10.0' if action=='TunnelUpgrade' else '1.5.1'
             new_text = '#!/usr/bin/env bash\n# new-upgrade\necho "Komari Monitor ' + ('0.0.0' if bad_version else version) + '"\n[[ "$1" == --help ]] || exit 1\n'
             if action == 'AgentUpgrade':
                 # The real Agent has no --version interface. Any direct invocation
                 # of this fixture is a preflight bug, not a successful version check.
                 new_text = '#!/usr/bin/env bash\n# new-upgrade\necho "agent-binary-executed" >> "$CALLS"\necho "unsupported agent preflight invocation" >&2\nexit 64\n'
+            if action=='TunnelUpgrade':
+                new_text='#!/usr/bin/env bash\n# new-upgrade\necho "cloudflared version '+('0.0.0' if bad_version else version)+'"\n[[ "$1" == --version ]] || exit 1\n'
             new_binary = root / 'new-binary'
             with new_binary.open('w', encoding='utf-8', newline='\n') as output:
                 output.write(new_text)
@@ -177,18 +182,21 @@ class KomariLifecycleTests(unittest.TestCase):
                 CORRUPT_INSTALL=str(corrupt_install).lower(), SERVICE_START_FAILS=str(service_start_fails).lower(),
                 SERVICE_STOP_STILL_ACTIVE=str(service_stop_still_active).lower(),
                 TUNNEL_ENABLED=str(tunnel_enabled).lower(), TUNNEL_START_FAILS=str(tunnel_start_fails).lower(),
-                TOKEN_FILE_LAYOUT=str(token_file).lower(),
+                TOKEN_FILE_LAYOUT=str(token_file).lower(),VPS_PARAM_CONTROLLER_PORT=controller_port,
                 VPS_PARAM_FINAL_ACTIVE=str(final_active).lower(), VPS_PARAM_INCLUDE_TUNNEL='false',
                 VPS_PARAM_TUNNEL_TOKEN='fixture-rotated-token',PATH=shell_path(root/'usr/local/bin')+os.pathsep+os.environ['PATH'],
-                VPS_PARAM_ASSET_NAME='komari-agent-linux-amd64' if action == 'AgentUpgrade' else 'komari-linux-amd64',
+                VPS_PARAM_ASSET_NAME='komari-agent-linux-amd64' if action == 'AgentUpgrade' else 'cloudflared-linux-amd64' if action=='TunnelUpgrade' else 'komari-linux-amd64',
                 VPS_PARAM_SHA256='0' * 64 if bad_checksum else hashlib.sha256(new_binary.read_bytes()).hexdigest(), VPS_PARAM_BACKUP_FILE=shell_path(backup))
             if action == 'ControllerVerify':
                 with old_binary.open('w', encoding='utf-8', newline='\n') as output:
                     output.write(new_text)
                 old_binary.chmod(0o755)
-            os.link(old_binary, root / 'proc/123/exe')
+            if download_url is not None:environment['VPS_PARAM_DOWNLOAD_URL']=download_url
+            if action in ('AgentUpgrade','ControllerUpgrade','TunnelUpgrade'):shutil.copyfile(old_binary,root/'proc/123/exe')
+            else:os.link(old_binary, root / 'proc/123/exe')
             if tunnel_binary.exists():
-                os.link(tunnel_binary, root / 'proc/234/exe')
+                if action=='TunnelUpgrade':shutil.copyfile(tunnel_binary,root/'proc/234/exe')
+                else:os.link(tunnel_binary, root / 'proc/234/exe')
             if project_backup:
                 (root/'opt/komari/data/komari.db').write_text('old-db')
                 (root/'opt/komari/data/metrics.db').unlink()
@@ -205,7 +213,7 @@ class KomariLifecycleTests(unittest.TestCase):
             calls = (root / 'calls').read_text() if (root / 'calls').exists() else ''
             current = (root / 'opt/komari/data/komari.db').read_text()
             result.binary_contents = old_binary.read_text()
-            result.service_active = (root / ('tunnel-active' if action == 'TunnelRotate' else 'active')).read_text().strip() == 'true'
+            result.service_active = (root / ('tunnel-active' if action in ('TunnelRotate','TunnelUpgrade') else 'active')).read_text().strip() == 'true'
             result.tunnel_active = (root / 'tunnel-active').read_text().strip() == 'true'
             result.tunnel_binary = tunnel_binary.read_text() if tunnel_binary.exists() else None
             result.tunnel_unit = tunnel_unit.read_text() if tunnel_unit.exists() else None
@@ -218,6 +226,32 @@ class KomariLifecycleTests(unittest.TestCase):
     def marker(self, output):
         line = next(line for line in output.splitlines() if line.startswith('VPSDEPLOY_KOMARI_MIGRATION_REQUIRED_B64='))
         return base64.b64decode(line.split('=', 1)[1]).decode()
+
+    def test_latest_tag_url_is_exact_and_untrusted_origin_is_refused(self):
+        result,_,_,_,_=self.run_case('AgentUpgrade', download_url='https://github.com/komari-monitor/komari-agent/releases/download/v1.5.11/komari-agent-linux-amd64')
+        self.assertEqual(result.returncode,0,result.stderr)
+        result,calls,_,_,preserved=self.run_case('AgentUpgrade',download_url='https://example.com/program')
+        self.assertNotEqual(result.returncode,0);self.assertNotIn('restart',calls);self.assertTrue(preserved)
+
+    def test_controller_upgrade_reuses_custom_loopback_port(self):
+        result,_,_,_,_=self.run_case('ControllerUpgrade',controller_port='35074')
+        self.assertEqual(result.returncode,0,result.stderr)
+        for invalid in ('0','65536','35074;echo bad'):
+            result,calls,_,_,_=self.run_case('ControllerUpgrade',controller_port=invalid)
+            self.assertNotEqual(result.returncode,0);self.assertNotIn('stop',calls)
+
+    def test_tunnel_program_upgrade_preserves_token_unit_and_activation(self):
+        result,calls,_,_,preserved=self.run_case('TunnelUpgrade',tunnel=True,token_file=True,tunnel_active=False,tunnel_enabled=False)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('new-upgrade',result.binary_contents);self.assertTrue(result.unit_preserved)
+        self.assertEqual(result.managed_token,'fixture-old-token');self.assertFalse(result.tunnel_active)
+        self.assertNotIn('restart cloudflared',calls);self.assertTrue(preserved)
+
+    def test_tunnel_upgrade_bad_hash_or_version_never_restarts(self):
+        for options in ({'bad_checksum':True},{'bad_version':True}):
+            result,calls,_,_,_=self.run_case('TunnelUpgrade',tunnel=True,token_file=True,**options)
+            self.assertNotEqual(result.returncode,0);self.assertNotIn('restart',calls)
+            self.assertTrue(result.unit_preserved);self.assertEqual(result.managed_token,'fixture-old-token')
 
     def test_migration_guide_is_pending_not_completed(self):
         result, _, _, _, _ = self.run_case('ControllerUpgrade', migration_code='200', body=json.dumps({'data': {'mode': 'metric_store_restructure'}}))
@@ -434,7 +468,7 @@ class KomariLifecycleTests(unittest.TestCase):
         result, calls, _, _, token_unchanged = self.run_case('AgentUpgrade', stale_pid=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('restart komari-agent.service', calls)
-        self.assertEqual(calls.count('sleep 1'), 10)
+        self.assertEqual(calls.count('sleep 1'), 20)
         self.assertNotIn('VPSDEPLOY_KOMARI_LIFECYCLE_OK', result.stdout)
         self.assertTrue(token_unchanged)
 

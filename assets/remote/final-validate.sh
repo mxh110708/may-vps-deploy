@@ -45,7 +45,7 @@ if [[ "$VPS_PARAM_REALITY_ENABLED" == 'true' ]]; then
   systemctl is-enabled --quiet xray.service
   systemctl is-active --quiet xray.service
   grep -q xray <<< "$(ss -H -lntp "sport = :${VPS_PARAM_XRAY_PRIMARY}")"
-  if [[ -n "${VPS_PARAM_XRAY_BACKUP:-}" ]]; then
+  if [[ -n "${VPS_PARAM_XRAY_BACKUP:-}" && "$VPS_PARAM_XRAY_BACKUP" != 0 ]]; then
     grep -q xray <<< "$(ss -H -lntp "sport = :${VPS_PARAM_XRAY_BACKUP}")"
   fi
   if [[ "${VPS_PARAM_REALITY_TARGET_MODE:-ExternalAudited}" == 'LocalOwnedTls' ]]; then

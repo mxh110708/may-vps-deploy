@@ -23,6 +23,30 @@ public static class SafeFailures
     {
         try
         {
+            var phase = RemoteAssets.Marker(result.Output, "PROXY_UPGRADE_FAILURE", false);
+            var detail = phase switch { "download" => "代理核心发行包下载失败。", "checksum" => "代理核心发行包 SHA256 不匹配，未替换程序。", "archive" => "代理核心发行包内容不受支持，未替换程序。", "version" => "代理核心程序版本与目标不一致，未替换程序。", "configuration" => "新核心未通过现有配置检查，未替换程序。", "install" => "代理核心程序替换或写入后校验失败。", _ => "" };
+            if (detail != "") return new(detail, code: "ProxyCoreUpgradeFailed", nextAction: "核对任务中的目标版本和失败阶段；本轮按协议范围恢复后可重新审阅。");
+        }
+        catch (FormatException) { }
+        try
+        {
+            var code = RemoteAssets.Marker(result.Output, "COMPONENT_RELEASE_FAILURE", false);
+            var detail = code switch
+            {
+                "ComponentReleaseNotStable" => "官方查询返回测试版或草稿，未作为稳定升级目标。",
+                "ComponentReleaseAssetMissing" => "官方发行缺少唯一的 amd64 资产，未生成升级候选。",
+                "ComponentReleaseDigestMissing" => "官方资产缺少可验证的 SHA256 或资产身份不匹配，已停止查询。",
+                "ComponentReleaseRateLimited" => "官方版本接口限制了请求，稍后可重新查询。",
+                "ComponentReleaseHttpFailed" => "官方版本接口返回 HTTP 错误，未取得升级目标。",
+                "ComponentReleaseNetworkFailed" => "VPS 无法完成官方版本查询，请核对网络与 DNS。",
+                "ComponentReleaseUnsupported" => "官方发行格式或版本不受支持，未生成升级候选。",
+                _ => ""
+            };
+            if (detail != "") return new(detail, code: code, nextAction: "重新查询官方版本或选择应用固定版本；不会自动升级。 ");
+        }
+        catch (FormatException) { }
+        try
+        {
             var code = RemoteAssets.Marker(result.Output, "KERNEL_FAILURE_CODE", false);
             var detail = code switch
             {

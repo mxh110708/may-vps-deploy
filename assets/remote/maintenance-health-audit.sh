@@ -40,6 +40,8 @@ def version(command):
     text = r.stdout or r.stderr
     komari = re.search(r"Komari Monitor\s+v?([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?)", text)
     if komari: return komari.group(1)
+    cloudflared = re.search(r"^cloudflared version\s+v?([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)", text)
+    if cloudflared and r.returncode == 0: return cloudflared.group(1)
     return text.splitlines()[0].strip() if text and (r.returncode == 0 or "Komari Monitor" in text) else None
 
 def registered_binary(name, supported):
@@ -131,7 +133,8 @@ result = {
    "SingBoxAnyTls": version(["/usr/local/bin/sing-box-anytls","version"]) if pathlib.Path("/usr/local/bin/sing-box-anytls").exists() else None,
    "SingBox": version(["/usr/local/bin/sing-box","version"]) if pathlib.Path("/usr/local/bin/sing-box").exists() else None,
    "KomariAgent": agent_version,
-   "KomariController": version([komari_controller_binary,"--help"]) if komari_controller_binary else None
+   "KomariController": version([komari_controller_binary,"--help"]) if komari_controller_binary else None,
+   "Cloudflared": version([cloudflared_binary,"--version"]) if cloudflared_binary else None
  },
  "Hashes": {name: digest(path) for name,path in paths.items()},
  "Nftables": {"Present": pathlib.Path(nft_path).is_file(), "Valid": nft_valid},

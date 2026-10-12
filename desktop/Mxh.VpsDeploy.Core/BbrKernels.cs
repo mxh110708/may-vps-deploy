@@ -9,7 +9,7 @@ public static class BbrKernels
     public static bool Pending(JsonObject state) => state["KernelUpgrade"] != null && state.Text("KernelUpgrade.Phase") is not ("Committed" or "RolledBack" or "Aborted");
     public static void Validate(JsonObject options)
     {
-        if (options.Text("Action") is not ("Check" or "Install" or "Activate" or "Reconcile" or "Rollback") || options.Any(p => p.Key is not ("Action" or "CatalogId" or "CatalogSha256" or "Source"))) throw new OperationException("请选择明确的 BBR 内核操作。");
+        if (options.Text("Action") is not ("Check" or "Install" or "Activate" or "Reconcile" or "Rollback" or "RollbackOriginal") || options.Any(p => p.Key is not ("Action" or "CatalogId" or "CatalogSha256" or "Source"))) throw new OperationException("请选择明确的 BBR 内核操作。");
         if (options.Text("Action") == "Install" && options.Text("CatalogId") == "" || options.Text("Action") != "Install" && options.ContainsKey("CatalogId")) throw new OperationException("内核安装需指定受管版本，其他操作沿用原事务。");
         if (options.ContainsKey("Source") && (options.Text("Action") is not ("Check" or "Install") || options.Text("Source") is not ("Fixed" or "Latest"))) throw new OperationException("请选择应用固定版本或官方最新兼容 LTS。");
         if (options.ContainsKey("CatalogSha256") && (options.Text("Action") != "Install" || !Regex.IsMatch(options.Text("CatalogSha256"), "^[a-f0-9]{64}$")) || options.Text("Action") == "Install" && options.Text("Source") == "Latest" && !options.ContainsKey("CatalogSha256")) throw new OperationException("最新内核安装必须锁定已审阅的包哈希。");
@@ -48,6 +48,14 @@ public static class BbrKernels
         }
         if (cat["SourceFiles"]?["xanmod.gpg"]?.ToString() != anchor["SourceFiles"]?["xanmod.gpg"]?.ToString()) throw new OperationException("签名信任锚变化，需要更新应用。");
     }
-    public static string Label(string action) => action switch { "Check" => "检查兼容性", "Install" => "安装 BBR v3 内核", "Activate" => "重启并验收 BBR v3", "Rollback" => "回退旧内核", _ => "核对并完成内核事务" };
+    public static string Label(string action) => action switch { "Check" => "检查兼容性", "Install" => "安装 BBR v3 内核", "Activate" => "重启并验收 BBR v3", "Rollback" => "回退上一内核", "RollbackOriginal" => "回到 VPS 原有内核", _ => "核对并完成内核事务" };
+    public static bool CanUpgrade(JsonObject? transaction, JsonObject? check, JsonObject catalog)
+    {
+        if (check?.Flag("Compatible") != true || check.Text("Kernel") == catalog.Text("Kernel")) return false;
+        if (check.Text("BbrVersion") != "v3") return transaction == null || transaction.Text("Phase") is "Aborted" or "RolledBack";
+        var running = check.Text("Kernel");
+        var owned = transaction?.Text("Phase") == "Committed" && transaction.Text("Catalog.Kernel") == running || transaction?.Text("Phase") is "Aborted" or "RolledBack" && transaction.Text("PreviousTransaction") != "" && transaction.Text("OldKernel") == running;
+        return owned && ComponentUpdates.IsOlder(running.Split('-')[0], catalog.Text("Kernel").Split('-')[0]);
+    }
     public static string PhaseLabel(string phase) => phase switch { "Preparing" => "正在准备，需核对", "Installing" => "后台安装中", "Prepared" => "已安装，等待审阅重启", "BootRequested" => "已请求重启，等待验收", "Booted" => "新内核已启动，等待提交", "Committed" => "BBR v3 已验收并设为默认", "RollbackRequested" => "正在回到旧内核", "RolledBack" => "已回退旧内核", "AutoRolledBack" => "保护机制已回到旧内核，需核对", "Aborted" => "已结束安装准备，旧内核继续运行", "InstallFailed" => "安装失败，需核对后结束准备", _ => "状态未确认，请核对" };
 }

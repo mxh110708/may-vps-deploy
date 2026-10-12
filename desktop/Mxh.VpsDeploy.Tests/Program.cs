@@ -20,6 +20,7 @@ internal sealed partial class BoundaryTests(string repository)
         using var f = new Fixture(repository); Paths(f); Fonts(f); await Coordinator(f); Publisher(f); SinglePublisher(f); Profiles(f); MultiPurpose(f); Keys(f); await Workflows(f); await DesktopDeployment(f); await Credentials(f); await Workbench(f); await Trust(f); await DeploymentExperience(f); await MaintenanceExperience(f);
         CloudflareCredentialExperience(f);
         await MonitoringArchiveExperience(f);
+        await ComponentUpdateExperience(f);
         await RecoveryExperience(f);
         await PrivateDirectoryExperience();
         WindowPlacementExperience();

@@ -156,6 +156,20 @@ curl(){ while (($#)); do if [[ "$1" == --output ]]; then cp "$TEST_ARCHIVE" "$2"
     return subprocess.run(['/bin/bash', '-s'], input=preamble + source, text=True, capture_output=True, timeout=60, env=env)
 
 
+def run_program_upgrade(root, archive, version, sha256, role='ShadowsocksLanding'):
+    source=(ROOT/'assets/remote/proxy-core-upgrade.sh').read_text()
+    for prefix in ('/usr/local','/etc','/root'):
+        source=source.replace(prefix,str(root)+prefix)
+    source=source.replace('st.st_uid!=0','st.st_uid!='+str(os.getuid()))
+    preamble=r'''
+install(){ local args=();while (($#));do case "$1" in -o|-g) shift 2;; *) args+=("$1");shift;; esac;done;command install "${args[@]}"; }
+curl(){ while (($#));do if [[ "$1" == --output ]];then cp "$TEST_ARCHIVE" "$2";return;fi;shift;done;return 1; }
+'''
+    env=dict(os.environ,TEST_ARCHIVE=str(archive),VPS_PARAM_ROLE=role,VPS_PARAM_VERSION=version,
+             VPS_PARAM_ASSET_NAME=archive.name,VPS_PARAM_SHA256=sha256)
+    return subprocess.run(['/bin/bash','-s'],input=preamble+source,text=True,capture_output=True,timeout=60,env=env)
+
+
 def rollback_snapshot(root, binary, config):
     backup=root/'root/vps-deploy-backups/20000101-000000/protocol-lifecycle';backup.mkdir(parents=True)
     (backup/'components').write_text('Protocols')
@@ -332,6 +346,18 @@ def main():
             snapshot=rollback_snapshot(root,installed,server_path)
             exercise_both(installed)
             before = installed.read_bytes()
+            program_failed=run_program_upgrade(root,new_archive,catalog['sing_box']['version'],'0'*64)
+            assert program_failed.returncode!=0 and installed.read_bytes()==before,'program upgrade bad digest replaced core'
+            old_config=server_path.read_bytes();server_path.write_text('{"unsupported_qa_field":true}')
+            program_bad_config=run_program_upgrade(root,new_archive,catalog['sing_box']['version'],new_entry['sha256'])
+            assert program_bad_config.returncode!=0 and installed.read_bytes()==before,'incompatible config replaced core'
+            server_path.write_bytes(old_config)
+            program_updated=run_program_upgrade(root,new_archive,catalog['sing_box']['version'],new_entry['sha256'])
+            assert program_updated.returncode==0,program_updated.stderr
+            assert server_path.read_bytes()==old_config,'program upgrade rewrote configuration'
+            exercise_both(installed,mihomo)
+            project_rollback(root,snapshot);exercise_both(installed)
+            print('PASS: real program-only core upgrade and scoped rollback; exact archive hash, configuration refusal and preserved configuration')
             failed = run_installer(root, new_archive, catalog['sing_box']['version'], '0' * 64)
             assert failed.returncode != 0 and installed.read_bytes() == before, 'bad checksum overwrote old core'
             time.sleep(1.05)  # installer backup names have one-second resolution

@@ -31,7 +31,7 @@ systemctl restart xray.service
 systemctl is-active --quiet xray.service
 sleep 1
 ports=("$VPS_PARAM_PRIMARY_PORT")
-if [[ -n "$backup_port" ]]; then ports+=("$backup_port"); fi
+if [[ -n "$backup_port" && "$backup_port" != 0 ]]; then ports+=("$backup_port"); fi
 for port in "${ports[@]}"; do
   grep -q xray <<< "$(ss -H -lntp "sport = :$port")" || { echo "Xray is not listening on $port" >&2; exit 1; }
 done

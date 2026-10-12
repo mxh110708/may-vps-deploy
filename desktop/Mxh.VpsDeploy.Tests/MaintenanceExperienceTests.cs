@@ -23,7 +23,7 @@ internal sealed partial class BoundaryTests
         Refuses(() => MaintenanceTargets.Validate(agent, plan, state, f.Versions), "unmanaged Agent upgrade allowed");
         Refuses(() => OperationPolicy.Validate(agent with { Options = new() { ["Scope"] = "KomariAgent", ["Action"] = "Upgrade", ["Protocol"] = "ShadowsocksLanding" } }), "protocol mixed into monitoring accepted");
         Refuses(() => OperationPolicy.Validate(new(OperationKind.Upgrade, relative, new() { ["Scope"] = "KomariAgent" })), "Agent offered in proxy upgrade");
-        Refuses(() => OperationPolicy.Validate(new(OperationKind.Komari, relative, new() { ["Scope"] = "Tunnel", ["Action"] = "Upgrade" })), "Tunnel accepts controller update");
+        OperationPolicy.Validate(new(OperationKind.Komari, relative, new() { ["Scope"] = "Tunnel", ["Action"] = "Upgrade", ["TargetVersion"] = f.Versions.Text("cloudflared.version") }));
         var core = new OperationRequest(OperationKind.Upgrade, relative, new() { ["Scope"] = "Protocol", ["Protocol"] = "ShadowsocksLanding", ["TargetVersion"] = f.Versions.Text("sing_box.version") });
         MaintenanceTargets.Validate(core, plan, state, f.Versions);
         Refuses(() => MaintenanceTargets.Validate(core with { Options = new() { ["Scope"] = "Protocol", ["Protocol"] = "AnyTlsEntry", ["TargetVersion"] = f.Versions.Text("sing_box.version") } }, plan, state, f.Versions), "inactive service upgrade allowed");

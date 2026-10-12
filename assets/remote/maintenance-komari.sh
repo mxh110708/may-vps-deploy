@@ -1,6 +1,64 @@
 #!/usr/bin/env bash
 set -euo pipefail
 : "${VPS_PARAM_ACTION:?}"
+controller_port="${VPS_PARAM_CONTROLLER_PORT:-25774}"
+[[ "$controller_port" =~ ^[0-9]{1,5}$ ]] || exit 1
+((10#$controller_port >= 1 && 10#$controller_port <= 65535)) || exit 1
+
+release_url() {
+  local repo="$1" fallback_tag="$2" asset="$3" url
+  [[ "$VPS_PARAM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$VPS_PARAM_SHA256" =~ ^[0-9a-f]{64}$ && "$VPS_PARAM_ASSET_NAME" == "$asset" ]]
+  url="${VPS_PARAM_DOWNLOAD_URL:-https://github.com/${repo}/releases/download/${fallback_tag}/${asset}}"
+  [[ "$url" == "https://github.com/${repo}/releases/download/${VPS_PARAM_VERSION}/${asset}" || "$url" == "https://github.com/${repo}/releases/download/v${VPS_PARAM_VERSION}/${asset}" ]]
+  printf '%s' "$url"
+}
+
+service_binary() {
+  local service="$1"; shift
+  local command_line
+  command_line="$(systemctl show --property=ExecStart --value "$service")"
+  python3 - "$command_line" "$@" <<'PY'
+import os,pathlib,re,stat,sys
+command,*supported=sys.argv[1:]
+match=re.search(r"(?:^|\{\s*)path=(.*?)\s*;",command)
+if not match or match.group(1) not in supported: raise SystemExit('Unsupported managed service executable')
+binary=pathlib.Path(match.group(1))
+for p in (binary,*binary.parents):
+    st=p.lstat()
+    if stat.S_ISLNK(st.st_mode):raise SystemExit('Linked service executable refused')
+    if p==binary and (not stat.S_ISREG(st.st_mode) or st.st_nlink!=1 or st.st_uid!=0 or not os.access(p,os.X_OK)):
+        raise SystemExit('Service executable ownership refused')
+print(binary)
+PY
+}
+
+verify_running_binary() {
+  local service="$1" binary="$2" expected="$3" pid
+  for _ in {1..20}; do
+    pid="$(systemctl show --property=MainPID --value "$service")"
+    if systemctl is-active --quiet "$service" && [[ "$pid" =~ ^[1-9][0-9]*$ && "/proc/${pid}/exe" -ef "$binary" ]]; then break; fi
+    sleep 1
+  done
+  systemctl is-active --quiet "$service"
+  [[ "$pid" =~ ^[1-9][0-9]*$ && "/proc/${pid}/exe" -ef "$binary" ]]
+  printf '%s  %s\n' "$expected" "/proc/${pid}/exe" | sha256sum --check --status
+}
+
+verify_tunnel_ready() {
+  local pid endpoint
+  pid="$(systemctl show --property=MainPID --value cloudflared.service)"
+  # The managed notify service has a fixed loopback metrics port. Imported
+  # simple services may choose a dynamic loopback port: resolve only this PID.
+  endpoint="$(ss -H -lntp | python3 -c 'import re,sys
+pid=sys.argv[1]
+ports=[]
+for line in sys.stdin:
+    fields=line.split()
+    if len(fields)>3 and re.search(r"pid="+re.escape(pid)+r"(?:,|\))",line) and re.fullmatch(r"127\.0\.0\.1:[0-9]+",fields[3]):ports.append(fields[3])
+if len(ports)!=1:raise SystemExit("Tunnel loopback metrics listener is ambiguous")
+print(ports[0])' "$pid")"
+  curl --fail --silent --show-error --connect-timeout 5 --max-time 20 "http://${endpoint}/ready" >/dev/null
+}
 
 find_controller_binary() {
   local command_line
@@ -112,14 +170,14 @@ verify_controller() {
   grep -Fq "Komari Monitor ${VPS_PARAM_VERSION}" <<<"$("$binary" --help 2>&1)"
   pending=deferred
   if systemctl is-active --quiet komari.service; then
-    for _ in {1..30}; do grep -Fq '127.0.0.1:25774' <<< "$(ss -H -lnt 'sport = :25774' 2>/dev/null)" && break; sleep 1; done
-    grep -Fq '127.0.0.1:25774' <<< "$(ss -H -lnt 'sport = :25774')"
+    for _ in {1..30}; do grep -Fq "127.0.0.1:${controller_port}" <<< "$(ss -H -lnt "sport = :${controller_port}" 2>/dev/null)" && break; sleep 1; done
+    grep -Fq "127.0.0.1:${controller_port}" <<< "$(ss -H -lnt "sport = :${controller_port}")"
     pid="$(systemctl show --property=MainPID --value komari.service)"
     [[ "$pid" =~ ^[1-9][0-9]*$ && "/proc/${pid}/exe" -ef "$binary" ]]
-    code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 http://127.0.0.1:25774/)"
+    code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "http://127.0.0.1:${controller_port}/")"
     [[ "$code" =~ ^(200|302|303|307|308|401|403)$ ]]
     body="$(mktemp)"
-    if ! code="$(curl --silent --output "$body" --write-out '%{http_code}' --max-time 10 http://127.0.0.1:25774/api/admin/database-migration/auth)"; then rm -f "$body"; return 1; fi
+    if ! code="$(curl --silent --output "$body" --write-out '%{http_code}' --max-time 10 "http://127.0.0.1:${controller_port}/api/admin/database-migration/auth")"; then rm -f "$body"; return 1; fi
     case "$code" in
       404) pending=false ;;
       200)
@@ -143,7 +201,7 @@ PY
       *) rm -f "$body"; echo 'Unable to verify Komari database migration state.' >&2; return 1 ;;
     esac
     if [[ "$pending" == false ]]; then
-      if ! code="$(curl --silent --output "$body" --write-out '%{http_code}' --max-time 10 http://127.0.0.1:25774/api/version)" || [[ "$code" != 200 ]]; then rm -f "$body"; return 1; fi
+      if ! code="$(curl --silent --output "$body" --write-out '%{http_code}' --max-time 10 "http://127.0.0.1:${controller_port}/api/version")" || [[ "$code" != 200 ]]; then rm -f "$body"; return 1; fi
       if ! python3 - "$body" "$VPS_PARAM_VERSION" <<'PY'
 import json, sys
 value = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -180,31 +238,25 @@ case "$VPS_PARAM_ACTION" in
     : "${VPS_PARAM_VERSION:?}"; : "${VPS_PARAM_ASSET_NAME:?}"; : "${VPS_PARAM_SHA256:?}"
     [[ "$VPS_PARAM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$VPS_PARAM_SHA256" =~ ^[0-9a-f]{64}$ ]]
     [[ -s /etc/komari-agent/config.json ]]
-    systemctl cat komari-agent.service >/dev/null
+    binary="$(service_binary komari-agent.service /usr/local/bin/komari-agent)"
     case "$(uname -m)" in x86_64|amd64) arch=amd64;; aarch64|arm64) arch=arm64;; *) exit 1;; esac
     [[ "$VPS_PARAM_ASSET_NAME" == "komari-agent-linux-${arch}" ]]
     was_active=false; was_enabled=false
     systemctl is-active --quiet komari-agent.service 2>/dev/null && was_active=true
     systemctl is-enabled --quiet komari-agent.service 2>/dev/null && was_enabled=true
     tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
-    curl --fail --location --silent --show-error --connect-timeout 15 --max-time 180 --retry 3 --output "$tmp" "https://github.com/komari-monitor/komari-agent/releases/download/${VPS_PARAM_VERSION}/${VPS_PARAM_ASSET_NAME}"
+    url="$(release_url komari-monitor/komari-agent "$VPS_PARAM_VERSION" "komari-agent-linux-${arch}")"
+    curl --fail --location --proto '=https' --proto-redir '=https' --max-filesize 536870912 --silent --show-error --connect-timeout 15 --max-time 180 --retry 3 --output "$tmp" "$url"
     printf '%s  %s\n' "$VPS_PARAM_SHA256" "$tmp" | sha256sum --check --status
     if declare -F vps_transaction_check >/dev/null; then vps_transaction_check; fi
     # Agent 1.5.11 has no version command. Never execute a downloaded agent
     # for preflight: its normal entry point may start persistent workers.
     # The pinned release checksum identifies the exact version instead.
-    install -o root -g root -m 0755 "$tmp" /usr/local/bin/komari-agent
-    printf '%s  %s\n' "$VPS_PARAM_SHA256" /usr/local/bin/komari-agent | sha256sum --check --status
+    install -o root -g root -m 0755 "$tmp" "$binary"
+    printf '%s  %s\n' "$VPS_PARAM_SHA256" "$binary" | sha256sum --check --status
     if [[ "$was_active" == true ]]; then
       systemctl restart komari-agent.service
-      for _ in {1..10}; do
-        pid="$(systemctl show --property=MainPID --value komari-agent.service)"
-        if systemctl is-active --quiet komari-agent.service && [[ "$pid" =~ ^[1-9][0-9]*$ && "/proc/${pid}/exe" -ef /usr/local/bin/komari-agent ]]; then break; fi
-        sleep 1
-      done
-      systemctl is-active --quiet komari-agent.service
-      [[ "$pid" =~ ^[1-9][0-9]*$ && "/proc/${pid}/exe" -ef /usr/local/bin/komari-agent ]]
-      printf '%s  %s\n' "$VPS_PARAM_SHA256" "/proc/${pid}/exe" | sha256sum --check --status
+      verify_running_binary komari-agent.service "$binary" "$VPS_PARAM_SHA256"
     fi
     if [[ "$was_enabled" == false ]]; then systemctl disable komari-agent.service >/dev/null 2>&1 || true; fi
     ;;
@@ -284,9 +336,9 @@ case "$VPS_PARAM_ACTION" in
     for p in "${managed_files[@]}"; do rm -f "/$p"; done
     tar --numeric-owner -xzpf "$file" -C /; systemctl daemon-reload
     systemctl enable --now komari.service >/dev/null
-    for _ in {1..30}; do grep -Fq '127.0.0.1:25774' <<< "$(ss -H -lnt 'sport = :25774' 2>/dev/null)" && break; sleep 1; done
-    grep -Fq '127.0.0.1:25774' <<< "$(ss -H -lntp 'sport = :25774')"
-    code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 http://127.0.0.1:25774/)"
+    for _ in {1..30}; do grep -Fq "127.0.0.1:${controller_port}" <<< "$(ss -H -lnt "sport = :${controller_port}" 2>/dev/null)" && break; sleep 1; done
+    grep -Fq "127.0.0.1:${controller_port}" <<< "$(ss -H -lntp "sport = :${controller_port}")"
+    code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "http://127.0.0.1:${controller_port}/")"
     [[ "$code" =~ ^(200|302|303|307|308|401|403)$ ]]
     binary="$(find_controller_binary)"; pid="$(systemctl show --property=MainPID --value komari.service)"
     [[ "$pid" =~ ^[1-9][0-9]*$ && "/proc/${pid}/exe" -ef "$binary" ]]
@@ -320,7 +372,7 @@ case "$VPS_PARAM_ACTION" in
     for directory in /var/lib/komari /opt/komari; do [[ ! -L "$directory" ]] || { echo 'Unsupported symlinked Komari data directory.' >&2; exit 1; }; done
     case "$(uname -m)" in x86_64|amd64) arch=amd64;; aarch64|arm64) arch=arm64;; *) exit 1;; esac
     [[ "$VPS_PARAM_ASSET_NAME" == "komari-linux-${arch}" ]]
-    binary="$(find_controller_binary)"; systemctl cat komari.service >/dev/null
+    binary="$(service_binary komari.service /opt/komari/komari /var/lib/komari/komari /usr/local/bin/komari /usr/bin/komari)"
     was_active=false; was_enabled=false; systemctl is-active --quiet komari.service && was_active=true; systemctl is-enabled --quiet komari.service 2>/dev/null && was_enabled=true
     tmp="$(mktemp)"; previous="$(mktemp)"; cp -a "$binary" "$previous"
     binary_changed=false
@@ -344,18 +396,47 @@ case "$VPS_PARAM_ACTION" in
     }
     on_upgrade_exit(){ local rc=$?; trap - EXIT; if ((rc != 0)); then rollback_upgrade; fi; rm -f "$tmp" "$previous"; exit "$rc"; }
     trap on_upgrade_exit EXIT
-    curl --fail --location --silent --show-error --connect-timeout 15 --max-time 180 --retry 3 --output "$tmp" "https://github.com/komari-monitor/komari/releases/download/${VPS_PARAM_VERSION}/${VPS_PARAM_ASSET_NAME}"
+    url="$(release_url komari-monitor/komari "$VPS_PARAM_VERSION" "komari-linux-${arch}")"
+    curl --fail --location --proto '=https' --proto-redir '=https' --max-filesize 536870912 --silent --show-error --connect-timeout 15 --max-time 180 --retry 3 --output "$tmp" "$url"
     printf '%s  %s\n' "$VPS_PARAM_SHA256" "$tmp" | sha256sum --check --status
+    chmod 0700 "$tmp"
+    version_output="$("$tmp" --help 2>&1)"; grep -Eq "Komari Monitor v?${VPS_PARAM_VERSION//./\\.}([^0-9.]|$)" <<<"$version_output"
     if declare -F vps_transaction_check >/dev/null; then vps_transaction_check; fi
     systemctl stop komari.service
     ! systemctl is-active --quiet komari.service || { echo 'Controller is still running; upgrade refused.' >&2; exit 1; }
     binary_changed=true
     install -o root -g root -m 0755 "$tmp" "$binary"
-    version_output="$("$binary" --help 2>&1)"; grep -Fq "Komari Monitor ${VPS_PARAM_VERSION}" <<<"$version_output"
+    version_output="$("$binary" --help 2>&1)"; grep -Eq "Komari Monitor v?${VPS_PARAM_VERSION//./\\.}([^0-9.]|$)" <<<"$version_output"
     if [[ "$was_active" == true ]]; then systemctl start komari.service; systemctl is-active --quiet komari.service; fi
     verify_controller
     if [[ "$was_enabled" == false ]]; then systemctl disable komari.service >/dev/null 2>&1 || true; fi
     trap - EXIT; rm -f "$tmp" "$previous"
+    ;;
+  TunnelUpgrade)
+    : "${VPS_PARAM_VERSION:?}"; : "${VPS_PARAM_ASSET_NAME:?}"; : "${VPS_PARAM_SHA256:?}"
+    [[ "$(uname -m)" == x86_64 ]]
+    binary="$(service_binary cloudflared.service /usr/local/bin/cloudflared /usr/bin/cloudflared)"
+    url="$(release_url cloudflare/cloudflared "$VPS_PARAM_VERSION" cloudflared-linux-amd64)"
+    was_active=false; was_enabled=false
+    systemctl is-active --quiet cloudflared.service 2>/dev/null && was_active=true
+    systemctl is-enabled --quiet cloudflared.service 2>/dev/null && was_enabled=true
+    tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
+    curl --fail --location --proto '=https' --proto-redir '=https' --max-filesize 536870912 --silent --show-error --connect-timeout 15 --max-time 180 --retry 3 --output "$tmp" "$url"
+    printf '%s  %s\n' "$VPS_PARAM_SHA256" "$tmp" | sha256sum --check --status
+    chmod 0700 "$tmp"
+    actual="$("$tmp" --version | awk 'NR==1 {print $3}')"; [[ "${actual#v}" == "$VPS_PARAM_VERSION" ]]
+    if declare -F vps_transaction_check >/dev/null; then vps_transaction_check; fi
+    install -o root -g root -m 0755 "$tmp" "$binary"
+    printf '%s  %s\n' "$VPS_PARAM_SHA256" "$binary" | sha256sum --check --status
+    if [[ "$was_active" == true ]]; then
+      systemctl restart cloudflared.service
+      verify_running_binary cloudflared.service "$binary" "$VPS_PARAM_SHA256"
+      verify_tunnel_ready
+    else
+      ! systemctl is-active --quiet cloudflared.service
+    fi
+    if [[ "$was_enabled" == false ]]; then ! systemctl is-enabled --quiet cloudflared.service; fi
+    # Unit, token file, credentials, routes and persistent configuration are untouched.
     ;;
   TunnelRotate)
     : "${VPS_PARAM_TUNNEL_TOKEN:?}"
