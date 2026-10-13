@@ -202,7 +202,7 @@ public sealed partial class WorkflowEngine
             if (remotePhase == "None" && c.State.Text("DeploymentTransaction.Status") == "Arming") { c.State.Put("DeploymentTransaction.Status", JsonValue.Create("RolledBack")); c.State["Modules"] = new JsonObject(); c.Save(); return; }
             if (remotePhase is not ("Ready" or "RolledBack")) throw new OperationException("远端部署基线不完整或已变化，请维护者核对，未清除记录。", true);
             if (!await user.ConfirmAsync(new("恢复部署前基线", "恢复本次新机部署前受管文件与 SSH，保留已安装系统包。", "RESTORE-DEPLOYMENT"), c.Cancellation)) throw new OperationCanceledException();
-            if (remotePhase != "RolledBack") await c.Run("deployment-baseline-rollback.sh", new() { ["BASELINE_DIR"] = c.State.Text("DeploymentTransaction.RemoteBaselineDirectory"), ["ADMIN_USER"] = c.Plan.Text("AdminUser") }, true, marker: "DEPLOYMENT_ROLLBACK_OK", bootstrap: bootstrap, port: port);
+            if (remotePhase != "RolledBack") await c.Run("deployment-baseline-rollback.sh", new() { ["BASELINE_DIR"] = c.State.Text("DeploymentTransaction.RemoteBaselineDirectory"), ["ADMIN_USER"] = c.Plan.Text("AdminUser"), ["RESTORE_NETWORK"] = "false" }, true, marker: "DEPLOYMENT_ROLLBACK_OK", bootstrap: bootstrap, port: port);
             await using (var restored = await c.Session(c.Plan.Number("Server.BootstrapSshPort"), bootstrap: true)) { var check = await restored.RunScriptAsync("printf 'VPSDEPLOY_SSH_OK\\n'\n", TimeSpan.FromSeconds(60), false, c.Cancellation); RemoteAssets.RequireMarker(check, "SSH_OK"); }
             c.State["CurrentManagementPort"] = c.Plan.Number("Server.BootstrapSshPort"); c.State.Put("DeploymentTransaction.Status", JsonValue.Create("RolledBack")); c.State["Modules"] = new JsonObject(); c.Save(); return;
         }

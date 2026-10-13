@@ -12,6 +12,8 @@ report_failure() {
 trap 'report_failure "$?"' ERR
 [[ "$VPS_PARAM_TRANSACTION_ID" =~ ^[a-f0-9]{32}$ ]]
 [[ "$VPS_PARAM_ADMIN_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+network_managed="${VPS_PARAM_NETWORK_MANAGED:-true}"
+[[ "$network_managed" == true || "$network_managed" == false ]]
 
 phase='prepare-baseline-directory'
 root='/root/vps-deploy-transaction-baselines'
@@ -34,7 +36,6 @@ paths=(
   etc/ssh/sshd_config
   etc/ssh/sshd_config.d
   etc/nftables.conf
-  etc/sysctl.d/99-mxh-vps-deploy.conf
   usr/local/bin/xray
   usr/local/etc/xray
   usr/local/share/xray
@@ -76,6 +77,7 @@ paths=(
   var/lib/komari-agent
   etc/systemd/system/komari-agent.service
 )
+if [[ "$network_managed" == true ]]; then paths+=(etc/sysctl.d/99-mxh-vps-deploy.conf); fi
 
 phase='capture-admin-account'
 if id "$VPS_PARAM_ADMIN_USER" >/dev/null 2>&1; then
@@ -145,6 +147,7 @@ sysctl_keys=(
 phase='capture-sysctl'
 : > "$baseline/sysctl.tsv"
 for key in "${sysctl_keys[@]}"; do
+  [[ "$network_managed" == true ]] || break
   value="$(sysctl -n "$key" 2>/dev/null || true)"
   [[ -z "$value" ]] || printf '%s\t%s\n' "$key" "$value" >> "$baseline/sysctl.tsv"
 done
@@ -158,6 +161,7 @@ else
 fi
 phase='finalize-baseline'
 printf '%s\n' "$VPS_PARAM_ADMIN_USER" > "$baseline/admin.name"
+printf '%s\n' "$network_managed" > "$baseline/network.managed"
 date -u +%FT%TZ > "$baseline/baseline.complete"
 chmod -R go-rwx "$baseline"
 

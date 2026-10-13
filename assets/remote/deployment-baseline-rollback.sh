@@ -9,6 +9,8 @@ baseline="$(readlink -f "$VPS_PARAM_BASELINE_DIR")"
 [[ "$(basename "$baseline")" =~ ^[a-f0-9]{32}$ ]]
 [[ -f "$baseline/baseline.complete" && -f "$baseline/files.tar.gz" ]]
 [[ "$(cat "$baseline/admin.name")" == "$VPS_PARAM_ADMIN_USER" ]]
+network_managed="${VPS_PARAM_RESTORE_NETWORK:-$(cat "$baseline/network.managed" 2>/dev/null || printf true)}"
+[[ "$network_managed" == true || "$network_managed" == false ]]
 
 # Check ownership before changing SSH, services or files. The initial audit
 # required an empty ruleset; only this deployment's inet/filter may be removed.
@@ -47,18 +49,21 @@ while IFS= read -r path; do
   [[ -n "$path" && "$path" != /* && "$path" != *'..'* ]]
   [[ "$path" != etc/letsencrypt && "$path" != etc/mxh-tls ]] || continue
   [[ "$path" != etc/nftables.conf || "$firewall_owned" == true ]] || continue
+  [[ "$path" != etc/sysctl.d/99-mxh-vps-deploy.conf || "$network_managed" == true ]] || continue
   rm -rf -- "/${path:?}"
 done < "$baseline/paths.list"
 while IFS= read -r path; do
   [[ -n "$path" && "$path" != /* && "$path" != *'..'* ]]
   [[ "$path" != etc/letsencrypt && "$path" != etc/mxh-tls ]] || continue
   [[ "$path" != etc/nftables.conf || "$firewall_owned" == true ]] || continue
+  [[ "$path" != etc/sysctl.d/99-mxh-vps-deploy.conf || "$network_managed" == true ]] || continue
   rm -rf -- "/${path:?}"
 done < "$baseline/absent.list"
 members="$(mktemp)"
 tar -tzpf "$baseline/files.tar.gz" | while IFS= read -r member; do
   case "$member" in
     etc/nftables.conf) [[ "$firewall_owned" == true ]] || continue;;
+    etc/sysctl.d/99-mxh-vps-deploy.conf) [[ "$network_managed" == true ]] || continue;;
     etc/letsencrypt/cloudflare.ini|etc/letsencrypt/cloudflare.ini.mxh-source|etc/letsencrypt/mxh-anytls-cloudflare.ini|etc/letsencrypt/mxh-anytls-cloudflare.ini.mxh-source|etc/letsencrypt/archive/mxh-anytls/*|etc/letsencrypt/live/mxh-anytls/*|etc/letsencrypt/renewal/mxh-anytls.conf|etc/letsencrypt/archive/mxh-reality-target/*|etc/letsencrypt/live/mxh-reality-target/*|etc/letsencrypt/renewal/mxh-reality-target.conf|etc/mxh-tls/anytls/*|etc/mxh-tls/reality-target/*) ;;
     etc/letsencrypt|etc/letsencrypt/*|etc/mxh-tls|etc/mxh-tls/*) continue;;
   esac
@@ -84,6 +89,7 @@ done
 
 systemctl daemon-reload
 while IFS=$'\t' read -r key value; do
+  [[ "$network_managed" == true ]] || break
   [[ -n "$key" ]] || continue
   sysctl -w "$key=$value" >/dev/null 2>&1 || true
 done < "$baseline/sysctl.tsv"

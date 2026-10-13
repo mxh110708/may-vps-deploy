@@ -158,23 +158,28 @@ class ScopedRollbackTests(unittest.TestCase):
         foreign=self.root/'etc/letsencrypt/archive/another-site/fullchain1.pem'
         for file,content in ((owned,'old-owned-cert'),(foreign,'old-foreign-cert')):
             file.parent.mkdir(parents=True,exist_ok=True);file.write_text(content)
-        preamble=PREAMBLE+'''\nid(){ return 1; }\nsysctl(){ return 0; }\ndpkg-query(){ echo package; }\nsshd(){ return 0; }\nnft(){ [[ "$*" != 'list table inet filter' ]]; }\n'''
+        preamble=PREAMBLE+'''\nid(){ return 1; }\nsysctl(){ echo "sysctl $*" >> "$TEST_ROOT/baseline-sysctl-calls"; }\ndpkg-query(){ echo package; }\nsshd(){ return 0; }\nnft(){ [[ "$*" != 'list table inet filter' ]]; }\n'''
         def source(name):
             text=(ROOT/'assets/remote'/name).read_text()
             for prefix in ('/usr/local','/etc','/var/lib','/var/www','/var/log','/run/systemd','/root'):
                 text=text.replace(prefix,shell_path(self.root)+prefix)
             return text.replace('"/$path"','"$TEST_ROOT/$path"').replace('"/${path:?}"','"$TEST_ROOT/${path:?}"')
-        self.env.update(VPS_PARAM_TRANSACTION_ID='a'*32,VPS_PARAM_ADMIN_USER='synthetic-admin')
+        self.env.update(VPS_PARAM_TRANSACTION_ID='a'*32,VPS_PARAM_ADMIN_USER='synthetic-admin',VPS_PARAM_NETWORK_MANAGED='false',VPS_PARAM_RESTORE_NETWORK='false')
         result=subprocess.run([BASH,'--noprofile','--norc','-s'],input=preamble+source('deployment-baseline-arm.sh'),text=True,capture_output=True,timeout=20,env=self.env)
         self.assertEqual(result.returncode,0,result.stderr)
         baseline=self.root/'root/vps-deploy-transaction-baselines'/('a'*32)
         with tarfile.open(baseline/'files.tar.gz') as archive:
             self.assertTrue(all('another-site' not in name for name in archive.getnames()))
         owned.write_text('new-owned-cert');foreign.write_text('new-foreign-cert')
+        network=self.root/'etc/sysctl.d/99-mxh-vps-deploy.conf';network.parent.mkdir(parents=True,exist_ok=True);network.write_text('external current network settings')
+        # The controller also excludes network data in older native baselines.
+        (baseline/'network.managed').unlink();(baseline/'sysctl.tsv').write_text('net.core.rmem_max\t1234\n')
+        with (baseline/'absent.list').open('a') as absent: absent.write('etc/sysctl.d/99-mxh-vps-deploy.conf\n')
         self.env['VPS_PARAM_BASELINE_DIR']=shell_path(baseline)
         result=subprocess.run([BASH,'--noprofile','--norc','-s'],input=preamble+source('deployment-baseline-rollback.sh'),text=True,capture_output=True,timeout=20,env=self.env)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(owned.read_text(),'old-owned-cert');self.assertEqual(foreign.read_text(),'new-foreign-cert')
+        self.assertEqual(network.read_text(),'external current network settings');self.assertFalse((self.root/'baseline-sysctl-calls').exists())
 
     def test_historical_full_protocol_restore_filters_monitor_files(self):
         runner=self.root/'usr/local/libexec/mxh-certbot-dns'

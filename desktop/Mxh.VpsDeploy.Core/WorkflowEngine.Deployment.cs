@@ -99,7 +99,7 @@ public sealed partial class WorkflowEngine
         {
             if (!Regex.IsMatch(c.Plan.Text("DeploymentTransaction.Id"), "^[a-f0-9]{32}$")) throw new OperationException("部署事务身份无效。");
             c.State["DeploymentTransaction"] = new JsonObject { ["Status"] = "Arming", ["RemoteBaselineDirectory"] = "/root/vps-deploy-transaction-baselines/" + c.Plan.Text("DeploymentTransaction.Id") }; c.Save();
-            var r = await c.Run("deployment-baseline-arm.sh", new() { ["TRANSACTION_ID"] = c.Plan.Text("DeploymentTransaction.Id"), ["ADMIN_USER"] = c.Plan.Text("AdminUser") }, true, marker: "DEPLOYMENT_BASELINE_OK", bootstrap: true);
+            var r = await c.Run("deployment-baseline-arm.sh", new() { ["TRANSACTION_ID"] = c.Plan.Text("DeploymentTransaction.Id"), ["ADMIN_USER"] = c.Plan.Text("AdminUser"), ["NETWORK_MANAGED"] = "false" }, true, marker: "DEPLOYMENT_BASELINE_OK", bootstrap: true);
             if (RemoteAssets.Marker(r.Output, "BASELINE_DIR") != c.State.Text("DeploymentTransaction.RemoteBaselineDirectory")) throw new OperationException("部署基线身份不一致。", true);
             c.State.Put("DeploymentTransaction.Status", JsonValue.Create("Armed")); c.Save();
         });

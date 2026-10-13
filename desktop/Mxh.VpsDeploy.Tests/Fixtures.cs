@@ -58,6 +58,8 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
     public const string Backup = "/root/vps-deploy-backups/20000101-000000/protocol-lifecycle";
     public List<string> Commands { get; } = new(); public int Mutations { get; private set; } public string FailAsset { get; set; } = ""; public string StatusTaskId { get; set; } = ""; public string StatusPhase { get; set; } = "None"; public string ArmedComponents { get; private set; } = "";
     public List<SshEndpoint> Endpoints { get; } = new();
+    public string BaselineNetworkCapture { get; private set; } = "";
+    public string BaselineNetworkRestore { get; private set; } = "";
     public string StatusBackup { get; set; } = Backup;
     public bool VerifyUnownedAllowed { get; set; } = true;
     public bool MonitoringPresent { get; set; } = true;
@@ -74,6 +76,8 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
     {
         var asset = payload.Split('\n')[0].Replace("# MXH asset: ", ""); if (!asset.EndsWith(".sh")) return Task.FromResult(new CommandResult(0, "VPSDEPLOY_SSH_OK\n", "")); Commands.Add(asset); if (mutating) Mutations++;
         if (asset == "protocol-migration-arm-rollback.sh") { var match = System.Text.RegularExpressions.Regex.Match(payload, "export VPS_PARAM_COMPONENTS=.+?'([A-Za-z0-9+/=]+)' "); ArmedComponents = Encoding.UTF8.GetString(Convert.FromBase64String(match.Groups[1].Value)); }
+        if (asset == "deployment-baseline-arm.sh") BaselineNetworkCapture = Parameter("NETWORK_MANAGED");
+        if (asset == "deployment-baseline-rollback.sh") BaselineNetworkRestore = Parameter("RESTORE_NETWORK");
         if (asset == FailAsset) throw new IOException("synthetic connection lost");
         ObserveAsset?.Invoke(asset);
         static string Marker(string name, string value) => "VPSDEPLOY_" + name + "_B64=" + Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) + "\n";
