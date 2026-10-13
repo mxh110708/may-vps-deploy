@@ -79,7 +79,7 @@ public sealed partial class MainWindow
         JsonArray nodes = new(); await RunBackground("读取来源配置", async token => nodes = await workbench.ReadSourcesAsync(sources.Text("Clash"), sources.Text("SingBox"), token));
         if (nodes.Count == 0) throw new OperationException("来源中未找到受支持的 Reality、AnyTLS 或 Shadowsocks 节点。");
         foreach (var format in ClientSchemes.Formats(selected)) { if (fingerprints.Text(format) != ClientSchemes.SourceFingerprint(sources.Text(format))) throw new OperationException("读取期间来源发生变化。"); selected[format] = sources.Text(format); }
-        selected["SourceMode"] = "ExistingAuthority"; selected["SourceFingerprints"] = fingerprints;
+        selected["SourceMode"] = "ExistingAuthority"; selected["SourceFingerprints"] = fingerprints; selected["Sources"] = new JsonObject();
         selected["AuthorityNodes"] = new JsonArray(nodes.Select(n => (JsonNode?)JsonValue.Create(n!.Text("name"))).ToArray());
         var names = selected["Nodes"]!.AsArray().Select(n => n!.Text("name")).ToHashSet();
         foreach (var node in nodes)

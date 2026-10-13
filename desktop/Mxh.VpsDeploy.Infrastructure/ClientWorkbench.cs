@@ -127,6 +127,7 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
     private void MigrateManagedSources(JsonObject scheme)
     {
         if (scheme["Sources"] is not JsonObject sources) return;
+        var resolvedFiles = new HashSet<string>(StringComparer.Ordinal);
         foreach (var instance in store.ListInstances())
         {
             var directory = store.Paths.Instance(instance.RelativePath);
@@ -137,16 +138,19 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
             {
                 foreach (var pair in ClientProfiles.Nodes(instance.Plan, secrets))
                 {
-                    var node = scheme["Nodes"]!.AsArray().OfType<JsonObject>().SingleOrDefault(n => n.Text("name") == pair.Name && n["ManagedOrigin"] == null);
-                    if (node == null) continue;
-                    if (node["clash"] is not JsonObject clash || node["sing_box"] is not JsonObject sing || ManagedNodeSources.Fingerprint(pair with { Clash = clash, SingBox = sing }) != ManagedNodeSources.Fingerprint(pair)) throw new OperationException("旧方案的受管节点已变化，请重新选择此节点更新来源。");
-                    node["ManagedOrigin"] = ManagedNodeSources.Origin(instance.RelativePath, pair);
+                    bool SameConnection(JsonObject node) => node["clash"] is JsonObject clash && node["sing_box"] is JsonObject sing && ManagedNodeSources.Fingerprint(pair with { Clash = clash, SingBox = sing }) == ManagedNodeSources.Fingerprint(pair);
+                    foreach (var node in scheme["Nodes"]!.AsArray().OfType<JsonObject>().Where(n => n["ManagedOrigin"] == null && (n.Text("name") == pair.Name || SameConnection(n))).ToArray())
+                    {
+                        if (!SameConnection(node)) throw new OperationException("旧方案的受管节点已变化，请重新选择此节点更新来源。");
+                        node["ManagedOrigin"] = ManagedNodeSources.Origin(instance.RelativePath, pair);
+                    }
                 }
-                // Historical bindings were instance-wide. Removed/manual nodes no
-                // longer depend on them; remaining nodes now have semantic origins.
-                foreach (var file in files) sources.Remove(file);
+                foreach (var file in files.Where(sources.ContainsKey)) resolvedFiles.Add(file);
             }
             finally { secrets.Clear(); }
         }
+        // Decide after visiting every instance. A multi-instance scheme must
+        // migrate in one pass; ambiguous rows retain their old source checks.
+        if (scheme["Nodes"]!.AsArray().OfType<JsonObject>().All(n => n["ManagedOrigin"] != null)) foreach (var file in resolvedFiles) sources.Remove(file);
     }
 }
