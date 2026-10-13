@@ -2,7 +2,7 @@
 # Included in the private remote payload; also copied into the owned rollback snapshot.
 mxh_network() {
   python3 - "$@" <<'PY'
-import base64, json, os, re, stat, subprocess, sys
+import base64, hashlib, json, os, re, stat, subprocess, sys
 from pathlib import Path
 
 action = sys.argv[1]
@@ -20,6 +20,22 @@ def run(args):
 def regular(path):
     if path.is_symlink() or (path.exists() and not path.is_file()):
         raise SystemExit('Network file is not a regular owned file.')
+
+def file_identity(path):
+    regular(path)
+    for parent in path.parents:
+        if parent.is_symlink(): raise SystemExit('Linked persistence directory.')
+    if not path.exists(): return None
+    return {'Sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'Mode': stat.S_IMODE(path.stat().st_mode)}
+
+def original_identity(saved):
+    return None if saved is None else {'Sha256': hashlib.sha256(base64.b64decode(saved['Content'], validate=True)).hexdigest(), 'Mode': saved['Mode']}
+
+def save_state(state):
+    temporary = statefile.with_suffix('.write')
+    regular(temporary)
+    with temporary.open('w') as f: json.dump(state, f, separators=(',', ':'))
+    os.chmod(temporary, 0o600); os.replace(temporary, statefile)
 
 def canonical(queues):
     return [{key: q[key] for key in ('kind', 'handle', 'parent', 'root', 'options') if key in q} for q in queues]
@@ -109,7 +125,7 @@ if action in ('snapshot', 'preflight'):
             if re.fullmatch(r'[a-zA-Z0-9_.:-]{1,15}', name) and name not in devices:
                 devices.append(name)
     if not devices: raise SystemExit('No default interface is available.')
-    state = {'Version': 1, 'Sysctl': {key: run(['sysctl', '-n', key]) for key in keys}, 'Devices': [], 'Files': {}}
+    state = {'Version': 2, 'Sysctl': {key: run(['sysctl', '-n', key]) for key in keys}, 'Devices': [], 'Files': {}, 'ExpectedFiles': {}, 'ExpectedSysctl': {}, 'ExpectedQueues': {}}
     for name in devices:
         current = queues(name); selected = targets(name, current)
         state['Devices'].append({'Name': name, 'Queues': current, 'Targets': selected})
@@ -133,10 +149,25 @@ if action in ('snapshot', 'preflight'):
     with statefile.open('x') as f:
         json.dump(state, f, separators=(',', ':'))
     os.chmod(statefile, 0o600)
-elif action in ('apply', 'restore', 'verify', 'ensure'):
+elif action in ('apply', 'restore', 'verify', 'ensure', 'expect-file', 'expect-sysctl'):
     state = json.loads(statefile.read_text())
-    if state.get('Version') != 1 or set(state['Sysctl']) != set(keys):
+    if state.get('Version') not in (1, 2) or set(state['Sysctl']) != set(keys):
         raise SystemExit('Invalid saved network runtime state.')
+    if action == 'expect-file':
+        name, content, mode = sys.argv[3:]
+        if name not in files or int(mode, 8) not in (0o644, 0o750): raise SystemExit('Invalid persistence intent.')
+        if file_identity(Path(name)) not in (original_identity(state['Files'].get(name)), state.get('ExpectedFiles', {}).get(name)):
+            raise SystemExit('Persistence changed since snapshot.')
+        regular(Path(content))
+        state.setdefault('ExpectedFiles', {})[name] = {'Sha256': hashlib.sha256(Path(content).read_bytes()).hexdigest(), 'Mode': int(mode, 8)}
+        save_state(state); raise SystemExit(0)
+    if action == 'expect-sysctl':
+        key, value = sys.argv[3:]
+        if key not in keys or not re.fullmatch(r'[a-zA-Z0-9_ \t]+', value): raise SystemExit('Invalid sysctl intent.')
+        if run(['sysctl', '-n', key]) not in (state['Sysctl'][key], state.get('ExpectedSysctl', {}).get(key)):
+            raise SystemExit('Runtime setting changed since snapshot.')
+        state.setdefault('ExpectedSysctl', {})[key] = value
+        save_state(state); raise SystemExit(0)
     if action == 'restore':
         # Earlier owned snapshots recorded only the queue files; their sysctl
         # content is restored by the enclosing rollback script.
@@ -146,10 +177,19 @@ elif action in ('apply', 'restore', 'verify', 'ensure'):
             path = Path(name); regular(path)
             for parent in path.parents:
                 if parent.is_symlink(): raise SystemExit('Linked persistence directory.')
-            if path.exists() and b'# Managed by MXH VPS Deploy.' not in path.read_bytes()[:256]:
-                raise SystemExit('Persistence ownership changed.')
+            if name in state['Files'] and file_identity(path) not in (original_identity(state['Files'][name]), state.get('ExpectedFiles', {}).get(name)):
+                raise SystemExit('Persistence changed externally; refusing to overwrite it.')
         for key, value in state['Sysctl'].items():
+            if key not in state.get('ExpectedSysctl', {}): continue
             if not re.fullmatch(r'[a-zA-Z0-9_ \t]+', value): raise SystemExit('Invalid saved sysctl value.')
+            if run(['sysctl', '-n', key]) not in (value, state.get('ExpectedSysctl', {}).get(key)):
+                raise SystemExit('Runtime setting changed externally; refusing to overwrite it.')
+        # Check every device before restoring any one of them.
+        for item in state['Devices']:
+            current = queues(item['Name'])
+            expected = state.get('ExpectedQueues', {}).get(item['Name'], item['Queues'])
+            if current != expected and not (len(current) == len(item['Queues']) and all(same_queue(a, b) for a, b in zip(current, item['Queues']))):
+                raise SystemExit('Queue changed externally; refusing to overwrite it.')
     for item in state['Devices']:
         name = item['Name']
         if not re.fullmatch(r'[a-zA-Z0-9_.:-]{1,15}', name): raise SystemExit('Invalid saved interface.')
@@ -160,6 +200,8 @@ elif action in ('apply', 'restore', 'verify', 'ensure'):
                 if q['kind'] == 'fq': continue
                 args = ['tc', 'qdisc', 'replace', 'dev', name] + (['root'] if q.get('root') else ['parent', q['parent']]) + ['fq']
                 run(args)
+                if action == 'apply':
+                    state.setdefault('ExpectedQueues', {})[name] = queues(name); save_state(state)
         elif action == 'restore':
             # Only our fq replacement (or the unmodified original) can be restored.
             for q in item['Targets']:
@@ -181,6 +223,7 @@ elif action in ('apply', 'restore', 'verify', 'ensure'):
     if action == 'restore':
         for key, value in state['Sysctl'].items():
             if key not in keys or not re.fullmatch(r'[a-zA-Z0-9_ \t]+', value): raise SystemExit('Invalid saved sysctl value.')
+            if state.get('Version') == 2 and key not in state.get('ExpectedSysctl', {}): continue
             run(['sysctl', '-w', key+'='+value])
             if run(['sysctl', '-n', key]).split() != value.split(): raise SystemExit('Runtime restore was not confirmed.')
         subprocess.run(['systemctl', 'disable', '--now', 'mxh-network-queue.service'], capture_output=True, check=False)
@@ -188,8 +231,8 @@ elif action in ('apply', 'restore', 'verify', 'ensure'):
             raise SystemExit('Invalid persistence snapshot.')
         for name, original in state['Files'].items():
             path = Path(name); regular(path)
-            if path.exists() and b'# Managed by MXH VPS Deploy.' not in path.read_bytes()[:256]:
-                raise SystemExit('Persistence ownership changed.')
+            if file_identity(path) not in (original_identity(original), state.get('ExpectedFiles', {}).get(name)):
+                raise SystemExit('Persistence changed during restore.')
             if original is None:
                 path.unlink(missing_ok=True)
             else:

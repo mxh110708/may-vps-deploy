@@ -30,6 +30,18 @@ public sealed partial class MainWindow
         SelectPage("instances"); await Task.Delay(120);
         Require(Find<ComboBox>(shell).Single(b => b.Header as string == "选择实例") is InstanceSelector, "实例选择器未阻止滚轮切换。");
         await Shot("instances-scoped-maintenance");
+        var stateFile = SafePath.Resolve(paths.Instance(instance.RelativePath), "deployment-state.json"); var oldBytes = File.ReadAllBytes(stateFile);
+        try
+        {
+            var diagnostic = state.DeepClone().AsObject(); diagnostic["HealthReport"] = new JsonObject { ["Status"] = "Warnings", ["Checks"] = new JsonArray(new JsonObject { ["Name"] = "SSH 配置", ["Status"] = "Warning", ["Message"] = "示例：SSH 配置检查失败。" }, new JsonObject { ["Name"] = "Reality 入口", ["Status"] = "Passed", ["Message"] = "核对通过" }) };
+            ArchiveStore.WriteJson(stateFile, diagnostic); SelectPage("instances"); await Task.Delay(90);
+            Require(Find<TextBlock>(page).Any(t => t.Text == "最近健康检查 · 有待处理项") && Find<TextBlock>(page).Any(t => t.Text.Contains("SSH 配置检查失败")), "健康诊断结果未显示在实例页。");
+            shell.UpdateLayout();
+            var warning = Find<TextBlock>(page).Single(t => t.Text == "最近健康检查 · 有待处理项");
+            Require(warning.TransformToVisual(shell).TransformPoint(new(0, 0)).Y < shell.ActualHeight - 80, "健康异常在首屏之外。");
+            await Shot("instances-health-warnings");
+        }
+        finally { ArchiveStore.AtomicWrite(stateFile, oldBytes); SelectPage("instances"); }
         var scroll = Find<ScrollViewer>(shell).Where(s => s.ActualHeight > 200 && s.ScrollableHeight > 0).OrderByDescending(s => s.ActualWidth).First();
         scroll.ChangeView(null, 400, null, true); await Shot("instances-monitoring-boundaries");
         var core = CoreUpgradeDialog(plan);

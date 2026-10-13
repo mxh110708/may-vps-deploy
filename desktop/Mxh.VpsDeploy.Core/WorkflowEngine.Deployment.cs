@@ -41,7 +41,7 @@ public sealed partial class WorkflowEngine
         if (privateData["KomariAgent"] != null) { c.Secrets["KomariAgent"] = privateData["KomariAgent"]!.DeepClone(); c.Plan["Komari"]!["Enabled"] = audit.Flag("Komari.Agent.Active"); c.Plan["Komari"]!["Endpoint"] = privateData.Text("KomariAgent.Endpoint"); c.State["KomariInstalled"] = audit.Flag("Komari.Agent.Installed"); }
         if (c.Plan.Text("Server.BootstrapKeyPath") != "") keys.Prepare(c.File("ssh"), c.Plan.Text("Server.BootstrapKeyPath"), c.KeyPassphrase);
         ArchiveStore.WriteJson(c.File("existing-import-audit.json"), audit); c.Save();
-        await ArchiveConfigs(c); validation.Export(c.Plan, c.Secrets, c.File("client-exports"));
+        await ArchiveConfigs(c); ExportProfiles(c);
         c.Plan.Put("Import.Status", JsonValue.Create("Completed")); c.Plan.Put("Import.CompletedAt", JsonValue.Create(DateTimeOffset.UtcNow)); c.Save();
         c.Report("接入完成", "已归档受支持配置，保留现有 SSH、服务和防火墙。");
     }
@@ -151,7 +151,7 @@ public sealed partial class WorkflowEngine
             RecordInstalledProgram(c, "komari_agent", versions);
             c.Secrets["KomariAgent"] = new JsonObject { ["Token"] = token }; c.State["KomariInstalled"] = true;
         });
-        await Step("final-validation", async () => { await RefreshInventory(c); await ServerGate(c); await VerifyManagement(c); await ValidateProtocols(c); });
+        await Step("final-validation", async () => { await RefreshInventory(c); await VerifyManagement(c); await ValidateInitialProtocols(c); });
         await Step("ssh-cutover", async () =>
         {
             if (c.Plan.Number("Server.BootstrapSshPort") != c.Plan.Number("Ports.SshPrimary"))
@@ -161,7 +161,7 @@ public sealed partial class WorkflowEngine
                 await VerifyManagement(c); await c.Run("ssh-cutover-confirm.sh", mutation: true, marker: "CUTOVER_CONFIRMED"); await Firewall(c, true);
             }
         });
-        await Step("private-archive", async () => { validation.Export(c.Plan, c.Secrets, c.File("client-exports")); await ArchiveConfigs(c); });
+        await Step("private-archive", async () => { ExportProfiles(c); await ArchiveConfigs(c); });
         await Step("deployment-commit", async () =>
         {
             c.State.Put("DeploymentTransaction.Status", JsonValue.Create("LocalPrepared")); c.Save();
@@ -180,13 +180,17 @@ public sealed partial class WorkflowEngine
     private async Task Firewall(Context c, bool final)
     {
         if (c.Plan.Text("Firewall.Mode") == "PreserveExisting") return;
-        var tcp = new List<int> { c.Plan.Number("Ports.SshPrimary"), c.Plan.Number("Ports.SshRescue") };
-        if (!final) tcp.Add(c.Plan.Number("Server.BootstrapSshPort"));
-        if (Enabled(c.Plan, "RealityEntry")) { tcp.Add(c.Plan.Number("Ports.XrayPrimary")); if (c.Plan.Number("Ports.XrayBackup") > 0) tcp.Add(c.Plan.Number("Ports.XrayBackup")); }
-        if (Enabled(c.Plan, "AnyTlsEntry")) tcp.Add(c.Plan.Number("Ports.AnyTlsPrimary"));
-        var ss = Enabled(c.Plan, "ShadowsocksLanding");
-        await c.Run("nftables-apply.sh", new() { ["TCP_PORTS"] = string.Join(',', tcp.Distinct()), ["RESTRICTED_PORT"] = ss ? c.Plan.Text("Ports.LandingShadowsocks") : "", ["ALLOWED_IPV4S"] = ss ? string.Join(',', c.Plan.Strings("Shadowsocks.TrustedEntryIPv4s")) : "", ["ALLOWED_IPV6S"] = ss ? string.Join(',', c.Plan.Strings("Shadowsocks.TrustedEntryIPv6s")) : "" }, true);
+        await c.Run("nftables-apply.sh", FirewallParameters(c.Plan, final), true);
         await VerifyManagement(c);
+    }
+    private static Dictionary<string, string> FirewallParameters(JsonObject plan, bool final)
+    {
+        var tcp = new List<int> { plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue") };
+        if (!final) tcp.Add(plan.Number("Server.BootstrapSshPort"));
+        if (Enabled(plan, "RealityEntry")) { tcp.Add(plan.Number("Ports.XrayPrimary")); if (plan.Number("Ports.XrayBackup") > 0) tcp.Add(plan.Number("Ports.XrayBackup")); }
+        if (Enabled(plan, "AnyTlsEntry")) tcp.Add(plan.Number("Ports.AnyTlsPrimary"));
+        var ss = Enabled(plan, "ShadowsocksLanding");
+        return new() { ["TCP_PORTS"] = string.Join(',', tcp.Distinct()), ["RESTRICTED_PORT"] = ss ? plan.Text("Ports.LandingShadowsocks") : "", ["ALLOWED_IPV4S"] = ss ? string.Join(',', plan.Strings("Shadowsocks.TrustedEntryIPv4s")) : "", ["ALLOWED_IPV6S"] = ss ? string.Join(',', plan.Strings("Shadowsocks.TrustedEntryIPv6s")) : "" };
     }
     private static bool Enabled(JsonObject plan, string role) => plan.At("ProtocolInventory." + role) == null ? DeploymentPlans.InitiallyEnabled(plan, role) : plan.Flag("ProtocolInventory." + role + ".Enabled");
     private async Task ArchiveConfigs(Context c)
@@ -195,7 +199,8 @@ public sealed partial class WorkflowEngine
         foreach (var (role, remote, name) in new[] { ("RealityEntry", "/usr/local/etc/xray/config.json", "xray-config.private.json"), ("AnyTlsEntry", "/etc/sing-box-anytls/config.json", "sing-box-anytls-config.private.json"), ("ShadowsocksLanding", "/etc/sing-box/config.json", "sing-box-config.private.json") })
         {
             if (!Enabled(c.Plan, role) && !c.Plan.Flag("ProtocolInventory." + role + ".Installed")) continue;
-            ArchiveStore.AtomicWrite(c.File("server-configs/" + name), await session.ReadFileAsync(remote, c.Cancellation));
+            var bytes = await session.ReadFileAsync(remote, c.Cancellation); var hash = ArchiveStore.Digest(bytes);
+            ExpectArtifact(c, "server-configs/" + name, hash); ArchiveStore.AtomicWrite(c.File("server-configs/" + name), bytes); c.State.Put("ServerConfigHashes." + role, JsonValue.Create(hash));
         }
     }
     private async Task ValidateProtocols(Context c)
@@ -203,6 +208,38 @@ public sealed partial class WorkflowEngine
         var result = await validation.ValidateAsync(c.Plan, c.Secrets, c.File("client-validation"), user, new InlineProgress<string>(m => c.Report("协议验收", m)), c.Cancellation);
         ArchiveStore.WriteJson(c.File("protocol-validation.dotnet.json"), result); c.State["ProtocolValidation"] = result;
         c.Warnings |= result.Text("Status") is not ("Passed" or "NoEnabledProtocols");
+    }
+    private async Task ValidateInitialProtocols(Context c)
+    {
+        var standby = DeploymentPlans.Roles[..2].Where(role => c.Plan.Flag("ProtocolInventory." + role + ".Installed") && !Enabled(c.Plan, role)).ToArray();
+        var enabled = DeploymentPlans.Roles[..3].ToDictionary(role => role, role => Enabled(c.Plan, role));
+        var active = c.Plan.Text("ActiveEntry"); var evidence = new JsonArray();
+        foreach (var role in standby)
+        {
+            try
+            {
+                c.Report("备用入口验收", "临时启用并独立验收 " + ComponentInstallations.Label(role) + "，完成后恢复计划中的入口。");
+                foreach (var entry in DeploymentPlans.Roles[..2]) c.Plan.Put("ProtocolInventory." + entry + ".Enabled", JsonValue.Create(entry == role));
+                c.Plan["ActiveEntry"] = role;
+                await ApplyProtocolState(c); await RefreshInventory(c); await Firewall(c, true); await ServerGate(c); await ValidateProtocols(c);
+                evidence.Add(new JsonObject { ["Role"] = role, ["Validation"] = c.State["ProtocolValidation"]!.DeepClone() });
+            }
+            finally
+            {
+                var token = c.Cancellation; c.Cancellation = CancellationToken.None;
+                try
+                {
+                    foreach (var entry in DeploymentPlans.Roles[..3]) c.Plan.Put("ProtocolInventory." + entry + ".Enabled", JsonValue.Create(enabled[entry]));
+                    c.Plan["ActiveEntry"] = active;
+                    await ApplyProtocolState(c); await RefreshInventory(c); await Firewall(c, true);
+                }
+                finally { c.Cancellation = token; }
+            }
+        }
+        await ServerGate(c); await ValidateProtocols(c);
+        var result = c.State["ProtocolValidation"]!.AsObject(); result["Standby"] = evidence;
+        if (evidence.Any(e => e!.Text("Validation.Status") is not ("Passed" or "NoEnabledProtocols"))) result["Status"] = "Incomplete";
+        ArchiveStore.WriteJson(c.File("protocol-validation.dotnet.json"), result);
     }
     private async Task ServerGate(Context c)
     {

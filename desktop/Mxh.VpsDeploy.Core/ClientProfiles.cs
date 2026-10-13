@@ -52,26 +52,43 @@ public static class ClientProfiles
             }
         }
     }
-    public static JsonObject SingProbe(NodePair node, int port) => new()
+    public static JsonObject SingProbe(NodePair node, int port, NodePair? entry = null)
     {
-        ["log"] = new JsonObject { ["level"] = "warn" }, ["inbounds"] = new JsonArray(new JsonObject { ["type"] = "mixed", ["tag"] = "probe-in", ["listen"] = "127.0.0.1", ["listen_port"] = port }),
-        ["outbounds"] = new JsonArray(node.SingBox.DeepClone()), ["route"] = new JsonObject { ["final"] = node.Name }
-    };
+        var outbound = node.SingBox.DeepClone(); var outbounds = new JsonArray(outbound);
+        if (entry != null) { var transit = entry.SingBox.DeepClone(); transit["tag"] = "mxh-probe-entry"; outbound["detour"] = "mxh-probe-entry"; outbounds.Add(transit); }
+        return new JsonObject { ["log"] = new JsonObject { ["level"] = "warn" }, ["inbounds"] = new JsonArray(new JsonObject { ["type"] = "mixed", ["tag"] = "probe-in", ["listen"] = "127.0.0.1", ["listen_port"] = port }), ["outbounds"] = outbounds, ["route"] = new JsonObject { ["final"] = node.Name } };
+    }
     // JSON is a YAML subset and preserves all string values without manual quoting.
-    public static JsonObject ClashProbe(NodePair node, int port) => new()
+    public static JsonObject ClashProbe(NodePair node, int port, NodePair? entry = null)
     {
-        ["mixed-port"] = port, ["allow-lan"] = false, ["bind-address"] = "127.0.0.1", ["mode"] = "rule", ["log-level"] = "warning", ["ipv6"] = true, ["geodata-mode"] = true, ["geo-auto-update"] = false,
-        ["proxies"] = new JsonArray(node.Clash.DeepClone()), ["proxy-groups"] = new JsonArray(new JsonObject { ["name"] = "Probe", ["type"] = "select", ["proxies"] = new JsonArray(node.Name) }), ["rules"] = new JsonArray("MATCH,Probe")
-    };
+        var proxy = node.Clash.DeepClone(); var proxies = new JsonArray(proxy);
+        if (entry != null) { var transit = entry.Clash.DeepClone(); transit["name"] = "mxh-probe-entry"; proxy["dialer-proxy"] = "mxh-probe-entry"; proxies.Add(transit); }
+        return new JsonObject { ["mixed-port"] = port, ["allow-lan"] = false, ["bind-address"] = "127.0.0.1", ["mode"] = "rule", ["log-level"] = "warning", ["ipv6"] = true, ["geodata-mode"] = true, ["geo-auto-update"] = false, ["proxies"] = proxies, ["proxy-groups"] = new JsonArray(new JsonObject { ["name"] = "Probe", ["type"] = "select", ["proxies"] = new JsonArray(node.Name) }), ["rules"] = new JsonArray("MATCH,Probe") };
+    }
     public static void Export(JsonObject plan, JsonObject secrets, string directory)
     {
         Directory.CreateDirectory(directory);
+        var documents = Documents(plan, secrets).ToArray();
+        foreach (var name in ExportNames.Except(documents.Select(d => d.Name), StringComparer.Ordinal))
+        {
+            var file = SafePath.Resolve(directory, name); if (!File.Exists(file)) continue;
+            // These exact private fragment names are owned by this exporter.
+            // A foreign/non-fragment file in their place needs manual review.
+            var old = ArchiveStore.ReadJson(file);
+            if (old.Count != 1 || old.First().Key is not ("outbounds" or "proxies") || old.First().Value is not JsonArray) throw new OperationException("当前客户端片段已被替换，未删除外部文件。");
+            File.Delete(file);
+        }
+        foreach (var document in documents) ArchiveStore.WriteJson(SafePath.Resolve(directory, document.Name), document.Document);
+    }
+    public static readonly string[] ExportNames = ["sing-box-outbounds.private.json", "mihomo-test-primary.yaml", "sing-box-anytls-outbounds.private.json", "mihomo-anytls-test.yaml", "sing-box-shadowsocks-outbounds.private.json", "mihomo-shadowsocks-test.yaml"];
+    public static IEnumerable<(string Name, JsonObject Document)> Documents(JsonObject plan, JsonObject secrets)
+    {
         foreach (var group in Nodes(plan, secrets).GroupBy(n => n.Role))
         {
             var jsonName = group.Key == "RealityEntry" ? "sing-box-outbounds.private.json" : group.Key == "AnyTlsEntry" ? "sing-box-anytls-outbounds.private.json" : "sing-box-shadowsocks-outbounds.private.json";
             var yamlName = group.Key == "RealityEntry" ? "mihomo-test-primary.yaml" : group.Key == "AnyTlsEntry" ? "mihomo-anytls-test.yaml" : "mihomo-shadowsocks-test.yaml";
-            ArchiveStore.WriteJson(SafePath.Resolve(directory, jsonName), new JsonObject { ["outbounds"] = new JsonArray(group.Select(n => n.SingBox.DeepClone()).ToArray()) });
-            ArchiveStore.WriteJson(SafePath.Resolve(directory, yamlName), new JsonObject { ["proxies"] = new JsonArray(group.Select(n => n.Clash.DeepClone()).ToArray()) });
+            yield return (jsonName, new JsonObject { ["outbounds"] = new JsonArray(group.Select(n => n.SingBox.DeepClone()).ToArray()) });
+            yield return (yamlName, new JsonObject { ["proxies"] = new JsonArray(group.Select(n => n.Clash.DeepClone()).ToArray()) });
         }
     }
 }

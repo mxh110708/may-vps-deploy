@@ -39,7 +39,11 @@ scope_has(){ [[ ",$components," == *",$1,"* ]]; }
 printf '%s\n' "$components" > "$backup_dir/components"
 printf '%s\n' "$backup_dir" > "$owner"
 chmod 0600 "$owner"
-if scope_has Firewall && [[ -f /etc/nftables.conf ]]; then cp -a /etc/nftables.conf "$backup_dir/nftables.conf"; fi
+if scope_has Firewall && [[ -f /etc/nftables.conf ]]; then
+  mxh_firewall snapshot "$backup_dir/firewall-state.json"
+  declare -f mxh_firewall > "$backup_dir/firewall-tools.sh"
+  cp -a /etc/nftables.conf "$backup_dir/nftables.conf"
+fi
 if scope_has Network && [[ -f /etc/sysctl.d/99-mxh-vps-deploy.conf ]]; then
   cp -a /etc/sysctl.d/99-mxh-vps-deploy.conf "$backup_dir/99-mxh-vps-deploy.conf"
 elif scope_has Network; then
@@ -160,6 +164,20 @@ if [[ "${2:-}" == '--transaction' ]]; then
   [[ ! -f "$backup_dir/transaction-committed" ]] || exit 0
   [[ "$(cat /var/lib/mxh-vps-deploy/transaction.owner)" == "$backup_dir" ]]
 fi
+if scope_has Firewall && [[ -f "$backup_dir/nftables.conf" ]]; then
+  [[ -f "$backup_dir/firewall-state.json" ]] || { echo 'Legacy firewall snapshot needs explicit ownership review.' >&2; exit 1; }
+  # shellcheck disable=SC1091
+  source "$backup_dir/firewall-tools.sh"
+  mxh_firewall restore "$backup_dir/firewall-state.json" "$backup_dir/nftables.conf" "$backup_dir/firewall.restore"
+  nft -c -f "$backup_dir/firewall.restore"
+fi
+if scope_has Network && [[ -f "$backup_dir/network-state.json" ]]; then
+  python3 - "$backup_dir/network-state.json" <<'NETWORK_VERSION'
+import json, sys
+if json.load(open(sys.argv[1])).get('Version') != 2:
+    raise SystemExit('Legacy network snapshot needs explicit ownership review.')
+NETWORK_VERSION
+fi
 
 cleanup_role() {
   case "$1" in
@@ -231,22 +249,24 @@ if [[ -f "$backup_dir/protocol-files.tar.gz" ]]; then
   fi
 fi
 if scope_has Firewall && [[ -f "$backup_dir/nftables.conf" ]]; then
-  cp -a "$backup_dir/nftables.conf" /etc/nftables.conf
+  [[ -f "$backup_dir/firewall-state.json" ]] || { echo 'Legacy firewall snapshot needs manual ownership review.' >&2; exit 1; }
+  mxh_firewall restore "$backup_dir/firewall-state.json" "$backup_dir/nftables.conf" "$backup_dir/firewall.restore"
+  install -m 0755 "$backup_dir/firewall.restore" /etc/nftables.conf
   nft -c -f /etc/nftables.conf
   nft -f /etc/nftables.conf
 fi
 if scope_has Network; then
-  if [[ -f "$backup_dir/99-mxh-vps-deploy.conf" ]]; then
-    cp -a "$backup_dir/99-mxh-vps-deploy.conf" /etc/sysctl.d/99-mxh-vps-deploy.conf
-  elif [[ -f "$backup_dir/sysctl-config-was-absent" ]]; then
-    rm -f /etc/sysctl.d/99-mxh-vps-deploy.conf
-  fi
   if [[ -f "$backup_dir/network-state.json" ]]; then
     [[ ! -L "$backup_dir/network-state.json" && -f "$backup_dir/network-tools.sh" && ! -L "$backup_dir/network-tools.sh" ]]
     # shellcheck disable=SC1091
     source "$backup_dir/network-tools.sh"
     mxh_network restore "$backup_dir"
   else
+    if [[ -f "$backup_dir/99-mxh-vps-deploy.conf" ]]; then
+      cp -a "$backup_dir/99-mxh-vps-deploy.conf" /etc/sysctl.d/99-mxh-vps-deploy.conf
+    elif [[ -f "$backup_dir/sysctl-config-was-absent" ]]; then
+      rm -f /etc/sysctl.d/99-mxh-vps-deploy.conf
+    fi
     sysctl --system >/dev/null
   fi
 fi

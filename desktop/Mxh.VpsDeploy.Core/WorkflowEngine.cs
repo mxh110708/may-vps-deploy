@@ -114,6 +114,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         private readonly Dictionary<string, string> passwords = new(StringComparer.Ordinal);
         private string? passphrase;
         public string? KeyPassphrase { get => passphrase; set => passphrase = value; }
+        public JsonObject? RestoreRecord { get; set; }
         private int stage;
         private string? activeStep;
         private int completedSteps;

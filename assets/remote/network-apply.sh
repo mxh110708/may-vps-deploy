@@ -57,9 +57,17 @@ PY
   fi
 } > "$temporary"
 chmod 0644 "$temporary"
+mxh_network expect-file "$snapshot" "$config" "$temporary" 0644
 mv -T "$temporary" "$config"
-# Apply just the owned file; unrelated administrator sysctl files are not reapplied.
-sysctl -p "$config" >/dev/null
+# Apply only this profile's selected keys. Retained historical TFO, MTU and
+# buffer persistence must not be replayed by a basic fq/BBR operation.
+apply_key(){ mxh_network expect-sysctl "$snapshot" "$1" "$2"; sysctl -w "$1=$2" >/dev/null; }
+apply_key net.core.default_qdisc fq
+if [[ "$bbr" == true ]]; then apply_key net.ipv4.tcp_congestion_control bbr; fi
+if [[ "$adjust" == true ]]; then
+  apply_key net.core.rmem_max "$core_r"; apply_key net.core.wmem_max "$core_w"
+  apply_key net.ipv4.tcp_rmem "$r_min $r_default $r_max"; apply_key net.ipv4.tcp_wmem "$w_min $w_default $w_max"
+fi
 mxh_network apply "$snapshot"
 mxh_network verify "$snapshot"
 [[ "$(sysctl -n net.core.default_qdisc)" == fq ]]
@@ -73,9 +81,10 @@ if [[ ! -d /usr/local/libexec ]]; then mkdir -m 0755 /usr/local/libexec; fi
   echo 'set -euo pipefail'
   declare -f mxh_network
   printf 'mxh_network ensure %q\n' "$snapshot"
-} > "$helper"
-chmod 0750 "$helper"
-cat > "$unit" <<EOF
+} > "$temporary"
+mxh_network expect-file "$snapshot" "$helper" "$temporary" 0750
+install -m 0750 "$temporary" "$helper"
+cat > "$temporary" <<EOF
 # Managed by MXH VPS Deploy. Network queue persistence.
 [Unit]
 Description=Apply MXH fq to approved default interfaces
@@ -88,7 +97,8 @@ ExecStart=$helper
 [Install]
 WantedBy=multi-user.target
 EOF
-chmod 0644 "$unit"
+mxh_network expect-file "$snapshot" "$unit" "$temporary" 0644
+install -m 0644 "$temporary" "$unit"
 systemctl daemon-reload
 systemctl enable --now mxh-network-queue.service >/dev/null
 mxh_network verify "$snapshot"

@@ -280,8 +280,7 @@ case "$VPS_PARAM_ACTION" in
     printf 'VPSDEPLOY_KOMARI_BACKUP_B64=%s\n' "$(printf '%s' "$output" | base64 | tr -d '\n')"
     ;;
   ControllerRestore)
-    : "${VPS_PARAM_BACKUP_FILE:?}"; final_active="${VPS_PARAM_FINAL_ACTIVE:-true}"
-    [[ "$final_active" == true || "$final_active" == false ]]
+    : "${VPS_PARAM_BACKUP_FILE:?}"
     file="$(readlink -f "$VPS_PARAM_BACKUP_FILE")"
     [[ "$file" =~ ^/root/komari-controller-[0-9]{8}-[0-9]{6}\.tar\.gz$ ]]
     restore_tunnel="$(validate_controller_archive "$file" scope)"
@@ -297,6 +296,10 @@ case "$VPS_PARAM_ACTION" in
     was_enabled=false; was_active=false; tunnel_was_enabled=false; tunnel_was_active=false
     systemctl is-enabled --quiet komari.service 2>/dev/null && was_enabled=true
     systemctl is-active --quiet komari.service 2>/dev/null && was_active=true
+    final_active="${VPS_PARAM_FINAL_ACTIVE:-$was_active}"
+    final_enabled="${VPS_PARAM_FINAL_ENABLED:-$was_enabled}"
+    [[ "$final_active" == true || "$final_active" == false ]]
+    [[ "$final_enabled" == true || "$final_enabled" == false ]]
     if [[ "$restore_tunnel" == true ]]; then
       systemctl is-enabled --quiet cloudflared.service 2>/dev/null && tunnel_was_enabled=true
       systemctl is-active --quiet cloudflared.service 2>/dev/null && tunnel_was_active=true
@@ -335,7 +338,7 @@ case "$VPS_PARAM_ACTION" in
     previous_data="$(mktemp -d "$safety/previous-data-XXXXXXXX")"; quarantine_controller_data "$previous_data"
     for p in "${managed_files[@]}"; do rm -f "/$p"; done
     tar --numeric-owner -xzpf "$file" -C /; systemctl daemon-reload
-    systemctl enable --now komari.service >/dev/null
+    systemctl start komari.service
     for _ in {1..30}; do grep -Fq "127.0.0.1:${controller_port}" <<< "$(ss -H -lnt "sport = :${controller_port}" 2>/dev/null)" && break; sleep 1; done
     grep -Fq "127.0.0.1:${controller_port}" <<< "$(ss -H -lntp "sport = :${controller_port}")"
     code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "http://127.0.0.1:${controller_port}/")"
@@ -343,7 +346,7 @@ case "$VPS_PARAM_ACTION" in
     binary="$(find_controller_binary)"; pid="$(systemctl show --property=MainPID --value komari.service)"
     [[ "$pid" =~ ^[1-9][0-9]*$ && "/proc/${pid}/exe" -ef "$binary" ]]
     restored_version="$("$binary" --help 2>&1)"
-    restored_version="$(sed -nE 's/.*Komari Monitor v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' <<<"$restored_version" | head -n 1)"
+    restored_version="$(sed -nE 's/.*Komari Monitor v?([0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?).*/\1/p' <<<"$restored_version" | head -n 1)"
     [[ -n "$restored_version" ]]
     if [[ "$restore_tunnel" == true ]]; then
       systemctl cat cloudflared.service >/dev/null
@@ -354,10 +357,14 @@ case "$VPS_PARAM_ACTION" in
         systemctl is-active --quiet cloudflared.service
       fi
     fi
-    if [[ "$final_active" == false ]]; then systemctl disable --now komari.service >/dev/null 2>&1 || true; fi
+    if [[ "$final_enabled" == true ]]; then systemctl enable komari.service >/dev/null; else systemctl disable komari.service >/dev/null; fi
+    if [[ "$final_active" == false ]]; then systemctl stop komari.service; fi
+    if [[ "$final_enabled" == true ]]; then systemctl is-enabled --quiet komari.service; else ! systemctl is-enabled --quiet komari.service; fi
+    if [[ "$final_active" == true ]]; then systemctl is-active --quiet komari.service; else ! systemctl is-active --quiet komari.service; fi
     trap - EXIT
     printf 'VPSDEPLOY_BACKUP_DIR_B64=%s\n' "$(printf '%s' "$safety" | base64 | tr -d '\n')"
     printf 'VPSDEPLOY_KOMARI_RESTORED_VERSION_B64=%s\n' "$(printf '%s' "$restored_version" | base64 | tr -d '\n')"
+    printf 'VPSDEPLOY_KOMARI_RESTORED_SHA256_B64=%s\n' "$(sha256sum "$binary" | cut -d' ' -f1 | tr -d '\n' | base64 | tr -d '\n')"
     ;;
   ControllerUpgrade)
     assert_controller_storage

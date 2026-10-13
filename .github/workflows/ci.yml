@@ -54,6 +54,7 @@ jobs:
           python3 tests/test_initial_release_pin.py
           python3 tests/test_tunnel_public_access.py
           python3 tests/test_certbot_source.py
+          python3 tests/test_review_repairs.py --bash /bin/bash
           python3 tests/test_scoped_rollback.py --bash /bin/bash
           python3 tests/test_component_installation.py --bash /bin/bash
           python3 tests/test_import_contracts.py --bash /bin/bash

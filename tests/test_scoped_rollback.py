@@ -38,6 +38,12 @@ systemctl(){
 }
 sysctl(){ echo "sysctl $*" >> "$TEST_ROOT/calls"; }
 nft(){ echo "nft $*" >> "$TEST_ROOT/calls"; }
+mxh_firewall(){
+  # This suite isolates archive component selection. Firewall ownership and
+  # scoped batches are exercised by test_review_repairs.py with the real helper.
+  [[ "$1" == snapshot ]] || return 1
+  printf '{"Version":1}\n' > "$2"
+}
 nginx(){ return 0; }
 tar(){
   local args=()

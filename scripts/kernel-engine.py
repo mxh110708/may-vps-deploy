@@ -369,10 +369,21 @@ def install_worker(s):
         stage = 'DependencyPlan'
         preview = run(['apt-get', '-s', '--no-remove', 'install', str(package)], 90)
         changes = [line for line in preview.splitlines() if line.startswith(('Inst ', 'Remv '))]
-        if len(changes) != 1 or not changes[0].startswith('Inst '+cat['Package']+' '):
+        retained = None
+        if not changes and run(['dpkg-query', '-W', '-f=${db:Status-Status} ${Version}', cat['Package']], allow=True) == 'installed '+cat['PackageVersion']:
+            identity = s.get('PreviousTransaction', ''); visited = set()
+            while identity and identity not in visited and len(visited) < 16:
+                visited.add(identity); previous = load(identity)
+                if previous['Phase'] in TERMINAL and all(previous['Catalog'].get(k) == cat[k] for k in ('Kernel', 'Package', 'PackageVersion', 'Sha256')) and previous.get('NewImageSha256') and previous.get('NewInitrdSha256'):
+                    retained = previous; break
+                identity = previous.get('PreviousTransaction', '')
+            if not retained or digest(Path('/boot/vmlinuz-'+cat['Kernel'])) != retained['NewImageSha256'] or digest(Path('/boot/initrd.img-'+cat['Kernel'])) != retained['NewInitrdSha256']:
+                raise RuntimeError('Installed target has no matching managed artifact history')
+            s['ReusedRetainedPackage'] = True; save(s)
+        elif len(changes) != 1 or not changes[0].startswith('Inst '+cat['Package']+' '):
             raise RuntimeError('Unexpected package dependency mutation refused')
         stage = 'PackageInstall'
-        run(['apt-get', '-y', '--no-remove', '-o', 'DPkg::Lock::Timeout=30', 'install', str(package)], None)
+        if not retained: run(['apt-get', '-y', '--no-remove', '-o', 'DPkg::Lock::Timeout=30', 'install', str(package)], None)
         stage = 'InstalledArtifacts'
         if run(['dpkg-query', '-W', '-f=${db:Status-Status} ${Version}', cat['Package']]) != 'installed '+cat['PackageVersion']:
             raise RuntimeError('Kernel installation unconfirmed')

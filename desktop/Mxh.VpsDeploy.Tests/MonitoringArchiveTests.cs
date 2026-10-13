@@ -16,7 +16,7 @@ internal sealed partial class BoundaryTests
         Check(targets.All(t => !t.Installed && t.RequiresVerification), "offline monitoring silently promoted or inaccessible");
         var request = new OperationRequest(OperationKind.Komari, relative, new() { ["Scope"] = "KomariAgent", ["Action"] = "Upgrade", ["TargetVersion"] = f.Versions.Text("komari_agent.version") });
         Refuses(() => MaintenanceTargets.Validate(request, plan, state, f.Versions), "historical evidence permits a mutation");
-        var remote = new FakeRemote(); remote.HealthAudit.Put("Services.KomariAgent", FakeRemote.HealthService(true, true, true)); remote.HealthAudit.Put("Services.KomariController", FakeRemote.HealthService(true, false, false));
+        var remote = new FakeRemote(); remote.SeedProtocols(plan); remote.HealthAudit.Put("Services.KomariAgent", FakeRemote.HealthService(true, true, true)); remote.HealthAudit.Put("Services.KomariController", FakeRemote.HealthService(true, false, false));
         remote.HealthAudit["Versions"] = new JsonObject { ["KomariAgent"] = "1.5.11", ["KomariController"] = "Komari Monitor 1.5.0-fix1" };
         var untouched = plan.DeepClone().AsObject(); var oldState = state.DeepClone().AsObject(); var invalid = remote.HealthAudit.DeepClone().AsObject();
         invalid["ChecksIncomplete"] = new JsonArray("systemctl");

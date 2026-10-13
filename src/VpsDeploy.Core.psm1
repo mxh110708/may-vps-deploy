@@ -2472,6 +2472,7 @@ function New-VpsRemoteScriptPayload {
         [void]$preamble.Append($exportLine + "`n")
     }
     $guard=if($Parameters.Contains('EXPECTED_TRANSACTION')){(Get-VpsRemoteAsset -Context $Context -Name 'maintenance-mutation-guard.sh')+"`nvps_begin_mutation || exit 1`n"}else{''}
+    if ($Asset -in @('nftables-apply.sh','component-firewall-add.sh','firewall-preflight.sh','protocol-migration-arm-rollback.sh')) { [void]$preamble.Append((Get-VpsRemoteAsset -Context $Context -Name 'firewall-tools.sh') + "`n") }
     return "(`nset -euo pipefail`n" + $preamble.ToString() + $guard + (Get-VpsRemoteAsset -Context $Context -Name $Asset) + "`n)`n"
 }
 

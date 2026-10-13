@@ -32,7 +32,8 @@ public sealed partial class MainWindow
         if (kind == OperationKind.Restore)
         {
             var directory = SafePath.Resolve(paths.Instance(selectedInstance!), "maintenance-backups");
-            var backups = Directory.Exists(directory) ? Directory.EnumerateFiles(directory, "restore-metadata.json", SearchOption.AllDirectories).Select(ArchiveStore.ReadJson).ToArray() : [];
+            var backups = Directory.Exists(directory) ? Directory.EnumerateFiles(directory, "restore-metadata.json", SearchOption.AllDirectories).Select(ArchiveStore.ReadJson).Where(b => ProtocolRestores.Compatible(b, plan)).ToArray() : [];
+            if (backups.Length == 0) throw new OperationException("没有兼容当前管理入口的协议专用恢复点。网络、主控和追加安装备份请从各自的恢复入口处理。");
             panel.Children.Add(Choice("恢复点", options, "Backup", backups.Select(b => (b.Text("RemoteBackup"), b.Text("CreatedAt")))));
             panel.Children.Add(Choice("恢复范围", options, "RestoreMode", [("ConfigOnly", "仅恢复协议配置"), ("Full", "恢复协议程序、文件与服务")])); panel.Children.Add(Text("仅限协议范围；SSH、网络、防火墙和监控保持当前配置。", 13, true));
         }
@@ -50,18 +51,20 @@ public sealed partial class MainWindow
             var secretFile = SafePath.Resolve(paths.Instance(instance.RelativePath), "secrets.dotnet.private.json"); if (!File.Exists(secretFile)) continue;
             var secrets = store.ReadSecret(secretFile); all.AddRange(ClientProfiles.Nodes(instance.Plan, secrets).Select(n => (n, instance.Plan, instance.RelativePath))); secrets.Clear();
         }
-        var existingNames = scheme!["Nodes"]!.AsArray().Select(n => n!.Text("name")).ToHashSet(StringComparer.Ordinal);
-        var candidates = all.DistinctBy(i => i.Node.Name).Where(i => !existingNames.Contains(i.Node.Name)).ToArray();
-        var picker = new ManagedNodePicker(candidates.Select(i => i.Node));
-        var dialog = OperationDialog("选择节点", picker.Content, "添加");
+        var candidates = all.DistinctBy(i => i.Node.Name).ToArray();
+        var picker = new ManagedNodePicker(candidates.Select(i => i.Node), scheme!["Nodes"]!.AsArray().Select(n => n!.Text("name")).ToHashSet(StringComparer.Ordinal));
+        var dialog = OperationDialog("选择节点", picker.Content, "添加 / 更新");
         dialog.IsPrimaryButtonEnabled = picker.Selected.Count != 0;
         picker.SelectionChanged += () => dialog.IsPrimaryButtonEnabled = picker.Selected.Count != 0;
         if (await ShowDialog(dialog) != ContentDialogResult.Primary) return;
-        scheme!["Sources"] ??= new JsonObject();
         foreach (var item in candidates.Where(s => picker.Selected.Contains(s.Node.Name)))
         {
-            var node = new JsonObject { ["name"] = item.Node.Name, ["kind"] = item.Node.Role == "ShadowsocksLanding" ? "landing" : "entry", ["region_group"] = "US-West Entry", ["transit_group"] = item.Plan.Text("Shadowsocks.ClientTransitTag", "US-West Entry"), ["clash"] = item.Node.Clash.DeepClone(), ["sing_box"] = item.Node.SingBox.DeepClone() }; scheme["Nodes"]!.AsArray().Add(node);
-            foreach (var name in new[] { "deployment-plan.json", "secrets.dotnet.private.json" }) { var file = SafePath.Resolve(paths.Instance(item.Relative), name); scheme["Sources"]![file] = ClientSchemes.SourceFingerprint(file); }
+            var nodes = scheme!["Nodes"]!.AsArray();
+            var index = nodes.ToList().FindIndex(n => n != null && (n.Text("name") == item.Node.Name || n["ManagedOrigin"] is JsonObject origin && origin.Text("Instance") == item.Relative && origin.Text("Role") == item.Node.Role && origin.Text("Family") == item.Node.Family && origin.Text("EgressFamily") == item.Node.EgressFamily && origin.Flag("Backup") == item.Node.IsBackup));
+            var previous = index < 0 ? null : nodes[index];
+            var node = new JsonObject { ["name"] = item.Node.Name, ["kind"] = item.Node.Role == "ShadowsocksLanding" ? "landing" : "entry", ["region_group"] = previous?.Text("region_group", "US-West Entry") ?? "US-West Entry", ["transit_group"] = previous?.Text("transit_group", item.Plan.Text("Shadowsocks.ClientTransitTag", "US-West Entry")) ?? item.Plan.Text("Shadowsocks.ClientTransitTag", "US-West Entry"), ["clash"] = item.Node.Clash.DeepClone(), ["sing_box"] = item.Node.SingBox.DeepClone(), ["ManagedOrigin"] = ManagedNodeSources.Origin(item.Relative, item.Node) };
+            if (previous?["AuthorityName"] != null) node["AuthorityName"] = previous["AuthorityName"]!.DeepClone();
+            if (index < 0) nodes.Add(node); else nodes[index] = node;
         }
         DirtyScheme();
     }
@@ -77,11 +80,15 @@ public sealed partial class MainWindow
         if (nodes.Count == 0) throw new OperationException("来源中未找到受支持的 Reality、AnyTLS 或 Shadowsocks 节点。");
         foreach (var format in ClientSchemes.Formats(selected)) { if (fingerprints.Text(format) != ClientSchemes.SourceFingerprint(sources.Text(format))) throw new OperationException("读取期间来源发生变化。"); selected[format] = sources.Text(format); }
         selected["SourceMode"] = "ExistingAuthority"; selected["SourceFingerprints"] = fingerprints;
+        selected["AuthorityNodes"] = new JsonArray(nodes.Select(n => (JsonNode?)JsonValue.Create(n!.Text("name"))).ToArray());
         var names = selected["Nodes"]!.AsArray().Select(n => n!.Text("name")).ToHashSet();
         foreach (var node in nodes)
         {
-            if (!names.Add(node!.Text("name"))) continue;
-            var copy = node!.DeepClone(); copy["region_group"] = "US-West Entry";
+            if (!names.Add(node!.Text("name")))
+            {
+                var retained = selected["Nodes"]!.AsArray().Single(n => n!.Text("name") == node.Text("name"))!; retained["AuthorityName"] = node.Text("name"); continue;
+            }
+            var copy = node!.DeepClone(); copy["region_group"] = "US-West Entry"; copy["AuthorityName"] = copy.Text("name");
             if (!selected["Layout"]!.Strings("region_groups").Contains(copy.Text("transit_group"))) copy["transit_group"] = "US-West Entry";
             selected["Nodes"]!.AsArray().Add(copy);
         }
@@ -123,6 +130,7 @@ public sealed partial class MainWindow
             foreach (var field in new[] { "tag", "server", "server_port", "uuid", "password", "method", "tls.server_name", "tls.reality.public_key", "tls.reality.short_id", "tls.ech.config" }) if (pair.SingBox.At(field) is JsonNode value) sing.Put(field, value.DeepClone());
         }
         var node = new JsonObject { ["name"] = model.Text("Name"), ["kind"] = model.Text("Role") == "ShadowsocksLanding" ? "landing" : "entry", ["region_group"] = model.Text("Region"), ["transit_group"] = model.Text("Transit"), ["clash"] = clash, ["sing_box"] = sing };
+        if (existing?["AuthorityName"] != null) node["AuthorityName"] = existing["AuthorityName"]!.DeepClone();
         if (index.HasValue) activeScheme["Nodes"]!.AsArray()[index.Value] = node; else activeScheme["Nodes"]!.AsArray().Add(node); password.Password = ""; fakeSecrets.Clear(); DirtyScheme();
     }
     private async Task EditBusinessGroups()

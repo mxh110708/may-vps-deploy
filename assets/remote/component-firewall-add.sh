@@ -37,6 +37,7 @@ PY
 nft -c -f "$temporary"
 if declare -F vps_transaction_check >/dev/null; then vps_transaction_check; fi
 [[ "$(sha256sum /etc/nftables.conf | cut -d' ' -f1)" == "$VPS_PARAM_EXPECTED_SHA256" ]]
+mxh_firewall intent "$VPS_PARAM_EXPECTED_TRANSACTION/firewall-state.json" "$temporary"
 install -o root -g root -m 0755 "$temporary" /etc/nftables.conf
 nft -f /etc/nftables.conf
 systemctl is-active --quiet nftables.service

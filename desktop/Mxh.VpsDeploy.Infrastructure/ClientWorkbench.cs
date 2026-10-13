@@ -44,9 +44,18 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
     }
     public async Task<JsonObject> BuildAsync(JsonObject scheme, CancellationToken cancellationToken)
     {
+        MigrateManagedSources(scheme);
+        if (scheme.Text("SourceMode") == "ExistingAuthority" && scheme["AuthorityNodes"] == null)
+        {
+            var original = await ReadSourcesAsync(ClientSchemes.Formats(scheme).Contains("Clash") ? scheme.Text("Clash") : "", ClientSchemes.Formats(scheme).Contains("SingBox") ? scheme.Text("SingBox") : "", cancellationToken);
+            scheme["AuthorityNodes"] = new JsonArray(original.Select(n => (JsonNode?)JsonValue.Create(n!.Text("name"))).ToArray());
+            foreach (var node in scheme["Nodes"]!.AsArray().OfType<JsonObject>()) if (scheme.Strings("AuthorityNodes").Contains(node.Text("name")) && node["AuthorityName"] == null) node["AuthorityName"] = node.Text("name");
+        }
         var formats = ClientSchemes.Formats(scheme); var specification = ClientSchemes.Specification(scheme); var sources = new JsonObject();
         foreach (var format in formats) { var source = scheme.Text(format); if (source == "") throw new OperationException("所选客户端缺少来源文件。"); var fingerprint = ClientSchemes.SourceFingerprint(source); if (scheme["SourceFingerprints"] is JsonObject recorded && recorded.Text(format) != "" && recorded.Text(format) != fingerprint) throw new OperationException("来源在读取后发生变化，请重新读取。"); sources[source] = fingerprint; }
         if (scheme["Sources"] is JsonObject originalSources) foreach (var item in originalSources) { if (ClientSchemes.SourceFingerprint(item.Key) != item.Value!.ToString()) throw new OperationException("节点来源发生变化，请重新读取。"); sources[item.Key] = item.Value.DeepClone(); }
+        var origins = new JsonArray(scheme["Nodes"]!.AsArray().Where(n => n!["ManagedOrigin"] != null).Select(n => n!["ManagedOrigin"]!.DeepClone()).ToArray());
+        ManagedNodeSources.Verify(store, origins);
         var directory = store.Paths.Resolve("private/client-candidates/" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
         ArchiveStore.WriteJson(SafePath.Resolve(directory, "candidate-owner.json"), new JsonObject { ["SchemeId"] = scheme.Text("Id") });
         var specFile = SafePath.Resolve(directory, "layout.private.json"); ArchiveStore.WriteJson(specFile, specification);
@@ -55,14 +64,16 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
         var result = await tools.RunAsync(python, args, null, TimeSpan.FromSeconds(60), cancellationToken);
         result.RequireSuccess("候选生成失败，请检查节点、连接关系与分组。");
         var candidate = new JsonObject { ["SchemeId"] = scheme.Text("Id"), ["OutputClients"] = scheme.Text("OutputClients", "Both"), ["Sources"] = sources, ["SpecFingerprint"] = ArchiveStore.Fingerprint(specification), ["ValidationStatus"] = "Pending", ["Targets"] = new JsonObject() };
+        candidate["ManagedSources"] = origins;
         foreach (var format in formats) { candidate[format] = SafePath.Resolve(directory, format == "Clash" ? "Clash_General.candidate.yaml" : "sing-box-general.candidate.json"); candidate[format + "Hash"] = ClientSchemes.SourceFingerprint(candidate.Text(format)); }
         VerifySources(candidate); scheme["Candidate"] = candidate; Save(scheme); return candidate;
     }
-    private static void VerifySources(JsonObject candidate)
+    private void VerifySources(JsonObject candidate)
     {
         foreach (var source in candidate["Sources"]!.AsObject()) if (ClientSchemes.SourceFingerprint(source.Key) != source.Value!.ToString()) throw new OperationException("来源已变化，请重新生成候选。");
+        if (candidate["ManagedSources"] is JsonArray origins) ManagedNodeSources.Verify(store, origins);
     }
-    private static void VerifyCandidate(JsonObject scheme, JsonObject candidate)
+    private void VerifyCandidate(JsonObject scheme, JsonObject candidate)
     {
         if (candidate.Text("OutputClients", "Both") != scheme.Text("OutputClients", "Both") || candidate.Text("SpecFingerprint") != ArchiveStore.Fingerprint(ClientSchemes.Specification(scheme))) throw new OperationException("方案已变化，请重新生成候选。");
         foreach (var format in ClientSchemes.Formats(scheme)) if (ClientSchemes.SourceFingerprint(candidate.Text(format)) != candidate.Text(format + "Hash")) throw new OperationException("候选已被外部修改。");
@@ -111,6 +122,31 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
     public void Publish(JsonObject scheme, string clash, string sing)
     {
         var candidate = scheme["Candidate"]?.AsObject() ?? throw new OperationException("请先生成候选。"); VerifyCandidate(scheme, candidate);
-        new CandidatePublisher(store.Paths).Publish(candidate, clash, sing);
+        new CandidatePublisher(store.Paths, verifyManagedSources: VerifySources).Publish(candidate, clash, sing);
+    }
+    private void MigrateManagedSources(JsonObject scheme)
+    {
+        if (scheme["Sources"] is not JsonObject sources) return;
+        foreach (var instance in store.ListInstances())
+        {
+            var directory = store.Paths.Instance(instance.RelativePath);
+            var files = new[] { "deployment-plan.json", "secrets.dotnet.private.json" }.Select(n => SafePath.Resolve(directory, n)).ToArray();
+            if (!files.Any(sources.ContainsKey)) continue;
+            var secrets = store.ReadSecret(files[1]);
+            try
+            {
+                foreach (var pair in ClientProfiles.Nodes(instance.Plan, secrets))
+                {
+                    var node = scheme["Nodes"]!.AsArray().OfType<JsonObject>().SingleOrDefault(n => n.Text("name") == pair.Name && n["ManagedOrigin"] == null);
+                    if (node == null) continue;
+                    if (node["clash"] is not JsonObject clash || node["sing_box"] is not JsonObject sing || ManagedNodeSources.Fingerprint(pair with { Clash = clash, SingBox = sing }) != ManagedNodeSources.Fingerprint(pair)) throw new OperationException("旧方案的受管节点已变化，请重新选择此节点更新来源。");
+                    node["ManagedOrigin"] = ManagedNodeSources.Origin(instance.RelativePath, pair);
+                }
+                // Historical bindings were instance-wide. Removed/manual nodes no
+                // longer depend on them; remaining nodes now have semantic origins.
+                foreach (var file in files) sources.Remove(file);
+            }
+            finally { secrets.Clear(); }
+        }
     }
 }

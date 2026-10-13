@@ -158,20 +158,58 @@ install -o root -g root -m 0600 "$credentials_tmp" "$credentials_path"
 if declare -F vps_transaction_check >/dev/null; then vps_transaction_check; fi
 install -d -o root -g root -m 0755 /usr/local/libexec
 [[ ! -L /usr/local/libexec/mxh-certbot-dns ]]
-api_source_json="$(python3 - "$zone_local_ip" <<'PY'
-import ipaddress, json, sys
-print(json.dumps(str(ipaddress.ip_address(sys.argv[1]))))
+# Migrate the historical global source to the original credential file before
+# replacing the runner. Each credential keeps its own transport thereafter.
+python3 - "$runner_path" "$credentials_path" "$zone_local_ip" <<'PY'
+import ipaddress, os, pathlib, re, sys
+runner, credentials, source = map(str, sys.argv[1:])
+old = pathlib.Path('/etc/letsencrypt/cloudflare.ini.mxh-source')
+if pathlib.Path(runner).exists() and not old.exists():
+    match = re.search(r'^DNS_API_SOURCE = "([^"\n]+)"$', pathlib.Path(runner).read_text(), re.M)
+    if match:
+        old.write_text(str(ipaddress.ip_address(match[1])) + '\n'); os.chmod(old, 0o600)
+path = pathlib.Path(credentials + '.mxh-source')
+if path.is_symlink() or any(p.is_symlink() for p in path.parents): raise SystemExit('Linked DNS source metadata.')
+path.write_text(str(ipaddress.ip_address(source)) + '\n'); os.chmod(path, 0o600)
 PY
-)"
 certbot_runner="$work/mxh-certbot-dns"
-printf '#!/usr/bin/python3\n# MXH managed Cloudflare DNS API transport\nDNS_API_SOURCE = %s\n' "$api_source_json" > "$certbot_runner"
+printf '#!/usr/bin/python3\n# MXH managed Cloudflare DNS API transport\n' > "$certbot_runner"
 cat >> "$certbot_runner" <<'RUNNER'
+import configparser
 import ipaddress
+import os
+from pathlib import Path
 import socket
+import subprocess
 import sys
 from urllib3.util import connection
 
-source = ipaddress.ip_address(DNS_API_SOURCE)
+def option(name):
+    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else None
+
+if len(sys.argv) > 1 and sys.argv[1] == 'renew' and '--cert-name' not in sys.argv:
+    # One process per lineage lets different DNS tokens bind different sources.
+    outcomes = [subprocess.run([sys.executable, sys.argv[0], *sys.argv[1:], '--cert-name', path.stem]).returncode for path in sorted(Path('/etc/letsencrypt/renewal').glob('*.conf'))]
+    sys.exit(1 if any(outcomes) else 0)
+
+credentials = option('--dns-cloudflare-credentials')
+if credentials is None and option('--cert-name'):
+    name = option('--cert-name')
+    if Path(name).name != name: raise SystemExit('Invalid certificate lineage.')
+    settings = configparser.ConfigParser(interpolation=None)
+    settings.read_string('[lineage]\n' + Path('/etc/letsencrypt/renewal/' + name + '.conf').read_text())
+    credentials = settings.get('renewalparams', 'dns_cloudflare_credentials', fallback=None)
+source_text = globals().get('DNS_API_SOURCE')  # compatibility with older saved runners
+if credentials:
+    metadata = Path(credentials + '.mxh-source')
+    if metadata.is_symlink() or any(p.is_symlink() for p in metadata.parents): raise SystemExit('Linked DNS source metadata.')
+    if metadata.exists():
+        if metadata.stat().st_uid != 0 or metadata.stat().st_mode & 0o077: raise SystemExit('Unowned DNS source metadata.')
+        source_text = metadata.read_text().strip()
+if source_text is None:
+    from certbot.main import main
+    sys.exit(main())
+source = ipaddress.ip_address(source_text)
 source_family = socket.AF_INET6 if source.version == 6 else socket.AF_INET
 getaddrinfo = socket.getaddrinfo
 create_connection = connection.create_connection
@@ -292,6 +330,27 @@ issue_certificate() {
     --key-type ecdsa --elliptic-curve secp256r1 \
     --cert-name "$cert_name" --keep-until-expiring \
     "${domain_args[@]}" >/dev/null
+  # certonly can keep a still-valid certificate and its old renewal parameters.
+  # Bind only this managed lineage to its selected credential file; otherwise a
+  # reinstallation would dry-run/renew with the previous token's transport.
+  python3 - "$cert_name" "$credentials_path" <<'RENEWAL'
+import configparser, os, pathlib, re, sys
+name, credentials = sys.argv[1:]
+if pathlib.Path(name).name != name: raise SystemExit('Invalid managed lineage.')
+path = pathlib.Path('/etc/letsencrypt/renewal') / (name + '.conf')
+if path.is_symlink() or any(p.is_symlink() for p in path.parents) or path.stat().st_uid != 0: raise SystemExit('Unowned renewal configuration.')
+text = path.read_text(); parser = configparser.ConfigParser(interpolation=None); parser.read_string('[lineage]\n'+text)
+section = parser['renewalparams']
+allowed = ('/etc/letsencrypt/cloudflare.ini', '/etc/letsencrypt/mxh-anytls-cloudflare.ini')
+if section.get('authenticator') != 'dns-cloudflare' or section.get('dns_cloudflare_credentials') not in allowed or credentials not in allowed: raise SystemExit('Unmanaged DNS renewal configuration.')
+head, body = text.split('[renewalparams]', 1)
+updated, count = re.subn(r'(?m)^dns_cloudflare_credentials\s*=.*$', 'dns_cloudflare_credentials = '+credentials, body)
+if count != 1: raise SystemExit('Ambiguous renewal credentials.')
+temporary = path.with_suffix('.mxh-write')
+if temporary.exists() or temporary.is_symlink(): raise SystemExit('Renewal update path occupied.')
+with temporary.open('x') as file: file.write(head+'[renewalparams]'+updated)
+os.chmod(temporary, path.stat().st_mode & 0o777); os.replace(temporary, path)
+RENEWAL
   phase='certificate-deploy-hook'
   if declare -F vps_transaction_check >/dev/null; then vps_transaction_check; fi
   RENEWED_LINEAGE="/etc/letsencrypt/live/$cert_name" \

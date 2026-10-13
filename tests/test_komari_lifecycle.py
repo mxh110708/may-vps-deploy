@@ -34,15 +34,16 @@ python3(){
 }
 systemctl(){
   echo "$*" >> "$CALLS"
-  local service="${@: -1}" state_file="$TEST_ROOT/active" binary="$SERVICE_BINARY" pid=123
+  local service="${@: -1}" state_file="$TEST_ROOT/active" enabled_file="$TEST_ROOT/enabled" binary="$SERVICE_BINARY" pid=123
   if [[ "$service" == cloudflared.service ]]; then
-    state_file="$TEST_ROOT/tunnel-active"; binary="$TEST_ROOT/usr/local/bin/cloudflared"; pid=234
+    state_file="$TEST_ROOT/tunnel-active"; enabled_file="$TEST_ROOT/tunnel-enabled"; binary="$TEST_ROOT/usr/local/bin/cloudflared"; pid=234
   fi
   case "$1" in
     cat) [[ "$service" != cloudflared.service || -f "$TEST_ROOT/etc/systemd/system/cloudflared.service" ]] ;;
     is-active) [[ "$(cat "$state_file")" == true ]] ;;
-    is-enabled) if [[ "$service" == cloudflared.service ]]; then [[ "$TUNNEL_ENABLED" == true ]]; else [[ "$WAS_ENABLED" == true ]]; fi ;;
+    is-enabled) [[ "$(cat "$enabled_file")" == true ]] ;;
     stop|disable)
+      [[ "$1" != disable ]] || echo false > "$enabled_file"
       if [[ "$1" == stop || "$*" == *--now* ]] && [[ "$SERVICE_STOP_STILL_ACTIVE" != true ]]; then echo false > "$state_file"; fi
       return 0 ;;
     start|restart)
@@ -61,6 +62,7 @@ systemctl(){
         echo new-metrics > "$TEST_ROOT/opt/komari/data/metrics.db"
       fi ;;
     enable)
+      echo true > "$enabled_file"
       if [[ "$*" == *--now* ]]; then
         echo true > "$state_file"
         [[ "$STALE_PID" == true ]] || ln -f "$binary" "$TEST_ROOT/proc/$pid/exe"
@@ -112,7 +114,7 @@ class KomariLifecycleTests(unittest.TestCase):
                  extra_db_arguments='', version_code='200', version_body=None, binary_location='opt/komari/komari', stale_pid=False,
                  bad_checksum=False, corrupt_install=False, service_start_fails=False, unsafe_archive=False, service_stop_still_active=False,
                  tunnel=False, include_tunnel=False, incomplete_tunnel=False, tunnel_active=True, tunnel_enabled=True,
-                 tunnel_start_fails=False, project_backup=False, final_active=True, token_file=False, download_url=None, controller_port='25774'):
+                 tunnel_start_fails=False, project_backup=False, final_active=None, token_file=False, download_url=None, controller_port='25774'):
         with tempfile.TemporaryDirectory(prefix='komari-lifecycle-', dir=ROOT / '.tmp') as folder:
             root = Path(folder)
             script = (ROOT / 'assets/remote/maintenance-komari.sh').read_text(encoding='utf-8')
@@ -124,6 +126,7 @@ class KomariLifecycleTests(unittest.TestCase):
             for relative in ('opt/komari/data/plugin', 'opt/komari/data/plguin-data', 'opt/komari/data/theme', 'root/vps-deploy-backups', 'etc/komari-agent', 'etc/systemd/system', 'usr/local/bin', 'proc/123', 'proc/234', 'tmp'):
                 (root / relative).mkdir(parents=True, exist_ok=True)
             (root / 'active').write_text(str(active).lower())
+            (root / 'enabled').write_text(str(enabled).lower()); (root / 'tunnel-enabled').write_text(str(tunnel_enabled).lower())
             (root / 'tunnel-active').write_text(str(tunnel_active and (tunnel or action in ('TunnelRotate','TunnelUpgrade'))).lower())
             (root / 'opt/komari/data/komari.db').write_text('old-db')
             (root / 'opt/komari/data/plugin/fixture').write_text('old-plugin')
@@ -183,7 +186,7 @@ class KomariLifecycleTests(unittest.TestCase):
                 SERVICE_STOP_STILL_ACTIVE=str(service_stop_still_active).lower(),
                 TUNNEL_ENABLED=str(tunnel_enabled).lower(), TUNNEL_START_FAILS=str(tunnel_start_fails).lower(),
                 TOKEN_FILE_LAYOUT=str(token_file).lower(),VPS_PARAM_CONTROLLER_PORT=controller_port,
-                VPS_PARAM_FINAL_ACTIVE=str(final_active).lower(), VPS_PARAM_INCLUDE_TUNNEL='false',
+                VPS_PARAM_INCLUDE_TUNNEL='false',
                 VPS_PARAM_TUNNEL_TOKEN='fixture-rotated-token',PATH=shell_path(root/'usr/local/bin')+os.pathsep+os.environ['PATH'],
                 VPS_PARAM_ASSET_NAME='komari-agent-linux-amd64' if action == 'AgentUpgrade' else 'cloudflared-linux-amd64' if action=='TunnelUpgrade' else 'komari-linux-amd64',
                 VPS_PARAM_SHA256='0' * 64 if bad_checksum else hashlib.sha256(new_binary.read_bytes()).hexdigest(), VPS_PARAM_BACKUP_FILE=shell_path(backup))
@@ -191,6 +194,7 @@ class KomariLifecycleTests(unittest.TestCase):
                 with old_binary.open('w', encoding='utf-8', newline='\n') as output:
                     output.write(new_text)
                 old_binary.chmod(0o755)
+            if final_active is not None: environment['VPS_PARAM_FINAL_ACTIVE'] = str(final_active).lower()
             if download_url is not None:environment['VPS_PARAM_DOWNLOAD_URL']=download_url
             if action in ('AgentUpgrade','ControllerUpgrade','TunnelUpgrade'):shutil.copyfile(old_binary,root/'proc/123/exe')
             else:os.link(old_binary, root / 'proc/123/exe')
@@ -214,6 +218,7 @@ class KomariLifecycleTests(unittest.TestCase):
             current = (root / 'opt/komari/data/komari.db').read_text()
             result.binary_contents = old_binary.read_text()
             result.service_active = (root / ('tunnel-active' if action in ('TunnelRotate','TunnelUpgrade') else 'active')).read_text().strip() == 'true'
+            result.service_enabled = (root/'enabled').read_text().strip() == 'true'
             result.tunnel_active = (root / 'tunnel-active').read_text().strip() == 'true'
             result.tunnel_binary = tunnel_binary.read_text() if tunnel_binary.exists() else None
             result.tunnel_unit = tunnel_unit.read_text() if tunnel_unit.exists() else None
@@ -270,6 +275,14 @@ class KomariLifecycleTests(unittest.TestCase):
         result,_,database,metrics,_=self.run_case('ControllerRestore',home_code='500')
         self.assertNotEqual(result.returncode,0)
         self.assertEqual(database,'new-db');self.assertTrue(metrics)
+
+    def test_restore_preserves_enabled_and_active_independently(self):
+        for active in (False, True):
+            for enabled in (False, True):
+                with self.subTest(active=active, enabled=enabled):
+                    result,_,_,_,_=self.run_case('ControllerRestore', active=active, enabled=enabled)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.service_active, active); self.assertEqual(result.service_enabled, enabled)
 
     def test_project_controller_only_backup_restore_leaves_current_tunnel_untouched(self):
         result,calls,database,_,_=self.run_case('ControllerRestore',tunnel=True,project_backup=True)

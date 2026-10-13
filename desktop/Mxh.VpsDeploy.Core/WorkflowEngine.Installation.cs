@@ -15,7 +15,7 @@ public sealed partial class WorkflowEngine
         Dictionary<string, string> PreflightParameters(bool verify) => new()
         {
             ["COMPONENTS"] = string.Join(',', selected), ["PORTS"] = string.Join(',', selected.SelectMany(component => ComponentInstallations.ListeningPorts(prepared, component))),
-            ["VERIFY_ONLY"] = Bool(verify), ["BEFORE_JSON"] = verify ? before.ToJsonString() : "{}"
+            ["VERIFY_ONLY"] = Bool(verify), ["BEFORE_JSON"] = verify ? before.ToJsonString() : "{}", ["ANYTLS_DOMAINS"] = prepared.Text("AnyTls.ServerName") + "," + prepared.Text("AnyTls.EchPublicName")
         };
         await c.TrackStep("installation-preflight", async () =>
         {
@@ -30,6 +30,7 @@ public sealed partial class WorkflowEngine
             var check = await c.Run("component-install-preflight.sh", PreflightParameters(false));
             before = JsonNode.Parse(RemoteAssets.Marker(check.Output, "INSTALLATION_CHECK"))!.AsObject();
             RequireInstallationCheck(before);
+            if (protocols.Length > 0 && prepared.Text("Firewall.Mode") != "PreserveExisting") await c.Run("firewall-preflight.sh", FirewallParameters(c.Plan, true), marker: "FIREWALL_SCOPE_OK");
             if (protocols.Length > 0 && prepared.Text("Firewall.Mode") == "PreserveExisting")
                 if (!await user.ConfirmAsync(new("既有防火墙放行", "此实例保留既有防火墙。请先放行：" + string.Join("；", protocols.Select(component => ComponentInstallations.Label(component) + " " + string.Join("、", ComponentInstallations.ListeningPorts(prepared, component)) + (component == "ShadowsocksLanding" ? " TCP / UDP，仅允许所填可信入口" : " TCP"))) + "。应用不会接管既有防火墙。"), c.Cancellation)) throw new OperationCanceledException();
         });
@@ -104,7 +105,7 @@ public sealed partial class WorkflowEngine
         });
         await c.TrackStep("installation-archive", async () =>
         {
-            if (protocols.Length > 0) { await ArchiveConfigs(c); validation.Export(c.Plan, c.Secrets, c.File("client-exports")); }
+            if (protocols.Length > 0) { await ArchiveConfigs(c); ExportProfiles(c); }
             c.State["LastComponentInstallation"] = new JsonObject { ["Components"] = new JsonArray(selected.Select(component => (JsonNode?)JsonValue.Create(component)).ToArray()), ["TaskId"] = c.Id, ["At"] = DateTimeOffset.UtcNow }; c.Save();
         });
         await c.TrackStep("installation-commit", () => Commit(c));

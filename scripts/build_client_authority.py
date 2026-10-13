@@ -106,10 +106,57 @@ def collect_nodes(spec: dict[str, Any], clash: dict[str, Any], sing: dict[str, A
     return nodes
 
 
-def replace_named(items: list[dict[str, Any]], key: str, replacements: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    names = {str(item[key]) for item in replacements}
+def replace_named(items: list[dict[str, Any]], key: str, replacements: list[dict[str, Any]], removed: set[str] | None = None) -> list[dict[str, Any]]:
+    names = {str(item[key]) for item in replacements} | (removed or set())
     existing = [item for item in items if str(item.get(key, "")) not in names]
     return existing + copy.deepcopy(replacements)
+
+
+def update_node_references(document: dict[str, Any], removed: set[str], renamed: dict[str, str], client: str) -> None:
+    # Preserve custom groups, while removing/renaming their references to nodes
+    # explicitly owned by this editor. Unrelated nodes and settings stay intact.
+    groups = document.get("proxy-groups" if client == "clash" else "outbounds") or []
+    for group in groups:
+        if client != "clash" and group.get("type") not in {"selector", "urltest"}:
+            continue
+        key = "proxies" if client == "clash" else "outbounds"
+        if key not in group:
+            continue
+        group[key] = [renamed.get(str(name), str(name)) for name in group[key] if str(name) not in removed or str(name) in renamed]
+        if not group[key]:
+            fail("removing nodes would empty an existing group; edit its members first")
+        if "default" in group:
+            value = str(group["default"])
+            group["default"] = renamed.get(value, value) if value not in removed or value in renamed else group[key][0]
+    def rename(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, item in list(value.items()):
+                if key in {"outbound", "final", "detour", "dialer-proxy"} and isinstance(item, str):
+                    value[key] = renamed.get(item, item)
+                elif key == "download_detour" and isinstance(item, str):
+                    value[key] = renamed.get(item, item)
+                else:
+                    rename(item)
+        elif isinstance(value, list):
+            for item in value:
+                rename(item)
+    rename(document)
+    if client == "clash":
+        rule_lists = [document.get("rules") or [], *(document.get("sub-rules") or {}).values()]
+        for rules in rule_lists:
+            for index, rule in enumerate(rules):
+                if not isinstance(rule, str):
+                    continue
+                parts = rule.rsplit(",", 2)
+                target = -2 if parts[-1].strip() == "no-resolve" else -1
+                if len(parts) < 2:
+                    continue
+                name = parts[target].strip()
+                if name in renamed:
+                    parts[target] = renamed[name]
+                    rules[index] = ",".join(parts)
+                elif name in removed:
+                    fail("a retained Clash rule uses a removed node; update its target first")
 
 
 def normalize_members(members: list[Any], client: str) -> list[str]:
@@ -294,17 +341,23 @@ def main() -> None:
     groups = copy.deepcopy(spec.get("groups") or [])
     order = [str(value) for value in spec.get("group_order") or []]
     remove_groups = {str(value) for value in spec.get("remove_groups") or []}
+    remove_nodes = {str(value) for value in spec.get("remove_nodes") or []}
+    rename_nodes = {str(key): str(value) for key, value in (spec.get("rename_nodes") or {}).items()}
+    if remove_nodes & {str(node["name"]) for node in nodes} or set(rename_nodes) - remove_nodes:
+        fail("invalid removed or renamed node ownership")
     if remove_groups & {str(group["name"]) for group in groups}:
         fail("a selector cannot be both generated and removed")
     validate_group_graph(groups, {str(node["name"]) for node in nodes})
     if "Clash" in formats:
         clash_nodes = [copy.deepcopy(node["clash"]) for node in nodes]
-        clash["proxies"] = replace_named(list(clash.get("proxies") or []), "name", clash_nodes)
+        clash["proxies"] = replace_named(list(clash.get("proxies") or []), "name", clash_nodes, remove_nodes)
         apply_clash_groups(clash, groups, order, remove_groups)
+        update_node_references(clash, remove_nodes, rename_nodes, "clash")
     if "SingBox" in formats:
         sing_nodes = [copy.deepcopy(node["sing_box"]) for node in nodes]
-        sing["outbounds"] = replace_named(list(sing.get("outbounds") or []), "tag", sing_nodes)
+        sing["outbounds"] = replace_named(list(sing.get("outbounds") or []), "tag", sing_nodes, remove_nodes)
         apply_sing_groups(sing, groups, order, remove_groups)
+        update_node_references(sing, remove_nodes, rename_nodes, "sing_box")
     validate_rendered_references(clash, sing)
 
     args.output.mkdir(parents=True, exist_ok=True)

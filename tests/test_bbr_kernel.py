@@ -2,6 +2,8 @@
 import base64
 import copy
 import json
+import hashlib
+import io
 import pathlib
 import tempfile
 import sys
@@ -184,6 +186,30 @@ class KernelContract(unittest.TestCase):
         for phase, count in [('Installing', 1), ('Prepared', 0), ('Committed', 1)]:
             with mock.patch.dict(NS, {'run': mock.Mock(side_effect=AssertionError('mutation'))}):
                 with self.assertRaises(RuntimeError): NS['install_worker']({'Phase': phase, 'InstallInvocations': count})
+
+    def test_previously_owned_installed_target_is_reused_without_package_mutation(self):
+        for owned in (True, False):
+            with self.subTest(owned=owned), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory); identity = 'a'*32; (root/identity).mkdir()
+                package_bytes = b'synthetic-checked-package'; cat = json.loads((ROOT/'config/kernel-catalog.json').read_text())
+                cat['Bytes'] = len(package_bytes); cat['Sha256'] = hashlib.sha256(package_bytes).hexdigest()
+                state = {'Id': identity, 'Phase': 'Installing', 'InstallInvocations': 0, 'Catalog': cat, 'PreviousTransaction': 'b'*32, 'OldKernel': 'stock', 'OldImageSha256': 'image'}
+                prior = {'Id': 'b'*32, 'Phase': 'RolledBack', 'Catalog': cat, 'NewImageSha256': 'image', 'NewInitrdSha256': 'initrd'} if owned else {'Id': 'b'*32, 'Phase': 'Aborted', 'Catalog': {'Kernel': 'foreign'}}
+                calls = []
+                def run(args, *unused, **kwargs):
+                    calls.append(args)
+                    if args[0] == 'dpkg-deb': return 'Package: '+cat['Package']+'\nVersion: '+cat['PackageVersion']+'\nArchitecture: amd64'
+                    if args[0] == 'apt-get': return '0 upgraded, 0 newly installed, 0 to remove'
+                    if args[0] == 'dpkg-query': return 'installed '+cat['PackageVersion']
+                    raise AssertionError(args)
+                response = io.BytesIO(package_bytes); response.geturl = lambda: cat['Repository']+cat['Filename']
+                with mock.patch.dict(NS, {'BASE': root, 'owned_boot': lambda _: None, 'sources_verify': lambda _: None, 'save': lambda _: None, 'run': run, 'load': lambda _: prior, 'digest': lambda p: 'initrd' if 'initrd' in str(p) else 'image', 'entry': lambda _: 'retained-entry'}), mock.patch.object(NS['urllib'].request, 'urlopen', return_value=response):
+                    if owned:
+                        NS['install_worker'](state); self.assertEqual(state['Phase'], 'Prepared'); self.assertTrue(state['ReusedRetainedPackage'])
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'managed artifact history'): NS['install_worker'](state)
+                        self.assertEqual(state['Phase'], 'InstallFailed')
+                self.assertFalse(any(args[:2] == ['apt-get', '-y'] for args in calls))
 
     def test_commit_requires_real_v3_and_old_services(self):
         for phase, version, healthy in [('Prepared', 'v3', True), ('Booted', 'VersionUnverified', True), ('Booted', 'v3', False)]:

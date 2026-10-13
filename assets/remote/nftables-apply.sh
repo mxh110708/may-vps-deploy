@@ -55,7 +55,9 @@ trap 'rm -f "$temporary"' EXIT
 cat > "$temporary" <<EOF
 #!/usr/sbin/nft -f
 
-flush ruleset
+# Managed by MXH VPS Deploy.
+table inet filter {}
+flush table inet filter
 
 table inet filter {
   chain input {
@@ -91,6 +93,9 @@ if [[ "$check_only" == 'true' ]]; then
 fi
 
 config='/etc/nftables.conf'
+if [[ -n "${VPS_PARAM_EXPECTED_TRANSACTION:-}" ]]; then
+  mxh_firewall intent "$VPS_PARAM_EXPECTED_TRANSACTION/firewall-state.json" "$temporary"
+fi
 stamp="$(date -u +%Y%m%d-%H%M%S)"
 backup_dir="/root/vps-deploy-backups/${stamp}/nftables"
 install -d -m 0700 "$backup_dir"
@@ -98,7 +103,8 @@ if [[ -f "$config" ]]; then cp -a "$config" "$backup_dir/nftables.conf"; fi
 install -o root -g root -m 0755 "$temporary" "$config"
 nft -f "$config"
 systemctl enable nftables.service
-systemctl restart nftables.service
+# Debian's ExecStop flushes every table. Do not restart during maintenance.
+if ! systemctl is-active --quiet nftables.service; then systemctl start nftables.service; fi
 systemctl is-active --quiet nftables.service
 active_ruleset="$(nft list ruleset)"
 tcp_rules="$(grep -E 'tcp dport' <<<"$active_ruleset" || true)"

@@ -63,7 +63,9 @@ public static class ClientSchemes
         }
         foreach (var definition in layout["guard_groups"]!.AsArray()) Group(definition!.Text("name"), definition.Strings("members"));
         return new JsonObject { ["schema_version"] = 1, ["source_mode"] = scheme.Text("SourceMode"), ["output_mode"] = "CandidateOnly", ["client_formats"] = new JsonArray(formats.Select(f => (JsonNode?)JsonValue.Create(f)).ToArray()), ["manual_nodes"] = nodes.DeepClone(), ["fragment_sources"] = new JsonArray(), ["existing_node_refs"] = new JsonArray(), ["groups"] = groups,
-            ["group_order"] = new JsonArray(groups.Select(g => (JsonNode?)JsonValue.Create(g!.Text("name"))).ToArray()), ["remove_groups"] = new JsonArray(layout.Strings("region_groups").Where(r => !regions.Contains(r)).Select(r => (JsonNode?)JsonValue.Create(r)).ToArray()) };
+            ["group_order"] = new JsonArray(groups.Select(g => (JsonNode?)JsonValue.Create(g!.Text("name"))).ToArray()), ["remove_groups"] = new JsonArray(layout.Strings("region_groups").Where(r => !regions.Contains(r)).Select(r => (JsonNode?)JsonValue.Create(r)).ToArray()),
+            ["remove_nodes"] = new JsonArray(scheme.Strings("AuthorityNodes").Except(nodes.Select(n => n!.Text("name")), StringComparer.Ordinal).Select(n => (JsonNode?)JsonValue.Create(n)).ToArray()),
+            ["rename_nodes"] = new JsonObject(nodes.Where(n => n!.Text("AuthorityName") != "" && n.Text("AuthorityName") != n.Text("name")).Select(n => new KeyValuePair<string, JsonNode?>(n!.Text("AuthorityName"), JsonValue.Create(n.Text("name"))))) };
     }
     public static string SourceFingerprint(string path) { SafePath.CheckLinks(path); return File.Exists(path) ? ArchiveStore.Digest(File.ReadAllBytes(path)) : "missing"; }
     public static void ValidateAuthorityPath(string path)
@@ -75,7 +77,7 @@ public static class ClientSchemes
     }
 }
 
-public sealed class CandidatePublisher(AppPaths paths, Action<string, byte[]>? writer = null)
+public sealed class CandidatePublisher(AppPaths paths, Action<string, byte[]>? writer = null, Action<JsonObject>? verifyManagedSources = null)
 {
     private readonly Action<string, byte[]> write = writer ?? ArchiveStore.AtomicWrite;
     public void Publish(JsonObject candidate, string clashTarget, string singTarget)
@@ -105,7 +107,12 @@ public sealed class CandidatePublisher(AppPaths paths, Action<string, byte[]>? w
                 if (File.Exists(targets[i])) { originals[i] = File.ReadAllBytes(targets[i]); ArchiveStore.AtomicWrite(SafePath.Resolve(transaction, i + ".backup"), originals[i]!); }
             }
             journal["Phase"] = "Prepared"; ArchiveStore.WriteJson(journalPath, journal);
-            for (var i = 0; i < targets.Length; i++) { write(targets[i], bytes[i]); journal["Applied"] = i + 1; ArchiveStore.WriteJson(journalPath, journal); }
+            for (var i = 0; i < targets.Length; i++)
+            {
+                verifyManagedSources?.Invoke(candidate);
+                if (ClientSchemes.SourceFingerprint(targets[i]) != Expected(targets[i])) throw new OperationException("目标在发布期间发生变化，已停止写入。");
+                write(targets[i], bytes[i]); journal["Applied"] = i + 1; ArchiveStore.WriteJson(journalPath, journal);
+            }
             journal["Phase"] = "Committed"; ArchiveStore.WriteJson(journalPath, journal);
         }
         catch

@@ -16,6 +16,8 @@ public sealed partial class WorkflowEngine
         var r = await c.Run("maintenance-health-audit.sh", new() { ["AGENT_RELEASES_JSON"] = releases.ToJsonString() }, timeout: 300);
         var audit = JsonNode.Parse(RemoteAssets.Marker(r.Output, "HEALTH_AUDIT"))!.AsObject();
         ArchiveStore.WriteJson(c.File("health-audits/" + c.Id + ".json"), audit);
+        c.State["HealthReport"] = HealthReports.Build(c.Plan, c.State, audit);
+        c.Warnings |= c.State.Text("HealthReport.Status") != "Passed";
         // Copies prevent an incomplete audit or unreadable config from partially promoting an archive.
         var plan = c.Plan.DeepClone().AsObject(); var state = c.State.DeepClone().AsObject();
         MonitoringArchives.ApplyHealth(plan, state, audit);
@@ -38,6 +40,8 @@ public sealed partial class WorkflowEngine
         }
         c.Plan["Komari"] = plan["Komari"]!.DeepClone();
         foreach (var field in new[] { "MonitoringInventory", "KomariInstalled", "KomariController", "Cloudflared" }) c.State[field] = state[field]!.DeepClone();
+        foreach (var field in new[] { "KomariController", "Cloudflared" }) if (plan[field] != null) c.Plan[field] = plan[field]!.DeepClone();
+        foreach (var field in new[] { "ComponentUpgrades", "InstalledProgramVersions" }) { if (state[field] != null) c.State[field] = state[field]!.DeepClone(); else c.State.Remove(field); }
         c.State["LastHealthAudit"] = new JsonObject { ["At"] = DateTimeOffset.UtcNow, ["File"] = "health-audits/" + c.Id + ".json" };
         c.Save(); c.Report("健康审计完成", "远端证据及监控组件状态已归档；任务完成表示读取完成，不代表全部检查健康。");
     }
@@ -45,9 +49,12 @@ public sealed partial class WorkflowEngine
     {
         var backup = c.File("maintenance-backups/" + c.Id); System.IO.Directory.CreateDirectory(backup);
         c.Pending = new JsonObject { ["TaskId"] = c.Id, ["Kind"] = c.Request.Kind.ToString(), ["Phase"] = "Arming", ["Components"] = new JsonArray(components.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray()), ["LocalBackup"] = "maintenance-backups/" + c.Id, ["OldPlan"] = c.Plan.DeepClone(), ["OldState"] = c.State.DeepClone() };
+        SnapshotCurrentArtifacts(c, backup, components);
         store.WriteSecret(SafePath.Resolve(backup, "secrets.dotnet.private.json"), c.Secrets); c.Save();
         var role = DeploymentPlans.Roles.Contains(c.Plan.Text("Role")) ? c.Plan.Text("Role") : "MonitorOnly";
-        var result = await c.Run("protocol-migration-arm-rollback.sh", new() { ["SOURCE_ROLE"] = role, ["TARGET_ROLE"] = role, ["TIMEOUT_MINUTES"] = c.Request.Kind == OperationKind.InstallComponent ? "60" : "20", ["QUIESCE_KOMARI_CONTROLLER"] = Bool(components.Contains("KomariController")), ["COMPONENTS"] = string.Join(',', components), ["CONTROL_TASK_ID"] = c.Id, ["NETWORK_SNAPSHOT"] = Bool(c.Request.Kind == OperationKind.TuneNetwork) }, true, 600);
+        var parameters = new Dictionary<string, string> { ["SOURCE_ROLE"] = role, ["TARGET_ROLE"] = role, ["TIMEOUT_MINUTES"] = c.Request.Kind == OperationKind.InstallComponent ? "60" : "20", ["QUIESCE_KOMARI_CONTROLLER"] = Bool(components.Contains("KomariController")), ["COMPONENTS"] = string.Join(',', components), ["CONTROL_TASK_ID"] = c.Id, ["NETWORK_SNAPSHOT"] = Bool(c.Request.Kind == OperationKind.TuneNetwork) };
+        if (components.Contains("Firewall")) foreach (var field in FirewallParameters(c.Plan, true)) parameters[field.Key] = field.Value;
+        var result = await c.Run("protocol-migration-arm-rollback.sh", parameters, true, 600);
         c.Pending["RemoteBackup"] = RemoteAssets.Marker(result.Output, "BACKUP_DIR"); c.Pending["Phase"] = "Armed"; c.Save();
         if (!Regex.IsMatch(c.Pending.Text("RemoteBackup"), @"^/root/vps-deploy-backups/[0-9]{8}-[0-9]{6}/protocol-lifecycle$")) throw new OperationException("远端恢复目录异常。", true);
         await using var session = await c.Session();
@@ -92,6 +99,7 @@ public sealed partial class WorkflowEngine
                 c.Pending["Phase"] = "Committed"; c.Save(); return;
             }
             if (phase == "Preparing") throw new OperationException("远端快照尚未完成，请保留记录核对，未擅自清除锁。", true);
+            await VerifyRollbackOwnership(c, remote);
             await c.Run("protocol-migration-trigger-rollback.sh", new() { ["EXPECTED_BACKUP"] = remote, ["SOURCE_ROLE"] = c.Pending.Text("OldPlan.Role", "MonitorOnly") }, true, 300, "MIGRATION_ROLLBACK_OK");
             ApplyLocalRollback(c);
             await c.VerifySsh(c.Port, "root");
@@ -105,6 +113,17 @@ public sealed partial class WorkflowEngine
         var oldSecrets = store.ReadSecret(c.File(c.Pending.Text("LocalBackup") + "/secrets.dotnet.private.json"));
         var components = c.Pending.Strings("Components");
         RestoreComponentState(c, oldPlan, oldState, oldSecrets, components); oldSecrets.Clear();
+        RestoreCurrentArtifacts(c);
+    }
+    private async Task VerifyRollbackOwnership(Context c, string remote)
+    {
+        await using var session = await c.Session();
+        foreach (var component in c.Pending!.Strings("Components").Where(scope => scope is "Network" or "Firewall"))
+        {
+            var file = component == "Network" ? "network-state.json" : "firewall-state.json";
+            var state = JsonNode.Parse(await session.ReadFileAsync(remote + "/" + file, c.Cancellation))!.AsObject();
+            if (state.Number("Version") != (component == "Network" ? 2 : 1)) throw new OperationException("旧恢复点缺少本轮写入身份，保留归档，请维护者核对后恢复。", true, "LegacyRollbackOwnership");
+        }
     }
     private void RestoreComponentState(Context c, JsonObject oldPlan, JsonObject oldState, JsonObject oldSecrets, string[] components)
     {
@@ -112,6 +131,11 @@ public sealed partial class WorkflowEngine
         foreach (var scope in new[] { "RealityEntry", "AnyTlsEntry", "ShadowsocksLanding", "KomariAgent", "KomariController", "Tunnel" })
         {
             if (!(components.Contains(scope) || scope == "Tunnel" && components.Contains("Cloudflared") || DeploymentPlans.Roles[..3].Contains(scope) && components.Contains("Protocols"))) continue;
+            if (DeploymentPlans.Roles[..3].Contains(scope))
+            {
+                c.State["ServerConfigHashes"] ??= new JsonObject();
+                if (oldState.At("ServerConfigHashes." + scope) != null) c.State["ServerConfigHashes"]![scope] = oldState.At("ServerConfigHashes." + scope)!.DeepClone(); else c.State["ServerConfigHashes"]!.AsObject().Remove(scope);
+            }
             if (c.State["ComponentUpgrades"] is JsonObject upgrades)
             {
                 if (oldState["ComponentUpgrades"] is JsonObject oldUpgrades && oldUpgrades.ContainsKey(scope)) upgrades[scope] = oldUpgrades[scope]?.DeepClone();
@@ -130,7 +154,7 @@ public sealed partial class WorkflowEngine
             foreach (var key in new[] { "Xray", "AnyTls", "Shadowsocks" }) Restore(c.Secrets, oldSecrets, key);
             foreach (var key in new[] { "ProtocolInventory", "ProtocolValidation", "XrayVersion", "SingBoxVersion", "AnyTls" }) Restore(c.State, oldState, key);
             foreach (var key in new[] { "XrayPrimary", "XrayBackup", "AnyTlsPrimary", "LandingShadowsocks" }) c.Plan.Put("Ports." + key, oldPlan.At("Ports." + key)?.DeepClone());
-            validation.Export(c.Plan, c.Secrets, c.File("client-exports"));
+            if (c.Pending?["ArtifactOriginal"] == null) ExportProfiles(c);
         }
         if (components.Contains("Network")) { Restore(c.Plan, oldPlan, "NetworkTuning"); Restore(c.State, oldState, "NetworkTuning"); }
         if (components.Contains("Firewall")) Restore(c.Plan, oldPlan, "Firewall");
@@ -144,7 +168,7 @@ public sealed partial class WorkflowEngine
             foreach (var key in new[] { "Role", "Roles", "ActiveEntry" }) Restore(c.Plan, oldPlan, key);
             foreach (var port in role == "RealityEntry" ? new[] { "XrayPrimary", "XrayBackup" } : role == "AnyTlsEntry" ? new[] { "AnyTlsPrimary" } : new[] { "LandingShadowsocks" }) c.Plan.Put("Ports." + port, oldPlan.At("Ports." + port)?.DeepClone());
             Restore(c.Plan, oldPlan, "ProtocolInventory"); Restore(c.State, oldState, "ProtocolInventory");
-            Restore(c.State, oldState, "ProtocolValidation"); validation.Export(c.Plan, c.Secrets, c.File("client-exports"));
+            Restore(c.State, oldState, "ProtocolValidation"); if (c.Pending?["ArtifactOriginal"] == null) ExportProfiles(c);
         }
         if (components.Contains("TrustedTls")) Restore(c.Plan, oldPlan, "TrustedTls");
         foreach (var name in new[] { "KomariAgent", "KomariController", "Cloudflared" }.Where(components.Contains))
@@ -191,6 +215,7 @@ public sealed partial class WorkflowEngine
     {
         var kind = c.Request.Kind; var option = c.Request.Options;
         OperationPolicy.Validate(c.Request); ValidateMaintenance(c);
+        if (kind == OperationKind.Restore) { c.RestoreRecord = ValidateProtocolRestore(c); await VerifyRemoteArchive(c, c.RestoreRecord.Text("RemoteBackup") + "/protocol-files.tar.gz", c.RestoreRecord.Text("BackupSha256")); }
         var upgrade = kind == OperationKind.Upgrade || kind == OperationKind.Komari && option.Text("Action") == "Upgrade";
         var versions = upgrade ? ComponentUpdates.Versions(store.Paths, c.Request.InstanceRelativePath, c.Request, Versions) : Versions;
         MaintenanceTargets.Validate(c.Request, c.Plan, c.State, versions);
@@ -219,6 +244,8 @@ public sealed partial class WorkflowEngine
         var components = scope switch { "Protocol" => new[] { "Protocols" }, "Network" => ["Network"], "Firewall" => ["Firewall"], "KomariAgent" => ["KomariAgent"], "KomariController" => ["KomariController"], "Tunnel" => ["Cloudflared"], "ManagedInstance" => ["Protocols", "KomariAgent", "Firewall"], _ => throw new OperationException("不受支持的组件范围。") };
         if (kind == OperationKind.TuneNetwork) components = ["Network"];
         if (kind == OperationKind.ProtocolState && c.Plan.Text("Firewall.Mode") != "PreserveExisting") components = ["Protocols", "Firewall"];
+        if (c.Plan.Text("Firewall.Mode") == "PreserveExisting") components = components.Where(component => component != "Firewall").ToArray();
+        if (components.Contains("Firewall")) await c.Run("firewall-preflight.sh", FirewallParameters(c.Plan, true), marker: "FIREWALL_SCOPE_OK");
         if (scope == "KomariController") await c.Run("maintenance-komari.sh", new() { ["ACTION"] = "ControllerPreflight" }, timeout: 60);
         await Arm(c, components);
         switch (kind)
@@ -232,10 +259,15 @@ public sealed partial class WorkflowEngine
                 if (scope != "ManagedInstance" || option.Text("Action") is not ("Disable" or "RemoveManaged")) throw new OperationException("退役必须明确选择整套受管协议与 Agent 的范围。");
                 await c.Run("maintenance-decommission.sh", new() { ["SCOPE"] = option.Text("Action"), ["REMOVE_CONTROLLER"] = "false" }, true, marker: "DECOMMISSION_OK");
                 foreach (var role in DeploymentPlans.Roles[..3]) { c.Plan.Put("ProtocolInventory." + role + ".Enabled", JsonValue.Create(false)); c.Plan.Put("ProtocolInventory." + role + ".Active", JsonValue.Create(false)); }
-                c.Plan.Put("Komari.Enabled", JsonValue.Create(false)); c.State["KomariInstalled"] = option.Text("Action") != "RemoveManaged"; await RefreshInventory(c); await Firewall(c, true); await VerifyManagement(c); break;
+                c.Plan.Put("Komari.Enabled", JsonValue.Create(false));
+                if (option.Text("Action") == "RemoveManaged") { c.State["KomariInstalled"] = false; c.Secrets.Remove("KomariAgent"); }
+                c.State.Put("MonitoringInventory.KomariAgent.Enabled", JsonValue.Create(false)); c.State.Put("MonitoringInventory.KomariAgent.Active", JsonValue.Create(false));
+                c.State.Put("MonitoringInventory.KomariAgent.Installed", JsonValue.Create(c.State.Flag("KomariInstalled")));
+                await RefreshInventory(c); await Firewall(c, true); await VerifyManagement(c); break;
             default: throw new OperationException("不受支持的任务类型。");
         }
         if (upgrade) RecordComponentUpgrade(c, versions);
+        if (kind == OperationKind.Decommission && option.Text("Action") == "RemoveManaged") { foreach (var role in DeploymentPlans.Roles[..3]) CleanupUninstalledProtocol(c, role); ExportProfiles(c); }
         c.Save(); await Commit(c);
     }
     private static void ValidateMaintenance(Context c)
@@ -316,13 +348,15 @@ public sealed partial class WorkflowEngine
         if (!c.Plan.Flag("ProtocolInventory." + role + ".Installed", c.Plan.Text("Role") == role)) throw new OperationException("该协议尚未安装，请先完成对应部署配置。");
         if (action == "Uninstall")
         {
+            c.Plan.Put("ProtocolInventory." + role + ".Enabled", JsonValue.Create(false)); await ApplyProtocolState(c);
             await c.Run("protocol-lifecycle-uninstall.sh", new() { ["REMOVE_ROLE"] = role }, true);
             c.Plan.Put("ProtocolInventory." + role + ".Installed", JsonValue.Create(false));
+            CleanupUninstalledProtocol(c, role);
         }
         c.Plan.Put("ProtocolInventory." + role + ".Enabled", JsonValue.Create(action is "Enable" or "Switch"));
         if (action == "Switch" && role is "RealityEntry" or "AnyTlsEntry") c.Plan.Put("ProtocolInventory." + (role == "RealityEntry" ? "AnyTlsEntry" : "RealityEntry") + ".Enabled", JsonValue.Create(false));
         if (Enabled(c.Plan, "RealityEntry") && Enabled(c.Plan, "AnyTlsEntry") && ComponentInstallations.EntryPortsConflict(c.Plan)) throw new OperationException("Reality 与 AnyTLS 共用监听端口，请使用明确切换操作。");
-        await ApplyProtocolState(c); await RefreshInventory(c); await Firewall(c, true); await ServerGate(c); await ValidateProtocols(c); await ArchiveConfigs(c); validation.Export(c.Plan, c.Secrets, c.File("client-exports"));
+        await ApplyProtocolState(c); await RefreshInventory(c); await Firewall(c, true); await ServerGate(c); await ValidateProtocols(c); await ArchiveConfigs(c); ExportProfiles(c);
     }
     private async Task ApplyProtocolState(Context c, string restart = "")
     {
@@ -333,7 +367,7 @@ public sealed partial class WorkflowEngine
         var role = c.Request.Options.Text("Protocol");
         if (!DeploymentPlans.Roles[..3].Contains(role) || !Enabled(c.Plan, role)) throw new OperationException("升级前请先启用对应协议，以便完成真实连接验收。");
         var versions = ComponentUpdates.Versions(store.Paths, c.Request.InstanceRelativePath, c.Request, Versions);
-        await InstallProtocol(c, role, true, versions); await ApplyProtocolState(c, role); await RefreshInventory(c); await ServerGate(c); await ValidateProtocols(c); await ArchiveConfigs(c); validation.Export(c.Plan, c.Secrets, c.File("client-exports"));
+        await InstallProtocol(c, role, true, versions); await ApplyProtocolState(c, role); await RefreshInventory(c); await ServerGate(c); await ValidateProtocols(c); await ArchiveConfigs(c); ExportProfiles(c);
     }
     private async Task Rotate(Context c)
     {
@@ -366,7 +400,7 @@ public sealed partial class WorkflowEngine
             }
         }
         await c.Run("maintenance-protocol-config-apply.sh", new() { ["ROLE"] = role, ["CONFIG_JSON"] = config.ToJsonString(), ["WAS_ACTIVE"] = "true", ["EXPECTED_CONFIG_SHA256"] = RemoteAssets.Marker(current.Output, "SERVER_CONFIG_SHA256") }, true, marker: "CREDENTIAL_CONFIG_APPLIED");
-        await ServerGate(c); await ValidateProtocols(c); await ArchiveConfigs(c); validation.Export(c.Plan, c.Secrets, c.File("client-exports"));
+        await ServerGate(c); await ValidateProtocols(c); await ArchiveConfigs(c); ExportProfiles(c);
     }
     private async Task Komari(Context c)
     {
@@ -398,7 +432,6 @@ public sealed partial class WorkflowEngine
                     if (records.Length != 1) throw new OperationException("缺少唯一的主控专用恢复归档。");
                     if (records[0].Number("ControllerPort", 25774).ToString() != controllerPort) throw new OperationException("主控恢复点与当前监听端口不同，请先核对服务与 Tunnel 路由，未自动替换连接设置。");
                     parameters["BACKUP_SHA256"] = records[0].Text("Sha256"); await VerifyRemoteArchive(c, parameters["BACKUP_FILE"], parameters["BACKUP_SHA256"]);
-                    parameters["FINAL_ACTIVE"] = Bool(c.State.Flag("KomariController.Active"));
                 }
                 if (action == "Backup") return;
             }
@@ -409,7 +442,15 @@ public sealed partial class WorkflowEngine
             if (token == "" || token.Any(char.IsWhiteSpace)) throw new OperationException("Tunnel Token 不能为空或含空白。");
             parameters["TUNNEL_TOKEN"] = token;
         }
-        await c.Run("maintenance-komari.sh", parameters, true, 1200, "KOMARI_LIFECYCLE_OK");
+        var response = await c.Run("maintenance-komari.sh", parameters, true, 1200, "KOMARI_LIFECYCLE_OK");
+        if (scope == "KomariController" && action == "Restore")
+        {
+            var restored = RemoteAssets.Marker(response.Output, "KOMARI_RESTORED_VERSION"); var hash = RemoteAssets.Marker(response.Output, "KOMARI_RESTORED_SHA256");
+            if (!Regex.IsMatch(restored, @"^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?$") || !Regex.IsMatch(hash, "^[a-f0-9]{64}$")) throw new OperationException("主控恢复版本或程序摘要未确认，未提交恢复。");
+            c.Plan.Put("KomariController.Version", JsonValue.Create(restored)); c.State.Put("KomariController.Version", JsonValue.Create(restored)); c.State.Put("MonitoringInventory.KomariController.Version", JsonValue.Create(restored));
+            var descriptor = new JsonObject { ["Component"] = "komari_controller", ["Version"] = restored, ["Sha256"] = hash, ["Source"] = "RestoredBackup", ["TaskId"] = c.Id, ["At"] = DateTimeOffset.UtcNow };
+            c.State.Put("ComponentUpgrades.KomariController", descriptor); c.State.Put("InstalledProgramVersions.komari_controller", descriptor.DeepClone());
+        }
         if (action == "RotateToken") c.Secrets.Put("Cloudflared.Token", JsonValue.Create(parameters["TUNNEL_TOKEN"]));
         if (scope == "KomariAgent" && action == "Upgrade") c.Plan.Put("Komari.AgentVersion", JsonValue.Create(version.Text("komari_agent.version")));
         if (scope == "KomariController" && action == "Upgrade") { c.Plan.Put("KomariController.Version", JsonValue.Create(version.Text("komari_controller.version"))); c.State.Put("KomariController.Version", JsonValue.Create(version.Text("komari_controller.version"))); }
@@ -433,7 +474,7 @@ public sealed partial class WorkflowEngine
             c.State.Put("MonitoringInventory." + inventoryScope + ".Version", JsonValue.Create(parameters["VERSION"]));
         }
     }
-    private async Task Restore(Context c)
+    private JsonObject ValidateProtocolRestore(Context c)
     {
         if (c.Request.Options.Text("Scope") != "Protocol") throw new OperationException("监控恢复请使用对应监控组件入口。");
         var backup = c.Request.Options.Text("Backup");
@@ -443,19 +484,33 @@ public sealed partial class WorkflowEngine
         var metadata = store.Paths.Instance(c.Request.InstanceRelativePath);
         var root = SafePath.Resolve(metadata, "maintenance-backups"); SafePath.CheckTree(root);
         var matches = Directory.EnumerateFiles(root, "restore-metadata.json", SearchOption.AllDirectories).Select(ArchiveStore.ReadJson).Where(n => n.Text("RemoteBackup") == backup && n.Strings("Components").Contains("Protocols")).ToArray();
-        if (matches.Length != 1 || matches[0].Text("SshPorts") != c.Plan.Text("Ports.SshPrimary") + "," + c.Plan.Text("Ports.SshRescue")) throw new OperationException("没有唯一、兼容当前管理入口的协议恢复记录。");
+        if (matches.Length != 1 || !ProtocolRestores.Compatible(matches[0], c.Plan)) throw new OperationException("没有唯一、兼容当前管理入口的协议恢复记录。");
         var record = matches[0]; var oldPlan = record["OldPlan"]!.AsObject(); var oldState = record["OldState"]!.AsObject();
         if (c.Request.Options.Text("RestoreMode") == "ConfigOnly")
         {
             foreach (var role in DeploymentPlans.Roles[..3]) if (Enabled(c.Plan, role) != Enabled(oldPlan, role)) throw new OperationException("配置恢复需要相同的协议启用状态，请选择完整协议恢复。");
             foreach (var field in new[] { "Reality.XrayVersion", "AnyTls.SingBoxVersion", "Shadowsocks.SingBoxVersion", "Ports.XrayPrimary", "Ports.XrayBackup", "Ports.AnyTlsPrimary", "Ports.LandingShadowsocks" }) if (c.Plan.Text(field) != oldPlan.Text(field)) throw new OperationException("当前程序版本或监听端口与配置归档不兼容。");
         }
+        if (c.Plan.Text("Firewall.Mode") != "PreserveExisting" && !FirewallParameters(c.Plan, true).OrderBy(p => p.Key).SequenceEqual(FirewallParameters(oldPlan, true).OrderBy(p => p.Key))) throw new OperationException("协议恢复点需要的监听或可信入口与当前防火墙不同。此次范围保留防火墙，请先切换到兼容的协议状态，未开始恢复。");
+        var reserved = new List<int> { c.Plan.Number("Ports.SshPrimary"), c.Plan.Number("Ports.SshRescue") };
+        if (c.State.Flag("KomariController.Installed") || c.State.Flag("MonitoringInventory.KomariController.Installed")) reserved.Add(c.Plan.Number("KomariController.Port", 25774));
+        if (c.State.Flag("Cloudflared.Installed") || c.State.Flag("MonitoringInventory.Cloudflared.Installed")) reserved.Add(c.Plan.Number("Cloudflared.MetricsPort", 20241));
+        if (DeploymentPlans.Roles[..3].Where(role => Enabled(oldPlan, role)).SelectMany(role => ComponentInstallations.ListeningPorts(oldPlan, role)).Any(reserved.Contains)) throw new OperationException("协议恢复点监听端口与当前管理或监控入口冲突，未开始恢复。");
+        var secrets = store.ReadSecret(c.File(record.Text("SecretsRelativePath"))); secrets.Clear();
+        var local = c.File(record.Text("SecretsRelativePath").Replace("secrets.dotnet.private.json", "remote-files.tar.gz", StringComparison.Ordinal));
+        if (ClientSchemes.SourceFingerprint(local) != record.Text("BackupSha256")) throw new OperationException("本地协议恢复材料摘要不匹配。");
+        return record;
+    }
+    private async Task Restore(Context c)
+    {
+        var record = c.RestoreRecord ?? throw new OperationException("协议恢复材料尚未通过预检。");
+        var backup = record.Text("RemoteBackup"); var oldPlan = record["OldPlan"]!.AsObject(); var oldState = record["OldState"]!.AsObject();
         await VerifyRemoteArchive(c, backup + "/protocol-files.tar.gz", record.Text("BackupSha256"));
         var oldSecrets = store.ReadSecret(c.File(record.Text("SecretsRelativePath")));
         try
         {
             await c.Run("maintenance-restore-apply.sh", new() { ["BACKUP_PATH"] = backup, ["SCOPE"] = c.Request.Options.Text("RestoreMode"), ["DESKTOP_PROTOCOL_ONLY"] = "true" }, true, marker: "MANUAL_RESTORE_APPLIED");
-            RestoreComponentState(c, oldPlan, oldState, oldSecrets, ["Protocols"]); await RefreshInventory(c); await ServerGate(c); await ValidateProtocols(c); await VerifyManagement(c); await ArchiveConfigs(c);
+            RestoreComponentState(c, oldPlan, oldState, oldSecrets, ["Protocols"]); await RefreshInventory(c); await ServerGate(c); await ValidateProtocols(c); await VerifyManagement(c); await ArchiveConfigs(c); ExportProfiles(c);
         }
         finally { oldSecrets.Clear(); }
     }

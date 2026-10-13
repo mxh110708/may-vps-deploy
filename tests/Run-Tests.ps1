@@ -1742,6 +1742,8 @@ if($pythonCommandForClient){
     if($LASTEXITCODE -ne 0){throw 'Health audit behavior tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_network_runtime.py')
     if($LASTEXITCODE -ne 0){throw 'Network runtime snapshot regressions failed.'}
+    if($bash){ & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_review_repairs.py') --bash $bash }else{ & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_review_repairs.py') }
+    if($LASTEXITCODE -ne 0){throw 'Cross-feature review repair regressions failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_bbr_kernel.py')
     if ($LASTEXITCODE -ne 0) { throw 'BBR kernel contracts failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_component_releases.py')

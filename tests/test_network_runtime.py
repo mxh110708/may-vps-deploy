@@ -28,6 +28,7 @@ class VirtualPath:
     def __init__(self, model, value): self.model, self.value = model, str(value)
     def __str__(self): return self.value
     def __truediv__(self, name): return VirtualPath(self.model, self.value.rstrip('/') + '/' + name)
+    def with_suffix(self, suffix): return VirtualPath(self.model, self.value.rsplit('.', 1)[0] + suffix)
     @property
     def parents(self):
         value = self.value
@@ -43,7 +44,7 @@ class VirtualPath:
     def stat(self): return types.SimpleNamespace(st_mode=0o100000 | self.model.modes.get(self.value, 0o600))
     def unlink(self, missing_ok=False): self.model.files.pop(self.value, None)
     def open(self, mode):
-        if mode != 'x' or self.exists(): raise FileExistsError(self.value)
+        if mode not in ('x', 'w') or mode == 'x' and self.exists(): raise FileExistsError(self.value)
         path = self
         class Writer(io.StringIO):
             def __exit__(self, *args):
@@ -92,14 +93,24 @@ class Model:
             self.queues = [result if q.get('parent') == parent and bool(q.get('root')) == (parent is None) else q for q in self.queues]
         elif args[:2] in (['systemctl', 'is-enabled'], ['systemctl', 'is-active']): code = 1
         return subprocess.CompletedProcess(args, code, output, '')
-    def execute(self, action):
+    def execute(self, action, *parameters):
         with mock.patch.object(pathlib, 'Path', lambda value: VirtualPath(self, value)), \
              mock.patch.object(subprocess, 'run', self.run), \
-             mock.patch.object(sys, 'argv', ['network-runtime', action, BACKUP]), \
+             mock.patch.object(sys, 'argv', ['network-runtime', action, BACKUP, *parameters]), \
+             mock.patch('os.replace', side_effect=self.replace), \
              mock.patch('os.chmod', side_effect=lambda path, mode: self.modes.__setitem__(str(path), mode)), contextlib.redirect_stdout(io.StringIO()):
             try: exec(compile(CODE, 'network-runtime', 'exec'), {})
             except SystemExit as error:
                 if error.code != 0: raise
+    def replace(self, source, target):
+        self.files[str(target)] = self.files.pop(str(source))
+        self.modes[str(target)] = self.modes.pop(str(source), 0o600)
+    def write_owned(self, name, content, mode=0o644):
+        candidate = BACKUP + '/candidate'; self.files[candidate] = content
+        self.execute('expect-file', name, candidate, oct(mode))
+        self.files[name] = content; self.modes[name] = mode
+    def set_owned(self, key, value):
+        self.execute('expect-sysctl', key, value); self.values[key] = value
 
 
 class NetworkRuntimeTests(unittest.TestCase):
@@ -110,8 +121,7 @@ class NetworkRuntimeTests(unittest.TestCase):
         model.files[filename] = original
         model.modes[filename] = 0o644
         model.execute('snapshot')
-        model.files[filename] = b'# Managed by MXH VPS Deploy.\nnet.core.default_qdisc = fq\n'
-        model.modes[filename] = 0o600
+        model.write_owned(filename, b'# Managed by MXH VPS Deploy.\nnet.core.default_qdisc = fq\n', 0o644)
         model.execute('restore')
         self.assertEqual(model.files[filename], original)
         self.assertEqual(model.modes[filename], 0o644)
@@ -166,9 +176,9 @@ class NetworkRuntimeTests(unittest.TestCase):
     def test_snapshot_apply_and_restore_runtime_and_persistence(self):
         model = Model(); queues = copy.deepcopy(model.queues)
         model.execute('snapshot'); model.execute('apply'); model.execute('verify')
-        model.values['net.core.default_qdisc'] = 'fq'; model.values['net.ipv4.tcp_congestion_control'] = 'bbr'
+        model.set_owned('net.core.default_qdisc', 'fq'); model.set_owned('net.ipv4.tcp_congestion_control', 'bbr')
         for name in ('/usr/local/libexec/mxh-network-queue', '/etc/systemd/system/mxh-network-queue.service'):
-            model.files[name] = b'# Managed by MXH VPS Deploy.\n'
+            model.write_owned(name, b'# Managed by MXH VPS Deploy.\n', 0o750 if name.endswith('mxh-network-queue') else 0o644)
         model.execute('restore')
         self.assertEqual(KEYS, model.values); self.assertEqual(queues, model.queues)
         self.assertNotIn('/usr/local/libexec/mxh-network-queue', model.files)
@@ -219,6 +229,36 @@ class NetworkRuntimeTests(unittest.TestCase):
         self.assertEqual(model.queues[0]['options']['target'], 5000)
         calls = len(model.calls); model.execute('restore')
         self.assertFalse(any(c[:3] == ['tc', 'qdisc', 'replace'] for c in model.calls[calls:]))
+
+    def test_managed_marker_does_not_allow_overwriting_external_edit(self):
+        model = Model(); name = '/etc/sysctl.d/99-mxh-vps-deploy.conf'
+        model.files[name] = b'# Managed by MXH VPS Deploy.\nnet.ipv4.tcp_fastopen = 3\n'; model.modes[name] = 0o644
+        model.execute('snapshot'); model.write_owned(name, b'# Managed by MXH VPS Deploy.\nnet.core.default_qdisc = fq\n')
+        external = b'# Managed by MXH VPS Deploy.\nnet.ipv4.tcp_fastopen = 0\n'; model.files[name] = external
+        calls = len(model.calls)
+        with self.assertRaisesRegex(SystemExit, 'changed externally'): model.execute('restore')
+        self.assertEqual(model.files[name], external)
+        self.assertFalse(any(c[:3] == ['tc', 'qdisc', 'replace'] or c[:2] == ['sysctl', '-w'] for c in model.calls[calls:]))
+
+    def test_modified_fq_options_after_apply_are_not_restored_over(self):
+        model = Model(); model.execute('snapshot'); model.execute('apply')
+        model.queues[0]['options'] = {'limit': 321}; current = copy.deepcopy(model.queues)
+        with self.assertRaisesRegex(SystemExit, 'changed externally'): model.execute('restore')
+        self.assertEqual(model.queues, current)
+
+    def test_externally_changed_runtime_buffers_are_not_overwritten(self):
+        model = Model(); model.execute('snapshot'); model.set_owned('net.core.default_qdisc', 'fq')
+        model.set_owned('net.core.rmem_max', '123456')
+        model.values['net.core.rmem_max'] = '333333'
+        with self.assertRaisesRegex(SystemExit, 'changed externally'): model.execute('restore')
+        self.assertEqual(model.values['net.core.rmem_max'], '333333')
+
+    def test_unselected_runtime_changes_do_not_block_scoped_restore(self):
+        model = Model(); model.execute('snapshot'); model.set_owned('net.core.default_qdisc', 'fq')
+        model.values['net.core.rmem_max'] = '333333'
+        model.execute('restore')
+        self.assertEqual(model.values['net.core.rmem_max'], '333333')
+        self.assertEqual(model.values['net.core.default_qdisc'], KEYS['net.core.default_qdisc'])
 
 
 if __name__ == '__main__': unittest.main()

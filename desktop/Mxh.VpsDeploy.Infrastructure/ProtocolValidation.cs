@@ -6,7 +6,7 @@ using Mxh.VpsDeploy.Core;
 
 namespace Mxh.VpsDeploy.Infrastructure;
 
-public sealed class ProtocolValidation(IValidationAssets assets, IExternalToolRunner tools) : IProtocolValidation
+public sealed class ProtocolValidation(IValidationAssets assets, IExternalToolRunner tools, ArchiveStore? store = null) : IProtocolValidation
 {
     public void Export(JsonObject plan, JsonObject secrets, string directory) => ClientProfiles.Export(plan, secrets, directory);
     public async Task<JsonObject> ValidateAsync(JsonObject plan, JsonObject secrets, string privateDirectory, IUserInteraction user, IProgress<string> progress, CancellationToken cancellationToken)
@@ -14,7 +14,13 @@ public sealed class ProtocolValidation(IValidationAssets assets, IExternalToolRu
         Directory.CreateDirectory(privateDirectory); var items = new JsonArray(); var incomplete = false;
         foreach (var node in ClientProfiles.Nodes(plan, secrets, true))
         {
-            if (node.Family == "IPv6" && !Socket.OSSupportsIPv6)
+            var entry = node.Role == "ShadowsocksLanding" ? FindTrustedEntry(plan, secrets, node.Family) : null;
+            if (node.Role == "ShadowsocksLanding" && entry == null)
+            {
+                if (!await user.ConfirmAsync(new("缺少可信入口验收路径", "Shadowsocks 仅允许可信入口连接。请先纳管并启用白名单中的入口；本机不会直接连接落地端口。是否保留此项未完成记录并继续？"), cancellationToken)) throw new OperationException("Shadowsocks 可信入口验收路径尚未配置。", code: "TrustedEntryMissing");
+                items.Add(new JsonObject { ["Node"] = node.Name, ["Role"] = node.Role, ["Status"] = "SkippedByUser", ["FailedStage"] = "TrustedEntryMissing" }); incomplete = true; continue;
+            }
+            if ((entry?.Family ?? node.Family) == "IPv6" && !Socket.OSSupportsIPv6)
             {
                 if (!await user.ConfirmAsync(new("IPv6 验收不可用", "本机 IPv6 不可用。是否明确跳过此入口的本机验证？跳过不计为通过。"), cancellationToken)) throw new OperationException("IPv6 入口验证尚未完成。");
                 items.Add(new JsonObject { ["Node"] = node.Name, ["Status"] = "SkippedByUser" }); incomplete = true; continue;
@@ -28,7 +34,7 @@ public sealed class ProtocolValidation(IValidationAssets assets, IExternalToolRu
                 var dataDirectory = SafePath.Resolve(work, "data"); Directory.CreateDirectory(dataDirectory);
                 if (core == "mihomo") foreach (var file in Directory.EnumerateFiles(assets.DataDirectory)) { SafePath.CheckLinks(file); File.Copy(file, SafePath.Resolve(dataDirectory, Path.GetFileName(file))); }
                 var port = FreePort(); var config = SafePath.Resolve(work, core == "mihomo" ? "profile.yaml" : "profile.json");
-                ArchiveStore.WriteJson(config, core == "mihomo" ? ClientProfiles.ClashProbe(node, port) : ClientProfiles.SingProbe(node, port));
+                ArchiveStore.WriteJson(config, core == "mihomo" ? ClientProfiles.ClashProbe(node, port, entry) : ClientProfiles.SingProbe(node, port, entry));
                 var check = await tools.RunAsync(executable, core == "mihomo" ? ["-t", "-d", dataDirectory, "-f", config] : ["check", "-c", config], null, TimeSpan.FromSeconds(40), cancellationToken);
                 check.RequireSuccess("固定核心拒绝验证配置，未启动测试代理。");
                 var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -58,7 +64,7 @@ public sealed class ProtocolValidation(IValidationAssets assets, IExternalToolRu
                     if (!IPAddress.TryParse(egress, out var address) || address.ToString() != IPAddress.Parse(expected).ToString()) throw new OperationException("协议出口与计划不一致，未计为通过。");
                     egressPassed = true; stage = "UDP DNS";
                     await SocksUdpProbe(port, node.EgressFamily == "IPv6", cancellationToken);
-                    items.Add(new JsonObject { ["Core"] = core, ["Node"] = node.Name, ["Status"] = "Passed", ["Https"] = "Passed", ["Egress"] = egress, ["Udp"] = "Passed" });
+                    items.Add(new JsonObject { ["Core"] = core, ["Node"] = node.Name, ["Role"] = node.Role, ["Path"] = entry == null ? "DirectEntry" : "TrustedEntry", ["Entry"] = entry?.Name, ["Status"] = "Passed", ["Https"] = "Passed", ["Egress"] = egress, ["Udp"] = "Passed" });
                 }
                 catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                 {
@@ -74,6 +80,25 @@ public sealed class ProtocolValidation(IValidationAssets assets, IExternalToolRu
             }
         }
         return new JsonObject { ["Status"] = items.Count == 0 ? "NoEnabledProtocols" : incomplete ? "Incomplete" : "Passed", ["Items"] = items, ["At"] = DateTimeOffset.UtcNow };
+    }
+    public ClientProfiles.NodePair? FindTrustedEntry(JsonObject plan, JsonObject secrets, string landingFamily)
+    {
+        var trusted = plan.Strings("Shadowsocks.TrustedEntry" + (landingFamily == "IPv6" ? "IPv6s" : "IPv4s")).Select(IPAddress.Parse).ToHashSet();
+        ClientProfiles.NodePair? Match(JsonObject candidate, JsonObject credentials) => trusted.Contains(IPAddress.TryParse(candidate.Text("Server." + landingFamily), out var address) ? address : IPAddress.None)
+            ? ClientProfiles.Nodes(candidate, credentials, true).FirstOrDefault(n => n.Role is "RealityEntry" or "AnyTlsEntry" && !n.IsBackup && n.Family == "IPv4") : null;
+        var local = Match(plan, secrets); if (local != null) return local;
+        if (store == null) return null;
+        foreach (var instance in store.ListInstances().OrderBy(i => i.RelativePath, StringComparer.Ordinal))
+        {
+            var lifecycle = InstanceLifecycle.Read(store, instance.RelativePath, instance.Plan);
+            if (!lifecycle.Managed || lifecycle.NeedsRecovery) continue;
+            var file = SafePath.Resolve(store.Paths.Instance(instance.RelativePath), "secrets.dotnet.private.json");
+            if (!File.Exists(file)) continue;
+            var credentials = store.ReadSecret(file);
+            try { var entry = Match(instance.Plan, credentials); if (entry != null) return entry; }
+            finally { credentials.Clear(); }
+        }
+        return null;
     }
     private static int FreePort() { var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); try { return ((IPEndPoint)listener.LocalEndpoint).Port; } finally { listener.Stop(); } }
     public static async Task VerifyVersion(IValidationAssets assets, IExternalToolRunner tools, string name, string executable, CancellationToken cancellationToken)

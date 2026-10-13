@@ -45,7 +45,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
         this.paths = paths; launchArguments = arguments; testSession = session; store = new(paths, new WindowsSecretProtector());
         var assets = new ValidationAssets(paths, "windows-amd64"); var tools = new ExternalToolRunner();
         IRemoteSessionFactory remote = new SshSessionFactory(store); if (session != null) remote = session.Restrict(remote);
-        coordinator = new(store, new WorkflowEngine(store, remote, new ManagedKeys(new WindowsManagedKeyAccess()), this, new ProtocolValidation(assets, tools), new NetworkMeasurement(assets, tools)));
+        coordinator = new(store, new WorkflowEngine(store, remote, new ManagedKeys(new WindowsManagedKeyAccess()), this, new ProtocolValidation(assets, tools, store), new NetworkMeasurement(assets, tools)));
         workbench = new(store, tools, assets, paths.Resolve("runtime/python/python.exe"));
         var preference = paths.Resolve("private/desktop-settings.json"); settings = File.Exists(preference) ? ArchiveStore.ReadJson(preference) : new JsonObject { ["AutoCheckUpdates"] = false, ["UpdateProxy"] = "http://127.0.0.1:2080" };
         fonts = new(paths);
@@ -184,6 +184,19 @@ public sealed partial class MainWindow : Window, IUserInteraction
                 SettingRow("追加代理协议", "在此实例安装尚未安装的协议，保留已有服务", Symbol.Add, Action("添加协议", () => ChooseInstallation(plan))),
                 SettingRow("代理核心", "升级此 VPS 上的 Xray 或 sing-box；审阅时显示对象与版本", Symbol.Download, Action("升级核心", () => OperationSheet(OperationKind.Upgrade, plan))),
                 SettingRow("协议凭据", "轮换正在运行的协议凭据", Symbol.Permissions, Action("凭据轮换", () => OperationSheet(OperationKind.RotateCredentials, plan)))));
+            var health = InstanceState(relative)["HealthReport"] as JsonObject;
+            if (health?["Checks"] is JsonArray checks)
+            {
+                var report = Column(Text(health.Text("Status") == "Passed" ? "最近健康检查 · 核对通过" : "最近健康检查 · 有待处理项", 18));
+                foreach (var check in checks.Where(c => health.Text("Status") == "Passed" || c!.Text("Status") != "Passed")) report.Children.Add(Trailing(Text(check!.Text("Name") + " · " + check.Text("Message"), 13, true), Text(check.Text("Status") == "Passed" ? "通过" : "需核对", 13)));
+                if (health.Text("Status") == "Passed") details.Children.Add(Details("健康检查结果", Card(report)));
+                else
+                {
+                    var passed = checks.Where(c => c!.Text("Status") == "Passed").ToArray();
+                    if (passed.Length > 0) report.Children.Add(Details("已通过的检查", Column(passed.Select(c => (UIElement)Text(c!.Text("Name") + " · 核对通过", 13, true)).ToArray())));
+                    details.Children.Insert(1, Card(report));
+                }
+            }
             details.Children.Add(GroupLabel("监控与访问")); details.Children.Add(MonitoringControls(plan, InstanceState(relative)));
             details.Children.Add(Details("恢复与后续操作", SettingsGroup(
                 SettingRow("未完成任务", "核对事务状态，再选择恢复操作", Symbol.Sync, Action("核对", () => Submit(new(OperationKind.Recover, selectedInstance, new())))),

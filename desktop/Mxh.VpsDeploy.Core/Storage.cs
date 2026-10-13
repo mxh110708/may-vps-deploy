@@ -77,7 +77,8 @@ public sealed class ArchiveStore(AppPaths paths, ISecretProtector protector)
         SafePath.CheckLinks(path);
         return JsonNode.Parse(File.ReadAllBytes(path))?.AsObject() ?? throw new OperationException("归档内容无效。");
     }
-    public static void WriteJson(string path, JsonNode value) => AtomicWrite(path, Encoding.UTF8.GetBytes(value.ToJsonString(JsonOptions)));
+    public static byte[] JsonBytes(JsonNode value) => Encoding.UTF8.GetBytes(value.ToJsonString(JsonOptions));
+    public static void WriteJson(string path, JsonNode value) => AtomicWrite(path, JsonBytes(value));
     public static void AtomicWrite(string path, byte[] bytes)
     {
         SafePath.CheckLinks(path); Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -91,6 +92,13 @@ public sealed class ArchiveStore(AppPaths paths, ISecretProtector protector)
     }
     public void WriteSecret(string path, JsonObject data)
     {
+        // DPAPI is randomized; an unchanged archive must retain its ciphertext.
+        if (File.Exists(path))
+        {
+            var previous = ReadSecret(path);
+            try { if (Fingerprint(previous) == Fingerprint(data)) return; }
+            finally { previous.Clear(); }
+        }
         var clear = Encoding.UTF8.GetBytes(data.ToJsonString());
         try { WriteJson(path, new JsonObject { ["schema_version"] = 1, ["protection"] = protector.Format, ["data"] = Convert.ToBase64String(protector.Protect(clear)) }); }
         finally { CryptographicOperations.ZeroMemory(clear); }

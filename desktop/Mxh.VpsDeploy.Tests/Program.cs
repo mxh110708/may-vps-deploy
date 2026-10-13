@@ -28,9 +28,10 @@ internal sealed partial class BoundaryTests(string repository)
         await AdditionsExperience(f);
         await TunnelAccessExperience(f); await NetworkExperience(f); await KernelExperience(f); await InstallationVersionExperience(f);
         await BackgroundTestTransport(f);
+        await ReviewRepairExperience();
         await BackgroundFaultExperience(f);
         var sshPython = Environment.GetEnvironmentVariable("MXH_TEST_SSH_PYTHON"); if (!string.IsNullOrEmpty(sshPython)) await LocalSshConfirmation(f, sshPython);
-        var python = Environment.GetEnvironmentVariable("MXH_TEST_PYTHON"); if (!string.IsNullOrEmpty(python)) await RealClientWorkbench(f, python);
+        var python = Environment.GetEnvironmentVariable("MXH_TEST_PYTHON"); if (!string.IsNullOrEmpty(python)) { using var clients = new Fixture(repository); await RealClientWorkbench(clients, python); }
         Console.WriteLine($"PASS: {assertions} C# boundary and workflow assertions; no production connections.");
     }
     public void RunFontTests()

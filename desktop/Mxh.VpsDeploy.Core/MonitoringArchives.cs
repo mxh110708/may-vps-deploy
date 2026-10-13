@@ -37,6 +37,15 @@ public static class MonitoringArchives
         plan.Put("Komari.Enabled", JsonValue.Create(inventory.Flag("KomariAgent.Installed") && inventory.Flag("KomariAgent.Enabled")));
         if (inventory.Flag("KomariAgent.Installed") && inventory.Text("KomariAgent.Version") != "")
             plan.Put("Komari.AgentVersion", JsonValue.Create(inventory.Text("KomariAgent.Version")));
+        foreach (var name in new[] { "KomariController", "Cloudflared" })
+        {
+            var actual = inventory.Text(name + ".Version");
+            if (actual == "" || !inventory.Flag(name + ".Installed") || !inventory.Flag(name + ".SupportedLayout")) continue;
+            plan.Put(name + ".Version", JsonValue.Create(actual));
+            if (state["ComponentUpgrades"] is JsonObject upgrades && upgrades.Text(name + ".Version") != actual) upgrades.Remove(name);
+            var component = name == "KomariController" ? "komari_controller" : "cloudflared";
+            if (state["InstalledProgramVersions"] is JsonObject programs && programs.Text(component + ".Version") != actual) programs.Remove(component);
+        }
     }
 
     public static bool SupplementAgent(JsonObject plan, JsonObject secrets, JsonObject configuration)
