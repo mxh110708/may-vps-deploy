@@ -70,7 +70,7 @@ public sealed partial class WorkflowEngine
             current = await NetworkObservation(c, before?["Options"] as JsonObject);
             if (c.Request.Options.Text("BbrVersion", "Current") == "v3" && current.Text("BbrVersion") != "v3") throw new OperationException("已选择 BBR v3，但当前内核尚未确认支持。请先检查并完成 BBR v3 内核升级与验收。");
             if (c.Request.Options.Text("BbrVersion", "Current") == "Current" && c.State["KernelUpgrade"] is JsonObject kernel && current.Text("Kernel") != kernel.Text("OriginalKernel", kernel.Text("OldKernel"))) throw new OperationException("已选择 VPS 原有内核版本，请先审阅回到 VPS 原有内核；当前运行的是升级后的内核。");
-            if (before != null && (current.Text("Kernel") != before.Text("ServerAfter.Kernel") || current.Long("MemoryKiB") != before.Long("ServerAfter.MemoryKiB") || ArchiveStore.Fingerprint(current["Sysctl"]!) != ArchiveStore.Fingerprint(before.At("ServerAfter.Sysctl")!) || NetworkTuning.QueueFingerprint(current) != NetworkTuning.QueueFingerprint(before["ServerAfter"]!.AsObject()))) throw new OperationException("远端内核、参数或队列在测速后发生变化，请重新采集。");
+            if (before != null && (current.Text("Kernel") != before.Text("ServerAfter.Kernel") || current.Text("BootId") != before.Text("ServerAfter.BootId") || current.Long("MemoryKiB") != before.Long("ServerAfter.MemoryKiB") || ArchiveStore.Fingerprint(current["Sysctl"]!) != ArchiveStore.Fingerprint(before.At("ServerAfter.Sysctl")!) || NetworkTuning.QueueFingerprint(current) != NetworkTuning.QueueFingerprint(before["ServerAfter"]!.AsObject()))) throw new OperationException("远端内核、启动身份、参数或队列在测速后发生变化，或记录来自旧版采集，请重新采集。");
             await c.Run("network-preflight.sh", timeout: 60, marker: "NETWORK_PREFLIGHT_OK");
         });
         await c.TrackStep("network-backup", () => Arm(c, ["Network"]));
@@ -84,11 +84,11 @@ public sealed partial class WorkflowEngine
             if (NetworkTuning.Sysctl(current, "net.ipv4.tcp_available_congestion_control").Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("bbr") && NetworkTuning.Sysctl(current, "net.ipv4.tcp_congestion_control") != "bbr") throw new OperationException("可用 BBR 未确认生效。");
             await VerifyManagement(c);
         });
-        JsonObject? after = null; var comparison = "BasicVerified";
+        JsonObject? after = null; JsonObject? decision = null; var comparison = "BasicVerified";
         if (profile == "EntryMeasured") await c.TrackStep("network-retest", async () =>
         {
             after = await CaptureNetwork(c, before!["Options"]!.DeepClone().AsObject(), Guid.NewGuid().ToString("N"));
-            comparison = NetworkTuning.Compare(before, after);
+            decision = NetworkTuning.CompareDetailed(before, after); comparison = decision.Text("Result");
         });
         await c.TrackStep("network-completion", async () =>
         {
@@ -101,7 +101,7 @@ public sealed partial class WorkflowEngine
                 if (NetworkTuning.Sysctl(current!, "net.ipv4.tcp_congestion_control") != "bbr") c.Warnings = true;
                 c.Save(); await Commit(c);
             }
-            c.State["LastNetworkComparison"] = new JsonObject { ["At"] = DateTimeOffset.UtcNow.ToString("O"), ["BeforeId"] = before?.Text("Id"), ["AfterId"] = after?.Text("Id"), ["Result"] = comparison, ["RestoredOriginal"] = reverted, ["VerifiedRuntime"] = current!.DeepClone() };
+            c.State["LastNetworkComparison"] = new JsonObject { ["At"] = DateTimeOffset.UtcNow.ToString("O"), ["BeforeId"] = before?.Text("Id"), ["AfterId"] = after?.Text("Id"), ["Result"] = comparison, ["Decision"] = decision, ["RestoredOriginal"] = reverted, ["VerifiedRuntime"] = current!.DeepClone() };
             c.Save(); c.Report("网络调优完成", reverted ? "复测未确认明确收益，原运行参数与队列已恢复，前后测量结果保留。" : NetworkTuning.Sysctl(current, "net.ipv4.tcp_congestion_control") == "bbr" ? "已核验实际 fq 队列、BBR 与管理连接，恢复点保留。" : "已核验 fq；当前内核没有可用 BBR，保留原拥塞控制。内核升级需另行维护。");
         });
     }

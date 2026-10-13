@@ -1,5 +1,6 @@
 {
   "schema_version": 2,
+  "business_policy": "GoogleServices.v1",
   "region_groups": [
     "US-West Entry",
     "Hong Kong Entry",
@@ -19,6 +20,7 @@
     { "name": "AI Services", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
     { "name": "Developer Tools", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
     { "name": "Academic Research", "default": "Default Exit", "order": ["Default Exit", "Hong Kong Entry", "Europe Entry", "US-West Entry", "Direct Route"] },
+    { "name": "Google Services", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
     { "name": "Microsoft Services", "default": "Direct Route", "order": ["Direct Route", "Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry"] },
     { "name": "Microsoft Global", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
     { "name": "Apple Services", "default": "Direct Route", "order": ["Direct Route", "Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry"] },

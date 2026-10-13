@@ -57,6 +57,7 @@ jobs:
           python3 -m venv .tmp/client-test-runtime
           .tmp/client-test-runtime/bin/python -m pip install --disable-pip-version-check -r requirements-client-merge.txt
           .tmp/client-test-runtime/bin/python tests/test_review_repairs.py --bash /bin/bash
+          .tmp/client-test-runtime/bin/python tests/test_google_client_policy.py
           python3 tests/test_scoped_rollback.py --bash /bin/bash
           python3 tests/test_component_installation.py --bash /bin/bash
           python3 tests/test_import_contracts.py --bash /bin/bash

@@ -4,6 +4,23 @@ namespace Mxh.VpsDeploy.Core;
 
 public static class ClientSchemes
 {
+    public static bool UpgradeLayout(JsonObject scheme)
+    {
+        if (scheme["Layout"] is not JsonObject layout || layout["business_groups"] is not JsonArray groups) throw new OperationException("方案缺少业务组布局。");
+        if (layout.Text("business_policy") == "GoogleServices.v1") return false;
+        if (layout.Text("business_policy") != "") throw new OperationException("方案业务策略版本不受支持，请使用与此方案匹配的应用版本。");
+        var matches = groups.OfType<JsonObject>().Where(g => g.Text("name") == "Google Services").ToArray();
+        if (matches.Length > 1) throw new OperationException("方案包含重复的 Google Services 业务组，请先核对布局。");
+        var existing = matches.SingleOrDefault();
+        var google = existing ?? new JsonObject { ["name"] = "Google Services", ["default"] = layout.Text("default_exit_group", "Default Exit"),
+            ["order"] = new JsonArray(new[] { layout.Text("default_exit_group", "Default Exit") }.Concat(layout.Strings("region_groups")).Append(layout.Text("direct_group", "Direct Route")).Select(n => (JsonNode?)JsonValue.Create(n)).ToArray()) };
+        if (existing != null) groups.Remove(existing);
+        var academic = groups.Select((g, i) => (Name: g.Text("name"), Index: i)).FirstOrDefault(g => g.Name == "Academic Research", (Name: "", Index: -1)).Index;
+        var microsoft = groups.Select((g, i) => (Name: g.Text("name"), Index: i)).FirstOrDefault(g => g.Name == "Microsoft Services", (Name: "", Index: -1)).Index;
+        groups.Insert(academic >= 0 ? academic + 1 : microsoft >= 0 ? microsoft : groups.Count, google);
+        layout["business_policy"] = "GoogleServices.v1";
+        scheme.Remove("Candidate"); return true;
+    }
     public static bool MoveNode(JsonObject scheme, int sourceIndex, int insertionIndex)
     {
         var nodes = scheme["Nodes"]?.AsArray() ?? throw new OperationException("方案缺少节点列表。");

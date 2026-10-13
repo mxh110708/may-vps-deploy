@@ -1738,6 +1738,8 @@ if($pythonCommandForClient){
     if($LASTEXITCODE -ne 0){throw 'Certbot scoped DNS API source tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_client_compatibility.py')
     if($LASTEXITCODE -ne 0){throw 'Client template compatibility tests failed.'}
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_google_client_policy.py')
+    if($LASTEXITCODE -ne 0){throw 'Google client policy and authority ownership tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_health_audit.py')
     if($LASTEXITCODE -ne 0){throw 'Health audit behavior tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_network_runtime.py')

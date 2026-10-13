@@ -5,7 +5,7 @@ internal static class NetworkTestData
 {
     public static JsonObject Observation() => new()
     {
-        ["Kernel"] = "test-kernel", ["MemoryKiB"] = 1048576, ["Cpu"] = new JsonObject { ["BusyPercent"] = 20, ["StealPercent"] = 0 },
+        ["Kernel"] = "test-kernel", ["BootId"] = "test-boot", ["MemoryKiB"] = 1048576, ["Cpu"] = new JsonObject { ["BusyPercent"] = 20, ["StealPercent"] = 0 },
         ["Sysctl"] = new JsonObject { ["net.core.default_qdisc"] = "fq_codel", ["net.ipv4.tcp_congestion_control"] = "cubic", ["net.ipv4.tcp_available_congestion_control"] = "reno cubic bbr", ["net.ipv4.tcp_moderate_rcvbuf"] = "1", ["net.ipv4.tcp_rmem"] = "4096 131072 6291456", ["net.ipv4.tcp_wmem"] = "4096 16384 4194304", ["net.core.rmem_max"] = "212992", ["net.core.wmem_max"] = "212992" },
         ["Tcp"] = new JsonObject { ["RttMs"] = new JsonArray(100, 120, 110) }, ["Counters"] = new JsonObject { ["TcpRetransSegs"] = 5, ["TcpOutSegs"] = 100 },
         ["Devices"] = new JsonArray(new JsonObject { ["Name"] = "eth0", ["Mtu"] = "1500", ["Queues"] = new JsonArray(new JsonObject { ["kind"] = "fq", ["handle"] = "8001:", ["root"] = true, ["options"] = new JsonObject() }) })
@@ -21,7 +21,10 @@ internal sealed class FakeNetwork(double speed = 100, double loaded = 120) : INe
     public int Calls { get; private set; }
     public async Task<JsonObject> MeasureAsync(JsonObject plan, JsonObject secrets, JsonObject options, string directory, Func<CancellationToken, Task<JsonObject>> observe, IProgress<string> progress, CancellationToken token)
     {
-        Calls++; var client = NetworkTestData.Client(speed, loaded); client["ServerAfter"] = await observe(token); return client;
+        Calls++; var client = NetworkTestData.Client(speed, loaded); var after = await observe(token);
+        after["Counters"]!["TcpOutSegs"] = after.Long("Counters.TcpOutSegs") + 100000;
+        after["Counters"]!["TcpRetransSegs"] = after.Long("Counters.TcpRetransSegs") + 100;
+        client["ServerAfter"] = after; return client;
     }
 }
 internal sealed partial class BoundaryTests
@@ -66,6 +69,7 @@ internal sealed partial class BoundaryTests
         Check(remote.ArmedComponents == "Network", "network recovery expanded scope");
         var improved = report.DeepClone().AsObject(); improved["Client"] = NetworkTestData.Client(150); improved["Analysis"] = NetworkTuning.Analyze(improved); Check(NetworkTuning.Compare(report, improved) == "Improved", "improvement not identified");
         var worse = report.DeepClone().AsObject(); worse["Client"] = NetworkTestData.Client(50, 400); worse["Analysis"] = NetworkTuning.Analyze(worse); Check(NetworkTuning.Compare(report, worse) == "Regression", "clear regression ignored");
+        NetworkComparisonExperience(report);
         var landing = f.Plan("NetworkLanding"); landing["Role"] = "ShadowsocksLanding"; landing["Roles"] = new JsonArray("ShadowsocksLanding"); f.SaveInstance(landing); var landingRemote = new FakeRemote();
         var landingOutcome = await f.Engine(landingRemote).ExecuteAsync(new(OperationKind.TuneNetwork, f.Relative(landing), new JsonObject { ["Scope"] = "Network", ["Profile"] = "LandingBasic" }), Guid.NewGuid().ToString("N"), new InlineProgress<TaskProgress>(_ => { }), default);
         Check(landingOutcome == TaskOutcome.Completed, "verified BBR reported a warning through dotted sysctl lookup");

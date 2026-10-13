@@ -82,7 +82,7 @@ if re.fullmatch(r'[0-9]{1,5}', port):
             m = re.search(r'\brtt:([0-9.]+)/', line)
             if m:
                 rtts.append(float(m.group(1)))
-result = {'Kernel': command(['uname', '-r']), 'MemoryKiB': int(memory.group(1)) if memory else 0,
+result = {'Kernel': command(['uname', '-r']), 'BootId': read('/proc/sys/kernel/random/boot_id').strip(), 'MemoryKiB': int(memory.group(1)) if memory else 0,
           'Cpu': {'BusyPercent': round(100*(total-(b[3]-a[3])-(b[4]-a[4]))/total, 2),
                   'StealPercent': round(100*(b[7]-a[7])/total, 2)},
           'Sysctl': sysctls, 'BbrVersion': bbr, 'BbrVersionEvidence': 'LoadedModule' if version else 'Unavailable',

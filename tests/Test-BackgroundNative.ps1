@@ -105,6 +105,12 @@ try {
     Check ($startedDrag.started -and $movingDrag.preview -and $movingDrag.indicator -and $cancelledDrag.cancelled) 'incremental handle gesture renders row preview and cancellation preserves order'
     $moved=Send 'ui.drag' @{id=(Control '拖动排序 synthetic-entry' 'NodeReorderHandle').id;insertion=0}
     Check ($moved.moved -and $moved.indicator -and $moved.preview) 'drag press move release follows application pointer handlers'
+    Click '3 · 连接与分组'; Click '设置'; $ui=Wait-Ui {param($ui) $ui.dialog -eq '业务默认出口'}
+    $business=@($ui.elements | Where-Object { $_.kind -like '*ComboBox' } | ForEach-Object name)
+    Check ([Array]::IndexOf($business,'Academic Research')+1 -eq [Array]::IndexOf($business,'Google Services') -and [Array]::IndexOf($business,'Google Services')+1 -eq [Array]::IndexOf($business,'Microsoft Services')) 'Google business selector is between Academic and Microsoft'
+    $google=Control 'Google Services' 'ComboBox'
+    Check (@($google.choices | Where-Object { $_.value -eq 'synthetic-exit' }).Count -eq 1) 'Google selector can choose a landing exit'
+    Send 'ui.choose' @{id=$google.id;value='synthetic-exit'} | Out-Null; Click '保存'; $null=Wait-Ui {param($ui) -not $ui.dialog}
     Click '4 · 生成与导出'; $ui=Read-Ui
     Check (-not (Control '审阅并导出' 'Button').enabled -and ($ui.elements.name -join ' ') -match '生成') 'export prerequisites visible and enforced'
     $export=Join-Path $FixtureRoot 'test-artifacts'

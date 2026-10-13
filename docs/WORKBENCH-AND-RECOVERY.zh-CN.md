@@ -1,5 +1,17 @@
 # 方案工作台与事务恢复
 
+## WinUI 配置设计的当前策略
+
+原生应用在“配置设计”的“连接与分组 → 业务分组 → 设置”选择各业务出口。Google Services 位于 Academic Research 之后、Microsoft Services 之前；普通谷歌服务和 YouTube 使用此组，Gemini 与已归类的 Google AI 后端仍使用 AI Services。地区入口、链式落地、Default Exit 和 Direct Route 都可作为业务出口。
+
+两份通用模板使用同一份 `config/google-services.policy.json` 公开域名策略。生成器补齐 Google 规则、AI 例外、OpenXLA 例外及私有短名称的 DNS 优先级；策略重复应用不会增加重复规则。sing-box 的 Google/AI A 查询使用 FakeIP 保留域名，避免 TUN 把客户端解析出的真实 IPv4 直接交给仅 IPv6 的落地出口。
+
+旧保存方案首次读取时补上 Google Services，保留已有节点、其他业务出口以及已经自定义的 Google 出口；旧候选作废，需要重新生成、校验、审阅。未知的较新业务策略版本和重复 Google 组会拒绝迁移，避免猜测覆盖。
+
+“已有权威来源”仍保留用户的 DNS 和分流规则，Google 通用策略仅应用于“通用模板”。若需要更新自定义权威来源，应先修改来源文件，再在应用内重新读取、核对后生成；工具不把通用规则覆盖到用户来源上。
+
+WinUI 正式归档、凭据、方案和恢复记录统一位于应用的 `private` 目录，默认随安装目录，例如 `D:\Programs\MXH VPS Deploy\private`；可用设置中的归档迁移更改目录。原生应用不向外部 VPS 材料目录额外复制部署归档。以下菜单编号、CLI 草稿格式及传统归档说明属于保留的 CLI 工作流，不是原生 EXE 的存储入口。
+
 ## 快速创建
 
 主菜单 7 → 快速创建方案 → 添加节点。可以从受管实例提取、手动填写，或在导入模式下提取来源中已有节点。

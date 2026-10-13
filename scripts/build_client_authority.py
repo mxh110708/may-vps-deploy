@@ -14,6 +14,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 from client_compatibility import serialize_profile
+from google_client_policy import apply_clash, apply_sing, load_policy, ordered_google_group
 
 
 ROLE_FILES = {
@@ -339,6 +340,12 @@ def main() -> None:
             clash = yaml.load(handle)
     if "SingBox" in formats:
         sing = json.loads(args.sing_box.read_text(encoding="utf-8"))
+    if spec.get("source_mode") == "GenericTemplate":
+        policy = load_policy()
+        if "Clash" in formats:
+            apply_clash(clash, policy)
+        if "SingBox" in formats:
+            apply_sing(sing, policy)
     nodes = collect_nodes(spec, clash, sing)
     groups = copy.deepcopy(spec.get("groups") or [])
     order = [str(value) for value in spec.get("group_order") or []]
@@ -360,6 +367,11 @@ def main() -> None:
         sing["outbounds"] = replace_named(list(sing.get("outbounds") or []), "tag", sing_nodes, remove_nodes)
         apply_sing_groups(sing, groups, order, remove_groups)
         update_node_references(sing, remove_nodes, rename_nodes, "sing_box")
+    if spec.get("source_mode") == "GenericTemplate":
+        if "Clash" in formats:
+            ordered_google_group(clash["proxy-groups"], "name", {})
+        if "SingBox" in formats:
+            ordered_google_group(sing["outbounds"], "tag", {})
     validate_rendered_references(clash, sing)
 
     args.output.mkdir(parents=True, exist_ok=True)

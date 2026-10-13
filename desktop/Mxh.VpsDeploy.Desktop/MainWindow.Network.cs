@@ -40,6 +40,7 @@ public sealed partial class MainWindow
                 Fields(Choice("入口连接地址族", options, "Family", plan.Text("Server.IPv6") == "" ? [("IPv4", "IPv4")] : [("IPv4", "IPv4"), ("IPv6", "IPv6")]), Choice("测试流量档位", options, "TestSize", [("Light", "轻量 · 最多 32 MiB"), ("Full", "完整 · 最多 256 MiB")])))));
             panel.Children.Add(NetworkTimeFields(options));
             panel.Children.Add(Row(Action("采集并生成建议", () => Submit(new(OperationKind.MeasureNetwork, relative, options)), true), Action("审阅晚高峰补测", () => ScheduleNetwork(relative, options))));
+            panel.Children.Add(Text(NetworkTuning.ComparisonPolicyDescription, 14, true));
             panel.Children.Add(Text("测速会产生有限流量，走本机→所选代理→Cloudflare 测试点；VPS 自身出口测速另列。UDP 仅采集 5 个样本，超时如实记录。结果不代表所有网站或线路。", 14, true));
             ShowNetworkSchedule(panel, directory);
             JsonObject? report = null;
@@ -50,9 +51,11 @@ public sealed partial class MainWindow
             }
             if (report != null) panel.Children.Add(NetworkReportCard(report));
             var kernelChanged = report != null && state.Text("KernelUpgrade.Runtime.Kernel") != "" && state.Text("KernelUpgrade.Runtime.Kernel") != report.Text("ServerAfter.Kernel");
+            var oldObservation = report != null && report.Text("ServerAfter.BootId") == "";
             if (kernelChanged) panel.Children.Add(Text("内核已经更换，此记录不能继续用于精细建议。请重新采集；现在仍可审阅 fq + BBR 基础配置。", 14, true));
+            if (oldObservation) panel.Children.Add(Text("此测量来自旧版采集，缺少启动身份。请重新采集后使用精细建议；基础 fq + BBR 仍可单独应用。", 14, true));
             var apply = new JsonObject { ["Scope"] = "Network", ["Profile"] = "EntryBasic" };
-            if (report != null && !kernelChanged && report.Text("Analysis.Profile") == "EntryMeasured")
+            if (report != null && !kernelChanged && !oldObservation && report.Text("Analysis.Profile") == "EntryMeasured")
             {
                 apply["Profile"] = "EntryMeasured"; apply["MeasurementId"] = report.Text("Id");
                 apply["MeasurementSha256"] = ClientSchemes.SourceFingerprint(SafePath.Resolve(directory, "network-measurements/" + report.Text("Id") + ".json"));
@@ -62,20 +65,23 @@ public sealed partial class MainWindow
             if (comparison?.Text("BeforeId") is { Length: > 0 } beforeId && comparison.Text("AfterId") is { Length: > 0 } afterId)
             {
                 var before = NetworkTuning.ReadReport(directory, beforeId); var after = NetworkTuning.ReadReport(directory, afterId);
-                panel.Children.Add(Card(Column(Text("应用前后对比", 17), NetworkMetrics(before, after), Text(ComparisonLabel(comparison.Text("Result")) + (comparison.Flag("RestoredOriginal") ? "；已恢复原运行值与队列。" : "；已保留本次配置。"), 14))));
+                panel.Children.Add(Card(Column(Text("应用前后对比", 17), NetworkMetrics(before, after), Text(ComparisonLabel(comparison.Text("Result")) + (comparison.Flag("RestoredOriginal") ? "；已恢复原运行值与队列。" : "；已保留本次配置。"), 14), Text(comparison.Text("Decision.Reason", "此记录来自旧版判定；新复测会显示丢包参考与速度的具体取舍。"), 13, true))));
             }
+            if (apply.Text("Profile") == "EntryMeasured") panel.Children.Add(Action("只应用 fq + BBR 基础配置", () => Submit(new(OperationKind.TuneNetwork, relative, new JsonObject { ["Scope"] = "Network", ["Profile"] = "EntryBasic", ["BbrVersion"] = BbrChoice(relative) }))));
             pageAction.Content = Action(apply.Text("Profile") == "EntryMeasured" ? "审阅并应用建议" : "审阅基础配置", () => { apply["BbrVersion"] = BbrChoice(relative); return Submit(new(OperationKind.TuneNetwork, relative, apply)); }, true);
         }
         picker.SelectionChanged += (_, _) => Refresh(); Refresh();
     }
     private static string NetworkTime(string text) => DateTimeOffset.TryParse(text, out var time) ? time.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "未知";
-    private static string ComparisonLabel(string value) => value switch { "Improved" => "本次路径测得收益", "Regression" => "吞吐和传输中延迟明显退化", "Tradeoff" => "速率提高但延迟增加", "NoClearGain" => "未测得明确收益", "Inconclusive" => "复测信息不足", _ => "基础配置已核验" };
+    private static string ComparisonLabel(string value) => value switch { "Improved" => "本次路径测得收益", "Regression" => "丢包参考或传输性能退化", "Tradeoff" => "改善伴随其他指标代价", "NoClearGain" => "未测得明确收益", "Inconclusive" => "复测信息不足", _ => "基础配置已核验" };
     private UIElement NetworkReportCard(JsonObject report)
     {
         var capacity = report.Text("Options.CapacityType") switch { "Shared" => "共享", "Dedicated" => "独享", "Burst" => "突发", _ => "未知" };
         var content = Column(Text("最近一次测量 · " + NetworkTime(report.Text("At")), 17), NetworkMetrics(report), Text("入口协议：" + RoleLabel(report.Text("Options.Protocol")) + " · " + report.Text("Options.Family") + " · 套餐类型：" + capacity, 13, true));
         content.Children.Add(Text("CPU：" + NetworkTuning.Value(report, "ServerAfter.Cpu.BusyPercent").ToString("0.0") + "% · steal：" + NetworkTuning.Value(report, "ServerAfter.Cpu.StealPercent").ToString("0.0") + "% · 内存：" + report.Long("ServerAfter.MemoryKiB") / 1024 + " MiB"));
-        content.Children.Add(Text("TCP 重传段（VPS 全机差值）：" + report.Long("Analysis.RetransmittedSegments") + " · UDP 小样本：" + report.Number("Client.Udp.Received") + "/" + report.Number("Client.Udp.Sent") + " 收到响应；不是整条线路丢包率。", 13, true));
+        var loss = NetworkTuning.LossEvidence(report);
+        content.Children.Add(Text("TCP 重传参考：" + (loss.Flag("Eligible") ? NetworkTuning.Value(loss, "Percent").ToString("0.00", CultureInfo.InvariantCulture) + "%" : "样本不足或计数未确认") + " · 重传 " + loss.Long("RetransmittedSegments") + " / 新发 " + loss.Long("SentSegments") + " 段。VPS 全机计数可能包含其他连接。", 13, true));
+        content.Children.Add(Text("UDP 小样本：" + report.Number("Client.Udp.Received") + "/" + report.Number("Client.Udp.Sent") + " 收到响应；超时单列，不用于判定整条线路丢包率。", 13, true));
         content.Children.Add(Text("VPS→Cloudflare IPv4 补充测速：" + NetworkTuning.Value(report, "VpsOutbound.Outbound.Mbps").ToString("0.0") + " Mbps · " + (report.Text("VpsOutbound.Outbound.Status") == "Complete" ? "已完成" : "未取得") + "；此值不代替实际入口路径吞吐。", 13, true));
         content.Children.Add(Text(report.Text("Client.Status") == "Measured" ? "测量完成；建议未自动应用。" : "测量未完整完成：" + report.Text("Client.SafeFailure", report.Text("Client.LimitReached", "部分传输未完成")), 14));
         foreach (var note in report.Strings("Analysis.Notes")) content.Children.Add(Text(note, 13, true));
@@ -84,7 +90,7 @@ public sealed partial class MainWindow
     private UIElement NetworkMetrics(JsonObject before, JsonObject? after = null)
     {
         var grid = new Grid { ColumnSpacing = 20, RowSpacing = 9 }; grid.ColumnDefinitions.Add(new()); grid.ColumnDefinitions.Add(new()); if (after != null) grid.ColumnDefinitions.Add(new());
-        var rows = new[] { ("指标", "", ""), ("下载 · 单连接", "DownloadSingleMbps", " Mbps"), ("下载 · 4 个连接", "DownloadMultiMbps", " Mbps"), ("上传 · 单连接", "UploadSingleMbps", " Mbps"), ("上传 · 4 个连接", "UploadMultiMbps", " Mbps"), ("实际 TCP RTT", "TcpRttMs", " ms"), ("空闲响应 p95", "IdleP95Ms", " ms"), ("传输中响应 p95", "LoadedP95Ms", " ms"), ("响应抖动", "JitterMs", " ms") };
+        var rows = new[] { ("指标", "", ""), ("TCP 重传比例 · 丢包参考", "TcpRetransmitPercent", "%"), ("下载 · 单连接", "DownloadSingleMbps", " Mbps"), ("下载 · 4 个连接", "DownloadMultiMbps", " Mbps"), ("上传 · 单连接", "UploadSingleMbps", " Mbps"), ("上传 · 4 个连接", "UploadMultiMbps", " Mbps"), ("实际 TCP RTT", "TcpRttMs", " ms"), ("空闲响应 p95", "IdleP95Ms", " ms"), ("传输中响应 p95", "LoadedP95Ms", " ms"), ("响应抖动", "JitterMs", " ms") };
         for (var i = 0; i < rows.Length; i++)
         {
             grid.RowDefinitions.Add(new() { Height = GridLength.Auto });
@@ -92,6 +98,7 @@ public sealed partial class MainWindow
             foreach (var (report, column) in after == null ? new[] { (before, 1) } : new[] { (before, 1), (after, 2) })
             {
                 var value = i == 0 ? column == 1 ? after == null ? "本次实测" : "应用前" : "应用后" : NetworkTuning.Value(report, "Analysis." + rows[i].Item2) > 0 ? NetworkTuning.Value(report, "Analysis." + rows[i].Item2).ToString("0.0", CultureInfo.InvariantCulture) + rows[i].Item3 : "未取得";
+                if (rows[i].Item2 == "TcpRetransmitPercent") { var loss = NetworkTuning.LossEvidence(report); value = loss.Flag("Eligible") ? NetworkTuning.Value(loss, "Percent").ToString("0.00", CultureInfo.InvariantCulture) + "%" : "未取得足够依据"; }
                 var text = Text(value); Grid.SetColumn(text, column); Grid.SetRow(text, i); grid.Children.Add(text);
             }
         }

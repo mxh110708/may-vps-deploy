@@ -10,7 +10,7 @@ public interface INetworkMeasurement
         Func<CancellationToken, Task<JsonObject>> observe, IProgress<string> progress, CancellationToken cancellationToken);
 }
 
-public static class NetworkTuning
+public static partial class NetworkTuning
 {
     public static bool IsEntry(JsonObject plan) => DeploymentPlans.Roles[..2].Any(role =>
         plan.Flag("ProtocolInventory." + role + ".Enabled", DeploymentPlans.InitiallyEnabled(plan, role)));
@@ -136,16 +136,17 @@ public static class NetworkTuning
         if (idle.Length < 3 || loaded.Length < 3) notes.Add("响应时间样本不足，无法核对排队代价，保留基础配置建议。");
         if (server.Long("MemoryKiB") <= 0 || Sysctl(server, "net.ipv4.tcp_moderate_rcvbuf") != "1") notes.Add("内存或自动接收缓冲状态未确认，不调整缓冲区。");
         if (loaded.Length >= 3 && loaded95 > Math.Max(idle95 * 1.5, idle95 + 30)) notes.Add("传输中延迟明显升高；优先观察排队，避免盲目增加缓存。此版本不自动配置全局限速。");
-        var retransBefore = report.Long("ServerBefore.Counters.TcpRetransSegs"); var retrans = Math.Max(0, server.Long("Counters.TcpRetransSegs") - retransBefore);
-        var sent = Math.Max(0, server.Long("Counters.TcpOutSegs") - report.Long("ServerBefore.Counters.TcpOutSegs"));
-        if (retrans > 0) notes.Add("TCP 重传是 VPS 全机计数差值，可能包含其他连接；不等同于所选线路丢包率。");
+        var loss = LossEvidence(report);
+        var retrans = loss.Long("RetransmittedSegments"); var sent = loss.Long("SentSegments");
+        notes.Add("TCP 重传比例来自 VPS 全机计数，可能包含其他连接；仅作为丢包参考，不等同于所选线路丢包率。");
+        if (!loss.Flag("Eligible")) notes.Add("重传计数缺失、重置或新发送段少于 " + MinimumLossSegments + "，不足以判断丢包变化；精细参数复测不会仅凭速度提高而自动保留。");
         notes.Add("吞吐为本机→所选代理→Cloudflare 测试点的实测有效载荷速率；不是套餐带宽，也不是纯 VPS 网卡速率。");
         var memoryMiB = server.Long("MemoryKiB") / 1024; var cap = (memoryMiB <= 512 ? 4L : memoryMiB <= 1024 ? 8L : memoryMiB <= 2048 ? 16L : 32L) * 1048576;
         long Ceiling(string key) => long.TryParse(Sysctl(server, key).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).LastOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : 0;
         var ceilings = new[] { "net.ipv4.tcp_rmem", "net.ipv4.tcp_wmem", "net.core.rmem_max", "net.core.wmem_max" }.Select(Ceiling).ToArray();
         if (ceilings.Any(value => value <= 0)) notes.Add("现有缓冲上限未完整确认，保留原值，仅建议基础配置。");
         else if (ceilings.Any(value => value > cap)) notes.Add("现有缓冲上限已高于本机保守内存预算；本轮保留原值，仅建议 fq 与可用 BBR。");
-        var eligible = client.Text("Status") == "Measured" && client.Flag("EgressVerified") && rtt > 0 && download > 0 && upload > 0 && options.Number("BandwidthMbps") > 0 && cpu < 85 && steal < 10 && idle.Length >= 3 && loaded.Length >= 3 && server.Long("MemoryKiB") > 0 && Sysctl(server, "net.ipv4.tcp_moderate_rcvbuf") == "1" && ceilings.All(value => value > 0 && value <= cap) && all.Count(t => t.Flag("Complete") && Value(t, "Seconds") >= .25) >= 4;
+        var eligible = client.Text("Status") == "Measured" && client.Flag("EgressVerified") && loss.Flag("Eligible") && rtt > 0 && download > 0 && upload > 0 && options.Number("BandwidthMbps") > 0 && cpu < 85 && steal < 10 && idle.Length >= 3 && loaded.Length >= 3 && server.Long("MemoryKiB") > 0 && Sysctl(server, "net.ipv4.tcp_moderate_rcvbuf") == "1" && ceilings.All(value => value > 0 && value <= cap) && all.Count(t => t.Flag("Complete") && Value(t, "Seconds") >= .25) >= 4;
         var rate = Math.Max(Math.Min(options.Number("BandwidthMbps"), planningDownload), options.Number("UploadMbps") > 0 ? Math.Min(options.Number("UploadMbps"), upload) : Math.Min(options.Number("BandwidthMbps"), upload));
         // A socket ceiling, not a preallocation. Preserve auto-tuning and existing higher values.
         var target = eligible ? Math.Min(cap, Math.Max(2097152L, (long)Math.Ceiling(rate * rtt * 125 * 2))) : 0;
@@ -153,27 +154,9 @@ public static class NetworkTuning
             ["DownloadSingleMbps"] = StreamSpeed("Download", 1), ["DownloadMultiMbps"] = StreamSpeed("Download", 4), ["UploadSingleMbps"] = StreamSpeed("Upload", 1), ["UploadMultiMbps"] = StreamSpeed("Upload", 4),
             ["PlanningDownloadMbps"] = planningDownload, ["TcpRttMs"] = rtt, ["IdleP50Ms"] = Percentile(idle, .5), ["IdleP95Ms"] = idle95, ["LoadedP95Ms"] = loaded95,
             ["JitterMs"] = Percentile(idle.Zip(idle.Skip(1), (a, b) => Math.Abs(a - b)), .5),
-            ["RetransmittedSegments"] = retrans, ["SentSegments"] = sent, ["BufferTargetBytes"] = target, ["BufferCapBytes"] = cap,
+            ["RetransmittedSegments"] = retrans, ["SentSegments"] = sent, ["TcpRetransmitPercent"] = loss["Percent"]?.DeepClone(), ["LossEvidence"] = loss, ["BufferTargetBytes"] = target, ["BufferCapBytes"] = cap,
             ["PeakSample"] = peak, ["PeakCovered"] = coverage, ["Confidence"] = eligible ? coverage ? "AcrossTimeWindows" : "CurrentWindowOnly" : "InsufficientForBuffers", ["Notes"] = notes };
     }
     private static double[] Values(JsonObject node, string path) => (node.At(path) as JsonArray ?? []).Select(value => Value(new JsonObject { ["v"] = value?.DeepClone() }, "v")).Where(value => value > 0).ToArray();
-    public static string Compare(JsonObject before, JsonObject after)
-    {
-        var b = before["Analysis"]!.AsObject(); var a = after["Analysis"]!.AsObject();
-        if (!before.Flag("Client.EgressVerified") || !after.Flag("Client.EgressVerified") || before.Text("SourceFingerprint") != after.Text("SourceFingerprint") || before.Text("Options.Protocol") != after.Text("Options.Protocol") || before.Text("Options.Family") != after.Text("Options.Family") || before.Text("Options.TestSize") != after.Text("Options.TestSize") || b.Text("Profile") != "EntryMeasured" || a.Text("Profile") != "EntryMeasured") return "Inconclusive";
-        if (Value(a, "DownloadMbps") < Value(b, "DownloadMbps") * .7 && Value(a, "UploadMbps") < Value(b, "UploadMbps") * .7 && Value(a, "LoadedP95Ms") > Math.Max(Value(b, "LoadedP95Ms") * 1.5, Value(b, "LoadedP95Ms") + 30)) return "Regression";
-        bool RepeatedGain(string direction)
-        {
-            var old = (before.At("Client.Transfers") as JsonArray ?? []).OfType<JsonObject>().Where(x => x.Text("Direction") == direction && x.Flag("Complete") && Value(x, "Seconds") >= .25).ToArray();
-            var current = (after.At("Client.Transfers") as JsonArray ?? []).OfType<JsonObject>().Where(x => x.Text("Direction") == direction && x.Flag("Complete") && Value(x, "Seconds") >= .25).ToArray();
-            var pairs = old.Select(x => (Old: x, New: current.SingleOrDefault(y => y.Number("Streams") == x.Number("Streams") && y.Number("Round") == x.Number("Round")))).Where(x => x.New != null).ToArray();
-            return pairs.Length >= 4 && pairs.Count(x => Value(x.New, "Mbps") > Value(x.Old, "Mbps") * 1.1) >= Math.Ceiling(pairs.Length * 2d / 3);
-        }
-        if ((Value(a, "DownloadMbps") > Value(b, "DownloadMbps") * 1.1 && RepeatedGain("Download")) || (Value(a, "UploadMbps") > Value(b, "UploadMbps") * 1.1 && RepeatedGain("Upload")))
-        {
-            if (Value(a, "DownloadMbps") < Value(b, "DownloadMbps") * .8 || Value(a, "UploadMbps") < Value(b, "UploadMbps") * .8) return "Tradeoff";
-            return Value(a, "LoadedP95Ms") <= Math.Max(Value(b, "LoadedP95Ms") * 1.15, Value(b, "LoadedP95Ms") + 15) ? "Improved" : "Tradeoff";
-        }
-        return "NoClearGain";
-    }
+    public static string Compare(JsonObject before, JsonObject after) => CompareDetailed(before, after).Text("Result");
 }

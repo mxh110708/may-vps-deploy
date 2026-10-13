@@ -36,153 +36,1106 @@ dns:
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter:
-    - localhost
-    - +.lan
-    - +.local
+  - localhost
+  - +.lan
+  - +.local
+  - android
+  - chrome
+  - dclk
+  - gbiz
+  - gle
+  - gmail
+  - goog
+  - google
+  - guge
+  - hangout
+  - nexus
+  - xn--flw351e
+  - xn--qcka1pmc
+  - youtube
   respect-rules: true
   default-nameserver:
-    - 223.5.5.5
-    - 119.29.29.29
+  - 223.5.5.5
+  - 119.29.29.29
   nameserver:
-    - https://1.1.1.1/dns-query
-    - https://8.8.8.8/dns-query
+  - https://1.1.1.1/dns-query
+  - https://8.8.8.8/dns-query
   proxy-server-nameserver:
-    - 223.5.5.5
-    - 119.29.29.29
+  - 223.5.5.5
+  - 119.29.29.29
   direct-nameserver:
-    - 223.5.5.5
-    - 119.29.29.29
+  - 223.5.5.5
+  - 119.29.29.29
   nameserver-policy:
     "geosite:private,cn":
-      - 223.5.5.5
-      - 119.29.29.29
+    - 223.5.5.5
+    - 119.29.29.29
+    android:
+    - 223.5.5.5
+    - 119.29.29.29
+    chrome:
+    - 223.5.5.5
+    - 119.29.29.29
+    dclk:
+    - 223.5.5.5
+    - 119.29.29.29
+    gbiz:
+    - 223.5.5.5
+    - 119.29.29.29
+    gle:
+    - 223.5.5.5
+    - 119.29.29.29
+    gmail:
+    - 223.5.5.5
+    - 119.29.29.29
+    goog:
+    - 223.5.5.5
+    - 119.29.29.29
+    google:
+    - 223.5.5.5
+    - 119.29.29.29
+    guge:
+    - 223.5.5.5
+    - 119.29.29.29
+    hangout:
+    - 223.5.5.5
+    - 119.29.29.29
+    nexus:
+    - 223.5.5.5
+    - 119.29.29.29
+    xn--flw351e:
+    - 223.5.5.5
+    - 119.29.29.29
+    xn--qcka1pmc:
+    - 223.5.5.5
+    - 119.29.29.29
+    youtube:
+    - 223.5.5.5
+    - 119.29.29.29
 proxies: []
 proxy-groups:
-  - name: US-West Entry
-    type: select
-    proxies: [DIRECT]
-  - name: Hong Kong Entry
-    type: select
-    proxies: [DIRECT]
-  - name: Europe Entry
-    type: select
-    proxies: [DIRECT]
-  - name: Default Exit
-    type: select
-    proxies: [DIRECT]
-  - name: Direct Route
-    type: select
-    proxies: [DIRECT]
-  - name: AI Services
-    type: select
-    proxies: [Default Exit, DIRECT]
-  - name: Developer Tools
-    type: select
-    proxies: [Default Exit, DIRECT]
-  - name: Academic Research
-    type: select
-    proxies: [Default Exit, DIRECT]
-  - name: Microsoft Services
-    type: select
-    proxies: [Direct Route, Default Exit]
-  - name: Microsoft Global
-    type: select
-    proxies: [Default Exit, DIRECT]
-  - name: Apple Services
-    type: select
-    proxies: [Direct Route, Default Exit]
-  - name: Game Platforms
-    type: select
-    proxies: [Default Exit, DIRECT]
-  - name: Game Downloads
-    type: select
-    proxies: [Direct Route, Default Exit]
-  - name: Social & Messaging
-    type: select
-    proxies: [Default Exit, DIRECT]
-  - name: Streaming Media
-    type: select
-    proxies: [Default Exit, DIRECT]
-  - name: UDP Guard
-    type: select
-    proxies: [Default Exit, DIRECT, REJECT]
-  - name: Catch-All
-    type: select
-    proxies: [Default Exit, DIRECT]
-  - name: WebRTC Guard
-    type: select
-    proxies: [REJECT, Default Exit, DIRECT]
-  - name: QUIC Guard
-    type: select
-    proxies: [REJECT, Default Exit, DIRECT]
-  - name: Ad Block
-    type: select
-    proxies: [REJECT, DIRECT, Default Exit]
-  - name: Legacy Ports
-    type: select
-    proxies: [REJECT, DIRECT, Default Exit]
+- name: US-West Entry
+  type: select
+  proxies: [DIRECT]
+- name: Hong Kong Entry
+  type: select
+  proxies: [DIRECT]
+- name: Europe Entry
+  type: select
+  proxies: [DIRECT]
+- name: Default Exit
+  type: select
+  proxies: [DIRECT]
+- name: Direct Route
+  type: select
+  proxies: [DIRECT]
+- name: AI Services
+  type: select
+  proxies: [Default Exit, DIRECT]
+- name: Developer Tools
+  type: select
+  proxies: [Default Exit, DIRECT]
+- name: Academic Research
+  type: select
+  proxies: [Default Exit, DIRECT]
+- name: Google Services
+  type: select
+  proxies:
+  - Default Exit
+  - Direct Route
+- name: Microsoft Services
+  type: select
+  proxies: [Direct Route, Default Exit]
+- name: Microsoft Global
+  type: select
+  proxies: [Default Exit, DIRECT]
+- name: Apple Services
+  type: select
+  proxies: [Direct Route, Default Exit]
+- name: Game Platforms
+  type: select
+  proxies: [Default Exit, DIRECT]
+- name: Game Downloads
+  type: select
+  proxies: [Direct Route, Default Exit]
+- name: Social & Messaging
+  type: select
+  proxies: [Default Exit, DIRECT]
+- name: Streaming Media
+  type: select
+  proxies: [Default Exit, DIRECT]
+- name: UDP Guard
+  type: select
+  proxies: [Default Exit, DIRECT, REJECT]
+- name: Catch-All
+  type: select
+  proxies: [Default Exit, DIRECT]
+- name: WebRTC Guard
+  type: select
+  proxies: [REJECT, Default Exit, DIRECT]
+- name: QUIC Guard
+  type: select
+  proxies: [REJECT, Default Exit, DIRECT]
+- name: Ad Block
+  type: select
+  proxies: [REJECT, DIRECT, Default Exit]
+- name: Legacy Ports
+  type: select
+  proxies: [REJECT, DIRECT, Default Exit]
 rules:
-  - DST-PORT,25,Legacy Ports
-  - DST-PORT,3306,Legacy Ports
-  - AND,((NETWORK,UDP),(DST-PORT,443)),QUIC Guard
-  - AND,((NETWORK,UDP),(DST-PORT,3478-3481)),WebRTC Guard
-  - GEOSITE,category-ads-all,Ad Block
-  - GEOSITE,private,Direct Route
-  - IP-CIDR,127.0.0.0/8,Direct Route,no-resolve
-  - IP-CIDR,10.0.0.0/8,Direct Route,no-resolve
-  - IP-CIDR,172.16.0.0/12,Direct Route,no-resolve
-  - IP-CIDR,192.168.0.0/16,Direct Route,no-resolve
-  - IP-CIDR,169.254.0.0/16,Direct Route,no-resolve
-  - IP-CIDR6,::1/128,Direct Route,no-resolve
-  - IP-CIDR6,fc00::/7,Direct Route,no-resolve
-  - IP-CIDR6,fe80::/10,Direct Route,no-resolve
-  - DOMAIN-SUFFIX,openai.com,AI Services
-  - DOMAIN-SUFFIX,chatgpt.com,AI Services
-  - DOMAIN-SUFFIX,oaistatic.com,AI Services
-  - DOMAIN-SUFFIX,oaiusercontent.com,AI Services
-  - DOMAIN-SUFFIX,anthropic.com,AI Services
-  - DOMAIN-SUFFIX,claude.ai,AI Services
-  - DOMAIN-SUFFIX,perplexity.ai,AI Services
-  - DOMAIN-SUFFIX,huggingface.co,AI Services
-  - DOMAIN-SUFFIX,hf.co,AI Services
-  - DOMAIN-SUFFIX,github.com,Developer Tools
-  - DOMAIN-SUFFIX,githubusercontent.com,Developer Tools
-  - DOMAIN-SUFFIX,npmjs.org,Developer Tools
-  - DOMAIN-SUFFIX,pypi.org,Developer Tools
-  - DOMAIN-SUFFIX,docker.com,Developer Tools
-  - DOMAIN-SUFFIX,docker.io,Developer Tools
-  - DOMAIN-SUFFIX,arxiv.org,Academic Research
-  - DOMAIN-SUFFIX,ieee.org,Academic Research
-  - DOMAIN-SUFFIX,springer.com,Academic Research
-  - DOMAIN-SUFFIX,nature.com,Academic Research
-  - DOMAIN-SUFFIX,bing.com,Microsoft Global
-  - DOMAIN-SUFFIX,bing.net,Microsoft Global
-  - DOMAIN-SUFFIX,bingapis.com,Microsoft Global
-  - DOMAIN-SUFFIX,copilot.microsoft.com,Microsoft Global
-  - DOMAIN-SUFFIX,azure.com,Microsoft Global
-  - DOMAIN-SUFFIX,azureedge.net,Microsoft Global
-  - DOMAIN-SUFFIX,microsoft.com,Microsoft Services
-  - DOMAIN-SUFFIX,office.com,Microsoft Services
-  - DOMAIN-SUFFIX,live.com,Microsoft Services
-  - DOMAIN-SUFFIX,apple.com,Apple Services
-  - DOMAIN-SUFFIX,icloud.com,Apple Services
-  - DOMAIN-SUFFIX,xbox.com,Game Platforms
-  - DOMAIN-SUFFIX,xboxlive.com,Game Platforms
-  - DOMAIN-SUFFIX,steampowered.com,Game Platforms
-  - DOMAIN-SUFFIX,steamcommunity.com,Game Platforms
-  - DOMAIN-SUFFIX,steamcontent.com,Game Downloads
-  - DOMAIN-SUFFIX,telegram.org,Social & Messaging
-  - DOMAIN-SUFFIX,t.me,Social & Messaging
-  - DOMAIN-SUFFIX,twitter.com,Social & Messaging
-  - DOMAIN-SUFFIX,x.com,Social & Messaging
-  - DOMAIN-SUFFIX,youtube.com,Streaming Media
-  - DOMAIN-SUFFIX,googlevideo.com,Streaming Media
-  - DOMAIN-SUFFIX,ytimg.com,Streaming Media
-  - DOMAIN-SUFFIX,netflix.com,Streaming Media
-  - DOMAIN-SUFFIX,nflxvideo.net,Streaming Media
-  - DOMAIN-SUFFIX,spotify.com,Streaming Media
-  - GEOSITE,cn,Direct Route
-  - GEOIP,CN,Direct Route,no-resolve
-  - NETWORK,udp,UDP Guard
-  - GEOSITE,geolocation-!cn,Catch-All
-  - MATCH,Catch-All
+- DST-PORT,25,Legacy Ports
+- DST-PORT,3306,Legacy Ports
+- AND,((NETWORK,UDP),(DST-PORT,443)),QUIC Guard
+- AND,((NETWORK,UDP),(DST-PORT,3478-3481)),WebRTC Guard
+- DOMAIN,android,Direct Route
+- DOMAIN,chrome,Direct Route
+- DOMAIN,dclk,Direct Route
+- DOMAIN,gbiz,Direct Route
+- DOMAIN,gle,Direct Route
+- DOMAIN,gmail,Direct Route
+- DOMAIN,goog,Direct Route
+- DOMAIN,google,Direct Route
+- DOMAIN,guge,Direct Route
+- DOMAIN,hangout,Direct Route
+- DOMAIN,nexus,Direct Route
+- DOMAIN,xn--flw351e,Direct Route
+- DOMAIN,xn--qcka1pmc,Direct Route
+- DOMAIN,youtube,Direct Route
+- DOMAIN,ai.google.dev,AI Services
+- DOMAIN,alkalicore-pa.clients6.google.com,AI Services
+- DOMAIN,alkalimakersuite-pa.clients6.google.com,AI Services
+- DOMAIN,antigravity-pa.googleapis.com,AI Services
+- DOMAIN,antigravity.googleapis.com,AI Services
+- DOMAIN,cloudaicompanion.googleapis.com,AI Services
+- DOMAIN,cloudcode-pa.googleapis.com,AI Services
+- DOMAIN,daily-cloudcode-pa.googleapis.com,AI Services
+- DOMAIN,geminiweb-pa.clients.google.com,AI Services
+- DOMAIN,geminiweb-pa.clients6.google.com,AI Services
+- DOMAIN,notebooklm-pa.googleapis.com,AI Services
+- DOMAIN,notebooklm.googleapis.com,AI Services
+- DOMAIN,webchannel-alkalimakersuite-pa.clients6.google.com,AI Services
+- DOMAIN-SUFFIX,ai.google,AI Services
+- DOMAIN-SUFFIX,ai.studio,AI Services
+- DOMAIN-SUFFIX,aicode.googleapis.com,AI Services
+- DOMAIN-SUFFIX,aida.googleapis.com,AI Services
+- DOMAIN-SUFFIX,aisandbox-pa.googleapis.com,AI Services
+- DOMAIN-SUFFIX,aistudio.google.com,AI Services
+- DOMAIN-SUFFIX,antigravity-unleash.goog,AI Services
+- DOMAIN-SUFFIX,antigravity.google,AI Services
+- DOMAIN-SUFFIX,api.ai,AI Services
+- DOMAIN-SUFFIX,bard.google.com,AI Services
+- DOMAIN-SUFFIX,colab.research.google.com,AI Services
+- DOMAIN-SUFFIX,deepmind.com,AI Services
+- DOMAIN-SUFFIX,deepmind.google,AI Services
+- DOMAIN-SUFFIX,developerprofiles-pa.googleapis.com,AI Services
+- DOMAIN-SUFFIX,flow.google,AI Services
+- DOMAIN-SUFFIX,flow.google.com,AI Services
+- DOMAIN-SUFFIX,geller-pa.googleapis.com,AI Services
+- DOMAIN-SUFFIX,gemini.google,AI Services
+- DOMAIN-SUFFIX,gemini.google.com,AI Services
+- DOMAIN-SUFFIX,gemini.gstatic.com,AI Services
+- DOMAIN-SUFFIX,generativeai.google,AI Services
+- DOMAIN-SUFFIX,generativelanguage.googleapis.com,AI Services
+- DOMAIN-SUFFIX,jules.google,AI Services
+- DOMAIN-SUFFIX,jules.google.com,AI Services
+- DOMAIN-SUFFIX,labs.google,AI Services
+- DOMAIN-SUFFIX,labs.google.com,AI Services
+- DOMAIN-SUFFIX,labstailwind.pa.googleapis.com,AI Services
+- DOMAIN-SUFFIX,makersuite.google.com,AI Services
+- DOMAIN-SUFFIX,notebook.google,AI Services
+- DOMAIN-SUFFIX,notebook.google.com,AI Services
+- DOMAIN-SUFFIX,notebooklm.google,AI Services
+- DOMAIN-SUFFIX,notebooklm.google.com,AI Services
+- DOMAIN-SUFFIX,opal.google,AI Services
+- DOMAIN-SUFFIX,opal.google.com,AI Services
+- DOMAIN-SUFFIX,proactivebackend-pa.googleapis.com,AI Services
+- DOMAIN-SUFFIX,robinfrontend-pa.googleapis.com,AI Services
+- DOMAIN-SUFFIX,stitch.withgoogle.com,AI Services
+- DOMAIN-SUFFIX,vids.google.com,AI Services
+- DOMAIN-SUFFIX,openxla.org,Google Services
+- GEOSITE,category-ads-all,Ad Block
+- GEOSITE,private,Direct Route
+- IP-CIDR,127.0.0.0/8,Direct Route,no-resolve
+- IP-CIDR,10.0.0.0/8,Direct Route,no-resolve
+- IP-CIDR,172.16.0.0/12,Direct Route,no-resolve
+- IP-CIDR,192.168.0.0/16,Direct Route,no-resolve
+- IP-CIDR,169.254.0.0/16,Direct Route,no-resolve
+- IP-CIDR6,::1/128,Direct Route,no-resolve
+- IP-CIDR6,fc00::/7,Direct Route,no-resolve
+- IP-CIDR6,fe80::/10,Direct Route,no-resolve
+- DOMAIN-SUFFIX,openai.com,AI Services
+- DOMAIN-SUFFIX,chatgpt.com,AI Services
+- DOMAIN-SUFFIX,oaistatic.com,AI Services
+- DOMAIN-SUFFIX,oaiusercontent.com,AI Services
+- DOMAIN-SUFFIX,anthropic.com,AI Services
+- DOMAIN-SUFFIX,claude.ai,AI Services
+- DOMAIN-SUFFIX,perplexity.ai,AI Services
+- DOMAIN-SUFFIX,huggingface.co,AI Services
+- DOMAIN-SUFFIX,hf.co,AI Services
+- DOMAIN-SUFFIX,github.com,Developer Tools
+- DOMAIN-SUFFIX,githubusercontent.com,Developer Tools
+- DOMAIN-SUFFIX,npmjs.org,Developer Tools
+- DOMAIN-SUFFIX,pypi.org,Developer Tools
+- DOMAIN-SUFFIX,docker.com,Developer Tools
+- DOMAIN-SUFFIX,docker.io,Developer Tools
+- DOMAIN-SUFFIX,arxiv.org,Academic Research
+- DOMAIN-SUFFIX,ieee.org,Academic Research
+- DOMAIN-SUFFIX,springer.com,Academic Research
+- DOMAIN-SUFFIX,nature.com,Academic Research
+- DOMAIN-SUFFIX,bing.com,Microsoft Global
+- DOMAIN-SUFFIX,bing.net,Microsoft Global
+- DOMAIN-SUFFIX,bingapis.com,Microsoft Global
+- DOMAIN-SUFFIX,copilot.microsoft.com,Microsoft Global
+- DOMAIN-SUFFIX,azure.com,Microsoft Global
+- DOMAIN-SUFFIX,azureedge.net,Microsoft Global
+- DOMAIN-SUFFIX,microsoft.com,Microsoft Services
+- DOMAIN-SUFFIX,office.com,Microsoft Services
+- DOMAIN-SUFFIX,live.com,Microsoft Services
+- DOMAIN-SUFFIX,apple.com,Apple Services
+- DOMAIN-SUFFIX,icloud.com,Apple Services
+- DOMAIN-SUFFIX,xbox.com,Game Platforms
+- DOMAIN-SUFFIX,xboxlive.com,Game Platforms
+- DOMAIN-SUFFIX,steampowered.com,Game Platforms
+- DOMAIN-SUFFIX,steamcommunity.com,Game Platforms
+- DOMAIN-SUFFIX,steamcontent.com,Game Downloads
+- DOMAIN-SUFFIX,telegram.org,Social & Messaging
+- DOMAIN-SUFFIX,t.me,Social & Messaging
+- DOMAIN-SUFFIX,twitter.com,Social & Messaging
+- DOMAIN-SUFFIX,x.com,Social & Messaging
+- DOMAIN,2mdn-cn.net,Google Services
+- DOMAIN,2mdn.net,Google Services
+- DOMAIN,admob-cn.com,Google Services
+- DOMAIN,app-analytics-services.com,Google Services
+- DOMAIN,app-measurement-cn.com,Google Services
+- DOMAIN,app-measurement.com,Google Services
+- DOMAIN,apps5.oingo.com,Google Services
+- DOMAIN,avail.googleflights.net,Google Services
+- DOMAIN,c.admob.com,Google Services
+- DOMAIN,clickserve.cc-dt.com,Google Services
+- DOMAIN,clickserver.googleads.com,Google Services
+- DOMAIN,dartsearch-cn.net,Google Services
+- DOMAIN,doubleclick-cn.net,Google Services
+- DOMAIN,doubleclick.net,Google Services
+- DOMAIN,gongyichuangyi.net,Google Services
+- DOMAIN,google-analytics-cn.com,Google Services
+- DOMAIN,google-analytics.com,Google Services
+- DOMAIN,google-ohttp-relay-safebrowsing.fastly-edge.com,Google Services
+- DOMAIN,googleadservices-cn.com,Google Services
+- DOMAIN,googleadservices.com,Google Services
+- DOMAIN,googleanalytics.com,Google Services
+- DOMAIN,googleapis-cn.com,Google Services
+- DOMAIN,googleapps-cn.com,Google Services
+- DOMAIN,googleflights-cn.net,Google Services
+- DOMAIN,googleoptimize-cn.com,Google Services
+- DOMAIN,googleoptimize.com,Google Services
+- DOMAIN,googlesyndication-cn.com,Google Services
+- DOMAIN,googlesyndication.com,Google Services
+- DOMAIN,googletagmanager-cn.com,Google Services
+- DOMAIN,googletagmanager.com,Google Services
+- DOMAIN,googletagservices-cn.com,Google Services
+- DOMAIN,googletagservices.com,Google Services
+- DOMAIN,googletraveladservices-cn.com,Google Services
+- DOMAIN,googletraveladservices.com,Google Services
+- DOMAIN,googlevads-cn.com,Google Services
+- DOMAIN,gstatic-cn.com,Google Services
+- DOMAIN,gtm.oasisfeng.com,Google Services
+- DOMAIN,qiao-cn.com,Google Services
+- DOMAIN,qpx.googleflights.net,Google Services
+- DOMAIN,recaptcha-cn.net,Google Services
+- DOMAIN,service.urchin.com,Google Services
+- DOMAIN,www.destinationurl.com,Google Services
+- DOMAIN,www.pxcc.com,Google Services
+- DOMAIN,www.recaptcha-cn.net,Google Services
+- DOMAIN-SUFFIX,0emm.com,Google Services
+- DOMAIN-SUFFIX,1e100.net,Google Services
+- DOMAIN-SUFFIX,1ucrs.com,Google Services
+- DOMAIN-SUFFIX,265.com,Google Services
+- DOMAIN-SUFFIX,466453.com,Google Services
+- DOMAIN-SUFFIX,actifio.com,Google Services
+- DOMAIN-SUFFIX,adgoogle.net,Google Services
+- DOMAIN-SUFFIX,admeld.com,Google Services
+- DOMAIN-SUFFIX,android,Google Services
+- DOMAIN-SUFFIX,android.com,Google Services
+- DOMAIN-SUFFIX,androidify.com,Google Services
+- DOMAIN-SUFFIX,angulardart.org,Google Services
+- DOMAIN-SUFFIX,apigee.com,Google Services
+- DOMAIN-SUFFIX,appbridge.ca,Google Services
+- DOMAIN-SUFFIX,appbridge.io,Google Services
+- DOMAIN-SUFFIX,appbridge.it,Google Services
+- DOMAIN-SUFFIX,appspot.com,Google Services
+- DOMAIN-SUFFIX,apture.com,Google Services
+- DOMAIN-SUFFIX,area120.com,Google Services
+- DOMAIN-SUFFIX,asp-cc.com,Google Services
+- DOMAIN-SUFFIX,autodraw.com,Google Services
+- DOMAIN-SUFFIX,bandpage.com,Google Services
+- DOMAIN-SUFFIX,baselinestudy.com,Google Services
+- DOMAIN-SUFFIX,baselinestudy.org,Google Services
+- DOMAIN-SUFFIX,bazel.build,Google Services
+- DOMAIN-SUFFIX,bdn.dev,Google Services
+- DOMAIN-SUFFIX,beatthatquote.com,Google Services
+- DOMAIN-SUFFIX,blink.org,Google Services
+- DOMAIN-SUFFIX,blogblog.com,Google Services
+- DOMAIN-SUFFIX,blogger.com,Google Services
+- DOMAIN-SUFFIX,blogspot.ae,Google Services
+- DOMAIN-SUFFIX,blogspot.al,Google Services
+- DOMAIN-SUFFIX,blogspot.am,Google Services
+- DOMAIN-SUFFIX,blogspot.ba,Google Services
+- DOMAIN-SUFFIX,blogspot.be,Google Services
+- DOMAIN-SUFFIX,blogspot.bg,Google Services
+- DOMAIN-SUFFIX,blogspot.bj,Google Services
+- DOMAIN-SUFFIX,blogspot.ca,Google Services
+- DOMAIN-SUFFIX,blogspot.cf,Google Services
+- DOMAIN-SUFFIX,blogspot.ch,Google Services
+- DOMAIN-SUFFIX,blogspot.cl,Google Services
+- DOMAIN-SUFFIX,blogspot.co.at,Google Services
+- DOMAIN-SUFFIX,blogspot.co.id,Google Services
+- DOMAIN-SUFFIX,blogspot.co.il,Google Services
+- DOMAIN-SUFFIX,blogspot.co.ke,Google Services
+- DOMAIN-SUFFIX,blogspot.co.nz,Google Services
+- DOMAIN-SUFFIX,blogspot.co.uk,Google Services
+- DOMAIN-SUFFIX,blogspot.co.za,Google Services
+- DOMAIN-SUFFIX,blogspot.com,Google Services
+- DOMAIN-SUFFIX,blogspot.com.ar,Google Services
+- DOMAIN-SUFFIX,blogspot.com.au,Google Services
+- DOMAIN-SUFFIX,blogspot.com.br,Google Services
+- DOMAIN-SUFFIX,blogspot.com.by,Google Services
+- DOMAIN-SUFFIX,blogspot.com.co,Google Services
+- DOMAIN-SUFFIX,blogspot.com.cy,Google Services
+- DOMAIN-SUFFIX,blogspot.com.ee,Google Services
+- DOMAIN-SUFFIX,blogspot.com.eg,Google Services
+- DOMAIN-SUFFIX,blogspot.com.es,Google Services
+- DOMAIN-SUFFIX,blogspot.com.mt,Google Services
+- DOMAIN-SUFFIX,blogspot.com.ng,Google Services
+- DOMAIN-SUFFIX,blogspot.com.tr,Google Services
+- DOMAIN-SUFFIX,blogspot.com.uy,Google Services
+- DOMAIN-SUFFIX,blogspot.cv,Google Services
+- DOMAIN-SUFFIX,blogspot.cz,Google Services
+- DOMAIN-SUFFIX,blogspot.de,Google Services
+- DOMAIN-SUFFIX,blogspot.dk,Google Services
+- DOMAIN-SUFFIX,blogspot.fi,Google Services
+- DOMAIN-SUFFIX,blogspot.fr,Google Services
+- DOMAIN-SUFFIX,blogspot.gr,Google Services
+- DOMAIN-SUFFIX,blogspot.hk,Google Services
+- DOMAIN-SUFFIX,blogspot.hr,Google Services
+- DOMAIN-SUFFIX,blogspot.hu,Google Services
+- DOMAIN-SUFFIX,blogspot.ie,Google Services
+- DOMAIN-SUFFIX,blogspot.in,Google Services
+- DOMAIN-SUFFIX,blogspot.is,Google Services
+- DOMAIN-SUFFIX,blogspot.it,Google Services
+- DOMAIN-SUFFIX,blogspot.jp,Google Services
+- DOMAIN-SUFFIX,blogspot.kr,Google Services
+- DOMAIN-SUFFIX,blogspot.li,Google Services
+- DOMAIN-SUFFIX,blogspot.lt,Google Services
+- DOMAIN-SUFFIX,blogspot.lu,Google Services
+- DOMAIN-SUFFIX,blogspot.md,Google Services
+- DOMAIN-SUFFIX,blogspot.mk,Google Services
+- DOMAIN-SUFFIX,blogspot.mx,Google Services
+- DOMAIN-SUFFIX,blogspot.my,Google Services
+- DOMAIN-SUFFIX,blogspot.nl,Google Services
+- DOMAIN-SUFFIX,blogspot.no,Google Services
+- DOMAIN-SUFFIX,blogspot.pe,Google Services
+- DOMAIN-SUFFIX,blogspot.pt,Google Services
+- DOMAIN-SUFFIX,blogspot.qa,Google Services
+- DOMAIN-SUFFIX,blogspot.re,Google Services
+- DOMAIN-SUFFIX,blogspot.ro,Google Services
+- DOMAIN-SUFFIX,blogspot.rs,Google Services
+- DOMAIN-SUFFIX,blogspot.ru,Google Services
+- DOMAIN-SUFFIX,blogspot.se,Google Services
+- DOMAIN-SUFFIX,blogspot.sg,Google Services
+- DOMAIN-SUFFIX,blogspot.si,Google Services
+- DOMAIN-SUFFIX,blogspot.sk,Google Services
+- DOMAIN-SUFFIX,blogspot.sn,Google Services
+- DOMAIN-SUFFIX,blogspot.td,Google Services
+- DOMAIN-SUFFIX,blogspot.tw,Google Services
+- DOMAIN-SUFFIX,blogspot.ug,Google Services
+- DOMAIN-SUFFIX,blogspot.vn,Google Services
+- DOMAIN-SUFFIX,brocaproject.com,Google Services
+- DOMAIN-SUFFIX,brotli.org,Google Services
+- DOMAIN-SUFFIX,bumpshare.com,Google Services
+- DOMAIN-SUFFIX,bumptop.ca,Google Services
+- DOMAIN-SUFFIX,bumptop.com,Google Services
+- DOMAIN-SUFFIX,bumptop.net,Google Services
+- DOMAIN-SUFFIX,bumptop.org,Google Services
+- DOMAIN-SUFFIX,bumptunes.com,Google Services
+- DOMAIN-SUFFIX,campuslondon.com,Google Services
+- DOMAIN-SUFFIX,certificate-transparency.org,Google Services
+- DOMAIN-SUFFIX,charlestonroadregistry.com,Google Services
+- DOMAIN-SUFFIX,chrome,Google Services
+- DOMAIN-SUFFIX,chrome.com,Google Services
+- DOMAIN-SUFFIX,chromebook.com,Google Services
+- DOMAIN-SUFFIX,chromecast.com,Google Services
+- DOMAIN-SUFFIX,chromeos.dev,Google Services
+- DOMAIN-SUFFIX,chromestatus.com,Google Services
+- DOMAIN-SUFFIX,chromium.org,Google Services
+- DOMAIN-SUFFIX,chronicle.security,Google Services
+- DOMAIN-SUFFIX,chroniclesec.com,Google Services
+- DOMAIN-SUFFIX,cloudburstresearch.com,Google Services
+- DOMAIN-SUFFIX,cloudfunctions.net,Google Services
+- DOMAIN-SUFFIX,cloudproxy.app,Google Services
+- DOMAIN-SUFFIX,cloudrobotics.com,Google Services
+- DOMAIN-SUFFIX,cobrasearch.com,Google Services
+- DOMAIN-SUFFIX,codespot.com,Google Services
+- DOMAIN-SUFFIX,conscrypt.com,Google Services
+- DOMAIN-SUFFIX,conscrypt.org,Google Services
+- DOMAIN-SUFFIX,cookiechoices.org,Google Services
+- DOMAIN-SUFFIX,coova.com,Google Services
+- DOMAIN-SUFFIX,coova.net,Google Services
+- DOMAIN-SUFFIX,coova.org,Google Services
+- DOMAIN-SUFFIX,crashlytics.com,Google Services
+- DOMAIN-SUFFIX,crossmediapanel.com,Google Services
+- DOMAIN-SUFFIX,crr.com,Google Services
+- DOMAIN-SUFFIX,cs4hs.com,Google Services
+- DOMAIN-SUFFIX,dart.dev,Google Services
+- DOMAIN-SUFFIX,dartlang.org,Google Services
+- DOMAIN-SUFFIX,dartpad.dev,Google Services
+- DOMAIN-SUFFIX,dartsearch.net,Google Services
+- DOMAIN-SUFFIX,dataliberation.org,Google Services
+- DOMAIN-SUFFIX,dclk,Google Services
+- DOMAIN-SUFFIX,debug.com,Google Services
+- DOMAIN-SUFFIX,debugproject.com,Google Services
+- DOMAIN-SUFFIX,deps.dev,Google Services
+- DOMAIN-SUFFIX,deps.info,Google Services
+- DOMAIN-SUFFIX,devsitetest.how,Google Services
+- DOMAIN-SUFFIX,dialogflow.com,Google Services
+- DOMAIN-SUFFIX,digitalassetlinks.org,Google Services
+- DOMAIN-SUFFIX,docs.new,Google Services
+- DOMAIN-SUFFIX,episodic.com,Google Services
+- DOMAIN-SUFFIX,fastlane.ci,Google Services
+- DOMAIN-SUFFIX,fastlane.tools,Google Services
+- DOMAIN-SUFFIX,feedburner.com,Google Services
+- DOMAIN-SUFFIX,fflick.com,Google Services
+- DOMAIN-SUFFIX,financeleadsonline.com,Google Services
+- DOMAIN-SUFFIX,firebase.com,Google Services
+- DOMAIN-SUFFIX,firebase.dev,Google Services
+- DOMAIN-SUFFIX,firebase.io,Google Services
+- DOMAIN-SUFFIX,firebaseapp.com,Google Services
+- DOMAIN-SUFFIX,firebaseio.com,Google Services
+- DOMAIN-SUFFIX,fitbit.com,Google Services
+- DOMAIN-SUFFIX,flutter.dev,Google Services
+- DOMAIN-SUFFIX,flutterapp.com,Google Services
+- DOMAIN-SUFFIX,foofle.com,Google Services
+- DOMAIN-SUFFIX,froogle.com,Google Services
+- DOMAIN-SUFFIX,fuchsia.dev,Google Services
+- DOMAIN-SUFFIX,g-tun.com,Google Services
+- DOMAIN-SUFFIX,g.cn,Google Services
+- DOMAIN-SUFFIX,g.co,Google Services
+- DOMAIN-SUFFIX,g.dev,Google Services
+- DOMAIN-SUFFIX,g.page,Google Services
+- DOMAIN-SUFFIX,gateway.dev,Google Services
+- DOMAIN-SUFFIX,gbiz,Google Services
+- DOMAIN-SUFFIX,gcr.io,Google Services
+- DOMAIN-SUFFIX,gerritcodereview.com,Google Services
+- DOMAIN-SUFFIX,get.app,Google Services
+- DOMAIN-SUFFIX,get.dev,Google Services
+- DOMAIN-SUFFIX,get.how,Google Services
+- DOMAIN-SUFFIX,get.new,Google Services
+- DOMAIN-SUFFIX,get.page,Google Services
+- DOMAIN-SUFFIX,get.rsvp,Google Services
+- DOMAIN-SUFFIX,getbumptop.com,Google Services
+- DOMAIN-SUFFIX,ggoogle.com,Google Services
+- DOMAIN-SUFFIX,ggpht.cn,Google Services
+- DOMAIN-SUFFIX,ggpht.com,Google Services
+- DOMAIN-SUFFIX,gipscorp.com,Google Services
+- DOMAIN-SUFFIX,gkecnapps.cn,Google Services
+- DOMAIN-SUFFIX,gle,Google Services
+- DOMAIN-SUFFIX,globaledu.org,Google Services
+- DOMAIN-SUFFIX,gmail,Google Services
+- DOMAIN-SUFFIX,gmail.com,Google Services
+- DOMAIN-SUFFIX,gmodules.com,Google Services
+- DOMAIN-SUFFIX,go-lang.com,Google Services
+- DOMAIN-SUFFIX,go-lang.net,Google Services
+- DOMAIN-SUFFIX,go-lang.org,Google Services
+- DOMAIN-SUFFIX,go.dev,Google Services
+- DOMAIN-SUFFIX,godoc.org,Google Services
+- DOMAIN-SUFFIX,gogle.com,Google Services
+- DOMAIN-SUFFIX,gogole.com,Google Services
+- DOMAIN-SUFFIX,golang.com,Google Services
+- DOMAIN-SUFFIX,golang.net,Google Services
+- DOMAIN-SUFFIX,golang.org,Google Services
+- DOMAIN-SUFFIX,gonglchuangl.net,Google Services
+- DOMAIN-SUFFIX,goo.gl,Google Services
+- DOMAIN-SUFFIX,goog,Google Services
+- DOMAIN-SUFFIX,googel.com,Google Services
+- DOMAIN-SUFFIX,googil.com,Google Services
+- DOMAIN-SUFFIX,googl.com,Google Services
+- DOMAIN-SUFFIX,google,Google Services
+- DOMAIN-SUFFIX,google-access.net,Google Services
+- DOMAIN-SUFFIX,google-syndication.com,Google Services
+- DOMAIN-SUFFIX,google.ad,Google Services
+- DOMAIN-SUFFIX,google.ae,Google Services
+- DOMAIN-SUFFIX,google.al,Google Services
+- DOMAIN-SUFFIX,google.am,Google Services
+- DOMAIN-SUFFIX,google.as,Google Services
+- DOMAIN-SUFFIX,google.at,Google Services
+- DOMAIN-SUFFIX,google.az,Google Services
+- DOMAIN-SUFFIX,google.ba,Google Services
+- DOMAIN-SUFFIX,google.be,Google Services
+- DOMAIN-SUFFIX,google.berlin,Google Services
+- DOMAIN-SUFFIX,google.bf,Google Services
+- DOMAIN-SUFFIX,google.bg,Google Services
+- DOMAIN-SUFFIX,google.bi,Google Services
+- DOMAIN-SUFFIX,google.bj,Google Services
+- DOMAIN-SUFFIX,google.bs,Google Services
+- DOMAIN-SUFFIX,google.bt,Google Services
+- DOMAIN-SUFFIX,google.by,Google Services
+- DOMAIN-SUFFIX,google.ca,Google Services
+- DOMAIN-SUFFIX,google.cat,Google Services
+- DOMAIN-SUFFIX,google.cd,Google Services
+- DOMAIN-SUFFIX,google.cf,Google Services
+- DOMAIN-SUFFIX,google.cg,Google Services
+- DOMAIN-SUFFIX,google.ch,Google Services
+- DOMAIN-SUFFIX,google.ci,Google Services
+- DOMAIN-SUFFIX,google.cl,Google Services
+- DOMAIN-SUFFIX,google.cm,Google Services
+- DOMAIN-SUFFIX,google.cn,Google Services
+- DOMAIN-SUFFIX,google.co,Google Services
+- DOMAIN-SUFFIX,google.co.ao,Google Services
+- DOMAIN-SUFFIX,google.co.bw,Google Services
+- DOMAIN-SUFFIX,google.co.ck,Google Services
+- DOMAIN-SUFFIX,google.co.cr,Google Services
+- DOMAIN-SUFFIX,google.co.id,Google Services
+- DOMAIN-SUFFIX,google.co.il,Google Services
+- DOMAIN-SUFFIX,google.co.in,Google Services
+- DOMAIN-SUFFIX,google.co.jp,Google Services
+- DOMAIN-SUFFIX,google.co.ke,Google Services
+- DOMAIN-SUFFIX,google.co.kr,Google Services
+- DOMAIN-SUFFIX,google.co.ls,Google Services
+- DOMAIN-SUFFIX,google.co.ma,Google Services
+- DOMAIN-SUFFIX,google.co.mz,Google Services
+- DOMAIN-SUFFIX,google.co.nz,Google Services
+- DOMAIN-SUFFIX,google.co.th,Google Services
+- DOMAIN-SUFFIX,google.co.tz,Google Services
+- DOMAIN-SUFFIX,google.co.ug,Google Services
+- DOMAIN-SUFFIX,google.co.uk,Google Services
+- DOMAIN-SUFFIX,google.co.uz,Google Services
+- DOMAIN-SUFFIX,google.co.ve,Google Services
+- DOMAIN-SUFFIX,google.co.vi,Google Services
+- DOMAIN-SUFFIX,google.co.za,Google Services
+- DOMAIN-SUFFIX,google.co.zm,Google Services
+- DOMAIN-SUFFIX,google.co.zw,Google Services
+- DOMAIN-SUFFIX,google.com,Google Services
+- DOMAIN-SUFFIX,google.com.af,Google Services
+- DOMAIN-SUFFIX,google.com.ag,Google Services
+- DOMAIN-SUFFIX,google.com.ai,Google Services
+- DOMAIN-SUFFIX,google.com.ar,Google Services
+- DOMAIN-SUFFIX,google.com.au,Google Services
+- DOMAIN-SUFFIX,google.com.bd,Google Services
+- DOMAIN-SUFFIX,google.com.bh,Google Services
+- DOMAIN-SUFFIX,google.com.bn,Google Services
+- DOMAIN-SUFFIX,google.com.bo,Google Services
+- DOMAIN-SUFFIX,google.com.br,Google Services
+- DOMAIN-SUFFIX,google.com.bz,Google Services
+- DOMAIN-SUFFIX,google.com.co,Google Services
+- DOMAIN-SUFFIX,google.com.cu,Google Services
+- DOMAIN-SUFFIX,google.com.cy,Google Services
+- DOMAIN-SUFFIX,google.com.do,Google Services
+- DOMAIN-SUFFIX,google.com.ec,Google Services
+- DOMAIN-SUFFIX,google.com.eg,Google Services
+- DOMAIN-SUFFIX,google.com.et,Google Services
+- DOMAIN-SUFFIX,google.com.fj,Google Services
+- DOMAIN-SUFFIX,google.com.gh,Google Services
+- DOMAIN-SUFFIX,google.com.gi,Google Services
+- DOMAIN-SUFFIX,google.com.gt,Google Services
+- DOMAIN-SUFFIX,google.com.hk,Google Services
+- DOMAIN-SUFFIX,google.com.jm,Google Services
+- DOMAIN-SUFFIX,google.com.kh,Google Services
+- DOMAIN-SUFFIX,google.com.kw,Google Services
+- DOMAIN-SUFFIX,google.com.lb,Google Services
+- DOMAIN-SUFFIX,google.com.ly,Google Services
+- DOMAIN-SUFFIX,google.com.mm,Google Services
+- DOMAIN-SUFFIX,google.com.mt,Google Services
+- DOMAIN-SUFFIX,google.com.mx,Google Services
+- DOMAIN-SUFFIX,google.com.my,Google Services
+- DOMAIN-SUFFIX,google.com.na,Google Services
+- DOMAIN-SUFFIX,google.com.ng,Google Services
+- DOMAIN-SUFFIX,google.com.ni,Google Services
+- DOMAIN-SUFFIX,google.com.np,Google Services
+- DOMAIN-SUFFIX,google.com.om,Google Services
+- DOMAIN-SUFFIX,google.com.pa,Google Services
+- DOMAIN-SUFFIX,google.com.pe,Google Services
+- DOMAIN-SUFFIX,google.com.pg,Google Services
+- DOMAIN-SUFFIX,google.com.ph,Google Services
+- DOMAIN-SUFFIX,google.com.pk,Google Services
+- DOMAIN-SUFFIX,google.com.pr,Google Services
+- DOMAIN-SUFFIX,google.com.py,Google Services
+- DOMAIN-SUFFIX,google.com.qa,Google Services
+- DOMAIN-SUFFIX,google.com.sa,Google Services
+- DOMAIN-SUFFIX,google.com.sb,Google Services
+- DOMAIN-SUFFIX,google.com.sg,Google Services
+- DOMAIN-SUFFIX,google.com.sl,Google Services
+- DOMAIN-SUFFIX,google.com.sv,Google Services
+- DOMAIN-SUFFIX,google.com.tj,Google Services
+- DOMAIN-SUFFIX,google.com.tr,Google Services
+- DOMAIN-SUFFIX,google.com.tw,Google Services
+- DOMAIN-SUFFIX,google.com.ua,Google Services
+- DOMAIN-SUFFIX,google.com.uy,Google Services
+- DOMAIN-SUFFIX,google.com.vc,Google Services
+- DOMAIN-SUFFIX,google.com.vn,Google Services
+- DOMAIN-SUFFIX,google.cv,Google Services
+- DOMAIN-SUFFIX,google.cz,Google Services
+- DOMAIN-SUFFIX,google.de,Google Services
+- DOMAIN-SUFFIX,google.dev,Google Services
+- DOMAIN-SUFFIX,google.dj,Google Services
+- DOMAIN-SUFFIX,google.dk,Google Services
+- DOMAIN-SUFFIX,google.dm,Google Services
+- DOMAIN-SUFFIX,google.dz,Google Services
+- DOMAIN-SUFFIX,google.ee,Google Services
+- DOMAIN-SUFFIX,google.es,Google Services
+- DOMAIN-SUFFIX,google.fi,Google Services
+- DOMAIN-SUFFIX,google.fm,Google Services
+- DOMAIN-SUFFIX,google.fr,Google Services
+- DOMAIN-SUFFIX,google.ga,Google Services
+- DOMAIN-SUFFIX,google.ge,Google Services
+- DOMAIN-SUFFIX,google.gg,Google Services
+- DOMAIN-SUFFIX,google.gl,Google Services
+- DOMAIN-SUFFIX,google.gm,Google Services
+- DOMAIN-SUFFIX,google.gr,Google Services
+- DOMAIN-SUFFIX,google.gy,Google Services
+- DOMAIN-SUFFIX,google.hn,Google Services
+- DOMAIN-SUFFIX,google.hr,Google Services
+- DOMAIN-SUFFIX,google.ht,Google Services
+- DOMAIN-SUFFIX,google.hu,Google Services
+- DOMAIN-SUFFIX,google.ie,Google Services
+- DOMAIN-SUFFIX,google.im,Google Services
+- DOMAIN-SUFFIX,google.iq,Google Services
+- DOMAIN-SUFFIX,google.is,Google Services
+- DOMAIN-SUFFIX,google.it,Google Services
+- DOMAIN-SUFFIX,google.je,Google Services
+- DOMAIN-SUFFIX,google.jo,Google Services
+- DOMAIN-SUFFIX,google.kg,Google Services
+- DOMAIN-SUFFIX,google.ki,Google Services
+- DOMAIN-SUFFIX,google.kz,Google Services
+- DOMAIN-SUFFIX,google.la,Google Services
+- DOMAIN-SUFFIX,google.li,Google Services
+- DOMAIN-SUFFIX,google.lk,Google Services
+- DOMAIN-SUFFIX,google.lt,Google Services
+- DOMAIN-SUFFIX,google.lu,Google Services
+- DOMAIN-SUFFIX,google.lv,Google Services
+- DOMAIN-SUFFIX,google.md,Google Services
+- DOMAIN-SUFFIX,google.me,Google Services
+- DOMAIN-SUFFIX,google.mg,Google Services
+- DOMAIN-SUFFIX,google.mk,Google Services
+- DOMAIN-SUFFIX,google.ml,Google Services
+- DOMAIN-SUFFIX,google.mn,Google Services
+- DOMAIN-SUFFIX,google.ms,Google Services
+- DOMAIN-SUFFIX,google.mu,Google Services
+- DOMAIN-SUFFIX,google.mv,Google Services
+- DOMAIN-SUFFIX,google.mw,Google Services
+- DOMAIN-SUFFIX,google.ne,Google Services
+- DOMAIN-SUFFIX,google.net,Google Services
+- DOMAIN-SUFFIX,google.nl,Google Services
+- DOMAIN-SUFFIX,google.no,Google Services
+- DOMAIN-SUFFIX,google.nr,Google Services
+- DOMAIN-SUFFIX,google.nu,Google Services
+- DOMAIN-SUFFIX,google.org,Google Services
+- DOMAIN-SUFFIX,google.pl,Google Services
+- DOMAIN-SUFFIX,google.pn,Google Services
+- DOMAIN-SUFFIX,google.ps,Google Services
+- DOMAIN-SUFFIX,google.pt,Google Services
+- DOMAIN-SUFFIX,google.ro,Google Services
+- DOMAIN-SUFFIX,google.rs,Google Services
+- DOMAIN-SUFFIX,google.ru,Google Services
+- DOMAIN-SUFFIX,google.rw,Google Services
+- DOMAIN-SUFFIX,google.sc,Google Services
+- DOMAIN-SUFFIX,google.se,Google Services
+- DOMAIN-SUFFIX,google.sh,Google Services
+- DOMAIN-SUFFIX,google.si,Google Services
+- DOMAIN-SUFFIX,google.sk,Google Services
+- DOMAIN-SUFFIX,google.sm,Google Services
+- DOMAIN-SUFFIX,google.sn,Google Services
+- DOMAIN-SUFFIX,google.so,Google Services
+- DOMAIN-SUFFIX,google.sr,Google Services
+- DOMAIN-SUFFIX,google.st,Google Services
+- DOMAIN-SUFFIX,google.td,Google Services
+- DOMAIN-SUFFIX,google.tg,Google Services
+- DOMAIN-SUFFIX,google.tl,Google Services
+- DOMAIN-SUFFIX,google.tm,Google Services
+- DOMAIN-SUFFIX,google.tn,Google Services
+- DOMAIN-SUFFIX,google.to,Google Services
+- DOMAIN-SUFFIX,google.tt,Google Services
+- DOMAIN-SUFFIX,google.ventures,Google Services
+- DOMAIN-SUFFIX,google.vg,Google Services
+- DOMAIN-SUFFIX,google.vu,Google Services
+- DOMAIN-SUFFIX,google.ws,Google Services
+- DOMAIN-SUFFIX,googleacquisitionmigration.com,Google Services
+- DOMAIN-SUFFIX,googleapis.cn,Google Services
+- DOMAIN-SUFFIX,googleapis.com,Google Services
+- DOMAIN-SUFFIX,googleapps.com,Google Services
+- DOMAIN-SUFFIX,googlearth.com,Google Services
+- DOMAIN-SUFFIX,googleblog.com,Google Services
+- DOMAIN-SUFFIX,googlebot.com,Google Services
+- DOMAIN-SUFFIX,googlecapital.com,Google Services
+- DOMAIN-SUFFIX,googlecert.net,Google Services
+- DOMAIN-SUFFIX,googlecnapps.cn,Google Services
+- DOMAIN-SUFFIX,googlecode.com,Google Services
+- DOMAIN-SUFFIX,googlecommerce.com,Google Services
+- DOMAIN-SUFFIX,googlecompare.co.uk,Google Services
+- DOMAIN-SUFFIX,googledanmark.com,Google Services
+- DOMAIN-SUFFIX,googledomains.com,Google Services
+- DOMAIN-SUFFIX,googledrive.com,Google Services
+- DOMAIN-SUFFIX,googlee.com,Google Services
+- DOMAIN-SUFFIX,googleearth.com,Google Services
+- DOMAIN-SUFFIX,googlefiber.com,Google Services
+- DOMAIN-SUFFIX,googlefiber.net,Google Services
+- DOMAIN-SUFFIX,googlefinland.com,Google Services
+- DOMAIN-SUFFIX,googlemail.com,Google Services
+- DOMAIN-SUFFIX,googlemaps.com,Google Services
+- DOMAIN-SUFFIX,googlepagecreator.com,Google Services
+- DOMAIN-SUFFIX,googlephotos.com,Google Services
+- DOMAIN-SUFFIX,googleplay.com,Google Services
+- DOMAIN-SUFFIX,googleplus.com,Google Services
+- DOMAIN-SUFFIX,googlesource.com,Google Services
+- DOMAIN-SUFFIX,googlestore.com,Google Services
+- DOMAIN-SUFFIX,googlesverige.com,Google Services
+- DOMAIN-SUFFIX,googleusercontent.com,Google Services
+- DOMAIN-SUFFIX,googleventures.com,Google Services
+- DOMAIN-SUFFIX,googlevideo.com,Google Services
+- DOMAIN-SUFFIX,googlezip.net,Google Services
+- DOMAIN-SUFFIX,googlr.com,Google Services
+- DOMAIN-SUFFIX,goolge.com,Google Services
+- DOMAIN-SUFFIX,gooogle.com,Google Services
+- DOMAIN-SUFFIX,gridaware.app,Google Services
+- DOMAIN-SUFFIX,gsrc.io,Google Services
+- DOMAIN-SUFFIX,gstatic.cn,Google Services
+- DOMAIN-SUFFIX,gstatic.com,Google Services
+- DOMAIN-SUFFIX,gstaticcnapps.cn,Google Services
+- DOMAIN-SUFFIX,gsuite.com,Google Services
+- DOMAIN-SUFFIX,guge,Google Services
+- DOMAIN-SUFFIX,gvt0.com,Google Services
+- DOMAIN-SUFFIX,gvt1-cn.com,Google Services
+- DOMAIN-SUFFIX,gvt1.com,Google Services
+- DOMAIN-SUFFIX,gvt2-cn.com,Google Services
+- DOMAIN-SUFFIX,gvt2.com,Google Services
+- DOMAIN-SUFFIX,gvt3.com,Google Services
+- DOMAIN-SUFFIX,gvt5.com,Google Services
+- DOMAIN-SUFFIX,gvt6.com,Google Services
+- DOMAIN-SUFFIX,gvt7.com,Google Services
+- DOMAIN-SUFFIX,gvt9.com,Google Services
+- DOMAIN-SUFFIX,hangout,Google Services
+- DOMAIN-SUFFIX,haplorrhini.com,Google Services
+- DOMAIN-SUFFIX,hdrplusdata.org,Google Services
+- DOMAIN-SUFFIX,hey.boo,Google Services
+- DOMAIN-SUFFIX,hindiweb.com,Google Services
+- DOMAIN-SUFFIX,howtogetmo.co.uk,Google Services
+- DOMAIN-SUFFIX,html5rocks.com,Google Services
+- DOMAIN-SUFFIX,hwgo.com,Google Services
+- DOMAIN-SUFFIX,iam.soy,Google Services
+- DOMAIN-SUFFIX,iamremarkable.org,Google Services
+- DOMAIN-SUFFIX,idx.dev,Google Services
+- DOMAIN-SUFFIX,igoogle.com,Google Services
+- DOMAIN-SUFFIX,impermium.com,Google Services
+- DOMAIN-SUFFIX,itasoftware.com,Google Services
+- DOMAIN-SUFFIX,j2objc.org,Google Services
+- DOMAIN-SUFFIX,jibemobile.com,Google Services
+- DOMAIN-SUFFIX,kaggle.com,Google Services
+- DOMAIN-SUFFIX,kaggle.io,Google Services
+- DOMAIN-SUFFIX,kaggle.net,Google Services
+- DOMAIN-SUFFIX,kaggleusercontent.com,Google Services
+- DOMAIN-SUFFIX,keyhole.com,Google Services
+- DOMAIN-SUFFIX,keytransparency.com,Google Services
+- DOMAIN-SUFFIX,keytransparency.foo,Google Services
+- DOMAIN-SUFFIX,keytransparency.org,Google Services
+- DOMAIN-SUFFIX,lanternal.com,Google Services
+- DOMAIN-SUFFIX,like.com,Google Services
+- DOMAIN-SUFFIX,madewithcode.com,Google Services
+- DOMAIN-SUFFIX,material.io,Google Services
+- DOMAIN-SUFFIX,mdialog.com,Google Services
+- DOMAIN-SUFFIX,meet.new,Google Services
+- DOMAIN-SUFFIX,mfg-inspector.com,Google Services
+- DOMAIN-SUFFIX,mobileview.page,Google Services
+- DOMAIN-SUFFIX,moodstocks.com,Google Services
+- DOMAIN-SUFFIX,near.by,Google Services
+- DOMAIN-SUFFIX,nest.com,Google Services
+- DOMAIN-SUFFIX,new.day,Google Services
+- DOMAIN-SUFFIX,nexus,Google Services
+- DOMAIN-SUFFIX,nomulus.foo,Google Services
+- DOMAIN-SUFFIX,oauthz.com,Google Services
+- DOMAIN-SUFFIX,on.here,Google Services
+- DOMAIN-SUFFIX,on2.com,Google Services
+- DOMAIN-SUFFIX,onefifteen.net,Google Services
+- DOMAIN-SUFFIX,onefifteen.org,Google Services
+- DOMAIN-SUFFIX,oneworldmanystories.com,Google Services
+- DOMAIN-SUFFIX,opensourceinsight.dev,Google Services
+- DOMAIN-SUFFIX,opensourceinsights.dev,Google Services
+- DOMAIN-SUFFIX,openthread.io,Google Services
+- DOMAIN-SUFFIX,openweave.io,Google Services
+- DOMAIN-SUFFIX,orbitera.com,Google Services
+- DOMAIN-SUFFIX,page.link,Google Services
+- DOMAIN-SUFFIX,pagespeedmobilizer.com,Google Services
+- DOMAIN-SUFFIX,pageview.mobi,Google Services
+- DOMAIN-SUFFIX,panoramio.com,Google Services
+- DOMAIN-SUFFIX,partylikeits1986.org,Google Services
+- DOMAIN-SUFFIX,paxlicense.org,Google Services
+- DOMAIN-SUFFIX,picasa.com,Google Services
+- DOMAIN-SUFFIX,picasaweb.com,Google Services
+- DOMAIN-SUFFIX,picasaweb.net,Google Services
+- DOMAIN-SUFFIX,picasaweb.org,Google Services
+- DOMAIN-SUFFIX,picnik.com,Google Services
+- DOMAIN-SUFFIX,pittpatt.com,Google Services
+- DOMAIN-SUFFIX,pixate.com,Google Services
+- DOMAIN-SUFFIX,polymer-project.org,Google Services
+- DOMAIN-SUFFIX,polymerproject.org,Google Services
+- DOMAIN-SUFFIX,postini.com,Google Services
+- DOMAIN-SUFFIX,privacysandbox.com,Google Services
+- DOMAIN-SUFFIX,projectara.com,Google Services
+- DOMAIN-SUFFIX,projectbaseline.com,Google Services
+- DOMAIN-SUFFIX,pub.dev,Google Services
+- DOMAIN-SUFFIX,publishproxy.com,Google Services
+- DOMAIN-SUFFIX,questvisual.com,Google Services
+- DOMAIN-SUFFIX,quickoffice.com,Google Services
+- DOMAIN-SUFFIX,quiksee.com,Google Services
+- DOMAIN-SUFFIX,recaptcha.net,Google Services
+- DOMAIN-SUFFIX,revolv.com,Google Services
+- DOMAIN-SUFFIX,ridepenguin.com,Google Services
+- DOMAIN-SUFFIX,run.app,Google Services
+- DOMAIN-SUFFIX,savethedate.foo,Google Services
+- DOMAIN-SUFFIX,saynow.com,Google Services
+- DOMAIN-SUFFIX,schemer.com,Google Services
+- DOMAIN-SUFFIX,screenwisetrends.com,Google Services
+- DOMAIN-SUFFIX,screenwisetrendspanel.com,Google Services
+- DOMAIN-SUFFIX,sheets.new,Google Services
+- DOMAIN-SUFFIX,slides.new,Google Services
+- DOMAIN-SUFFIX,snapseed.com,Google Services
+- DOMAIN-SUFFIX,solveforx.com,Google Services
+- DOMAIN-SUFFIX,stadia.dev,Google Services
+- DOMAIN-SUFFIX,stcroixmosquito.com,Google Services
+- DOMAIN-SUFFIX,stcroixmosquitoproject.com,Google Services
+- DOMAIN-SUFFIX,studywatchbyverily.com,Google Services
+- DOMAIN-SUFFIX,studywatchbyverily.org,Google Services
+- DOMAIN-SUFFIX,stxmosquito.com,Google Services
+- DOMAIN-SUFFIX,stxmosquitoproject.com,Google Services
+- DOMAIN-SUFFIX,stxmosquitoproject.net,Google Services
+- DOMAIN-SUFFIX,stxmosquitoproject.org,Google Services
+- DOMAIN-SUFFIX,synergyse.com,Google Services
+- DOMAIN-SUFFIX,tenor.com,Google Services
+- DOMAIN-SUFFIX,tensorflow.org,Google Services
+- DOMAIN-SUFFIX,tfhub.dev,Google Services
+- DOMAIN-SUFFIX,thecleversense.com,Google Services
+- DOMAIN-SUFFIX,thegooglestore.com,Google Services
+- DOMAIN-SUFFIX,thinkquarterly.co.uk,Google Services
+- DOMAIN-SUFFIX,thinkquarterly.com,Google Services
+- DOMAIN-SUFFIX,thinkwithgoogle.com,Google Services
+- DOMAIN-SUFFIX,tiltbrush.com,Google Services
+- DOMAIN-SUFFIX,txcloud.net,Google Services
+- DOMAIN-SUFFIX,txvia.com,Google Services
+- DOMAIN-SUFFIX,unfiltered.news,Google Services
+- DOMAIN-SUFFIX,useplannr.com,Google Services
+- DOMAIN-SUFFIX,usvimosquito.com,Google Services
+- DOMAIN-SUFFIX,usvimosquitoproject.com,Google Services
+- DOMAIN-SUFFIX,v8.dev,Google Services
+- DOMAIN-SUFFIX,v8project.org,Google Services
+- DOMAIN-SUFFIX,velostrata.com,Google Services
+- DOMAIN-SUFFIX,verilylifesciences.com,Google Services
+- DOMAIN-SUFFIX,verilystudyhub.com,Google Services
+- DOMAIN-SUFFIX,verilystudywatch.com,Google Services
+- DOMAIN-SUFFIX,verilystudywatch.org,Google Services
+- DOMAIN-SUFFIX,wallet.com,Google Services
+- DOMAIN-SUFFIX,waze.com,Google Services
+- DOMAIN-SUFFIX,web.app,Google Services
+- DOMAIN-SUFFIX,web.dev,Google Services
+- DOMAIN-SUFFIX,webappfieldguide.com,Google Services
+- DOMAIN-SUFFIX,webmproject.org,Google Services
+- DOMAIN-SUFFIX,webpkgcache.com,Google Services
+- DOMAIN-SUFFIX,webrtc.org,Google Services
+- DOMAIN-SUFFIX,weltweitwachsen.de,Google Services
+- DOMAIN-SUFFIX,whatbrowser.org,Google Services
+- DOMAIN-SUFFIX,whats.new,Google Services
+- DOMAIN-SUFFIX,widevine.com,Google Services
+- DOMAIN-SUFFIX,withgoogle.com,Google Services
+- DOMAIN-SUFFIX,withyoutube.com,Google Services
+- DOMAIN-SUFFIX,womenwill.com,Google Services
+- DOMAIN-SUFFIX,womenwill.com.br,Google Services
+- DOMAIN-SUFFIX,womenwill.id,Google Services
+- DOMAIN-SUFFIX,womenwill.in,Google Services
+- DOMAIN-SUFFIX,womenwill.mx,Google Services
+- DOMAIN-SUFFIX,x.company,Google Services
+- DOMAIN-SUFFIX,x.team,Google Services
+- DOMAIN-SUFFIX,xn--9kr7l.com,Google Services
+- DOMAIN-SUFFIX,xn--9trs65b.com,Google Services
+- DOMAIN-SUFFIX,xn--flw351e,Google Services
+- DOMAIN-SUFFIX,xn--flw351e.com,Google Services
+- DOMAIN-SUFFIX,xn--ggle-55da.com,Google Services
+- DOMAIN-SUFFIX,xn--gogl-0nd52e.com,Google Services
+- DOMAIN-SUFFIX,xn--gogl-1nd42e.com,Google Services
+- DOMAIN-SUFFIX,xn--ngstr-lra8j.com,Google Services
+- DOMAIN-SUFFIX,xn--p8j9a0d9c9a.xn--q9jyb4c,Google Services
+- DOMAIN-SUFFIX,xn--qcka1pmc,Google Services
+- DOMAIN-SUFFIX,xplr.co,Google Services
+- DOMAIN-SUFFIX,youtu.be,Google Services
+- DOMAIN-SUFFIX,youtube,Google Services
+- DOMAIN-SUFFIX,youtube-nocookie.com,Google Services
+- DOMAIN-SUFFIX,youtube.ae,Google Services
+- DOMAIN-SUFFIX,youtube.al,Google Services
+- DOMAIN-SUFFIX,youtube.am,Google Services
+- DOMAIN-SUFFIX,youtube.at,Google Services
+- DOMAIN-SUFFIX,youtube.az,Google Services
+- DOMAIN-SUFFIX,youtube.ba,Google Services
+- DOMAIN-SUFFIX,youtube.be,Google Services
+- DOMAIN-SUFFIX,youtube.bg,Google Services
+- DOMAIN-SUFFIX,youtube.bh,Google Services
+- DOMAIN-SUFFIX,youtube.bo,Google Services
+- DOMAIN-SUFFIX,youtube.by,Google Services
+- DOMAIN-SUFFIX,youtube.ca,Google Services
+- DOMAIN-SUFFIX,youtube.cat,Google Services
+- DOMAIN-SUFFIX,youtube.ch,Google Services
+- DOMAIN-SUFFIX,youtube.cl,Google Services
+- DOMAIN-SUFFIX,youtube.co,Google Services
+- DOMAIN-SUFFIX,youtube.co.ae,Google Services
+- DOMAIN-SUFFIX,youtube.co.at,Google Services
+- DOMAIN-SUFFIX,youtube.co.cr,Google Services
+- DOMAIN-SUFFIX,youtube.co.hu,Google Services
+- DOMAIN-SUFFIX,youtube.co.id,Google Services
+- DOMAIN-SUFFIX,youtube.co.il,Google Services
+- DOMAIN-SUFFIX,youtube.co.in,Google Services
+- DOMAIN-SUFFIX,youtube.co.jp,Google Services
+- DOMAIN-SUFFIX,youtube.co.ke,Google Services
+- DOMAIN-SUFFIX,youtube.co.kr,Google Services
+- DOMAIN-SUFFIX,youtube.co.ma,Google Services
+- DOMAIN-SUFFIX,youtube.co.nz,Google Services
+- DOMAIN-SUFFIX,youtube.co.th,Google Services
+- DOMAIN-SUFFIX,youtube.co.tz,Google Services
+- DOMAIN-SUFFIX,youtube.co.ug,Google Services
+- DOMAIN-SUFFIX,youtube.co.uk,Google Services
+- DOMAIN-SUFFIX,youtube.co.ve,Google Services
+- DOMAIN-SUFFIX,youtube.co.za,Google Services
+- DOMAIN-SUFFIX,youtube.co.zw,Google Services
+- DOMAIN-SUFFIX,youtube.com,Google Services
+- DOMAIN-SUFFIX,youtube.com.ar,Google Services
+- DOMAIN-SUFFIX,youtube.com.au,Google Services
+- DOMAIN-SUFFIX,youtube.com.az,Google Services
+- DOMAIN-SUFFIX,youtube.com.bd,Google Services
+- DOMAIN-SUFFIX,youtube.com.bh,Google Services
+- DOMAIN-SUFFIX,youtube.com.bo,Google Services
+- DOMAIN-SUFFIX,youtube.com.br,Google Services
+- DOMAIN-SUFFIX,youtube.com.by,Google Services
+- DOMAIN-SUFFIX,youtube.com.co,Google Services
+- DOMAIN-SUFFIX,youtube.com.do,Google Services
+- DOMAIN-SUFFIX,youtube.com.ec,Google Services
+- DOMAIN-SUFFIX,youtube.com.ee,Google Services
+- DOMAIN-SUFFIX,youtube.com.eg,Google Services
+- DOMAIN-SUFFIX,youtube.com.es,Google Services
+- DOMAIN-SUFFIX,youtube.com.gh,Google Services
+- DOMAIN-SUFFIX,youtube.com.gr,Google Services
+- DOMAIN-SUFFIX,youtube.com.gt,Google Services
+- DOMAIN-SUFFIX,youtube.com.hk,Google Services
+- DOMAIN-SUFFIX,youtube.com.hn,Google Services
+- DOMAIN-SUFFIX,youtube.com.hr,Google Services
+- DOMAIN-SUFFIX,youtube.com.jm,Google Services
+- DOMAIN-SUFFIX,youtube.com.jo,Google Services
+- DOMAIN-SUFFIX,youtube.com.kw,Google Services
+- DOMAIN-SUFFIX,youtube.com.lb,Google Services
+- DOMAIN-SUFFIX,youtube.com.lv,Google Services
+- DOMAIN-SUFFIX,youtube.com.ly,Google Services
+- DOMAIN-SUFFIX,youtube.com.mk,Google Services
+- DOMAIN-SUFFIX,youtube.com.mt,Google Services
+- DOMAIN-SUFFIX,youtube.com.mx,Google Services
+- DOMAIN-SUFFIX,youtube.com.my,Google Services
+- DOMAIN-SUFFIX,youtube.com.ng,Google Services
+- DOMAIN-SUFFIX,youtube.com.ni,Google Services
+- DOMAIN-SUFFIX,youtube.com.om,Google Services
+- DOMAIN-SUFFIX,youtube.com.pa,Google Services
+- DOMAIN-SUFFIX,youtube.com.pe,Google Services
+- DOMAIN-SUFFIX,youtube.com.ph,Google Services
+- DOMAIN-SUFFIX,youtube.com.pk,Google Services
+- DOMAIN-SUFFIX,youtube.com.pt,Google Services
+- DOMAIN-SUFFIX,youtube.com.py,Google Services
+- DOMAIN-SUFFIX,youtube.com.qa,Google Services
+- DOMAIN-SUFFIX,youtube.com.ro,Google Services
+- DOMAIN-SUFFIX,youtube.com.sa,Google Services
+- DOMAIN-SUFFIX,youtube.com.sg,Google Services
+- DOMAIN-SUFFIX,youtube.com.sv,Google Services
+- DOMAIN-SUFFIX,youtube.com.tn,Google Services
+- DOMAIN-SUFFIX,youtube.com.tr,Google Services
+- DOMAIN-SUFFIX,youtube.com.tw,Google Services
+- DOMAIN-SUFFIX,youtube.com.ua,Google Services
+- DOMAIN-SUFFIX,youtube.com.uy,Google Services
+- DOMAIN-SUFFIX,youtube.com.ve,Google Services
+- DOMAIN-SUFFIX,youtube.cr,Google Services
+- DOMAIN-SUFFIX,youtube.cz,Google Services
+- DOMAIN-SUFFIX,youtube.de,Google Services
+- DOMAIN-SUFFIX,youtube.dk,Google Services
+- DOMAIN-SUFFIX,youtube.ee,Google Services
+- DOMAIN-SUFFIX,youtube.es,Google Services
+- DOMAIN-SUFFIX,youtube.fi,Google Services
+- DOMAIN-SUFFIX,youtube.fr,Google Services
+- DOMAIN-SUFFIX,youtube.ge,Google Services
+- DOMAIN-SUFFIX,youtube.gr,Google Services
+- DOMAIN-SUFFIX,youtube.gt,Google Services
+- DOMAIN-SUFFIX,youtube.hk,Google Services
+- DOMAIN-SUFFIX,youtube.hr,Google Services
+- DOMAIN-SUFFIX,youtube.hu,Google Services
+- DOMAIN-SUFFIX,youtube.ie,Google Services
+- DOMAIN-SUFFIX,youtube.in,Google Services
+- DOMAIN-SUFFIX,youtube.iq,Google Services
+- DOMAIN-SUFFIX,youtube.is,Google Services
+- DOMAIN-SUFFIX,youtube.it,Google Services
+- DOMAIN-SUFFIX,youtube.jo,Google Services
+- DOMAIN-SUFFIX,youtube.jp,Google Services
+- DOMAIN-SUFFIX,youtube.kr,Google Services
+- DOMAIN-SUFFIX,youtube.kz,Google Services
+- DOMAIN-SUFFIX,youtube.la,Google Services
+- DOMAIN-SUFFIX,youtube.lk,Google Services
+- DOMAIN-SUFFIX,youtube.lt,Google Services
+- DOMAIN-SUFFIX,youtube.lu,Google Services
+- DOMAIN-SUFFIX,youtube.lv,Google Services
+- DOMAIN-SUFFIX,youtube.ly,Google Services
+- DOMAIN-SUFFIX,youtube.ma,Google Services
+- DOMAIN-SUFFIX,youtube.md,Google Services
+- DOMAIN-SUFFIX,youtube.me,Google Services
+- DOMAIN-SUFFIX,youtube.mk,Google Services
+- DOMAIN-SUFFIX,youtube.mn,Google Services
+- DOMAIN-SUFFIX,youtube.mx,Google Services
+- DOMAIN-SUFFIX,youtube.my,Google Services
+- DOMAIN-SUFFIX,youtube.ng,Google Services
+- DOMAIN-SUFFIX,youtube.ni,Google Services
+- DOMAIN-SUFFIX,youtube.nl,Google Services
+- DOMAIN-SUFFIX,youtube.no,Google Services
+- DOMAIN-SUFFIX,youtube.pa,Google Services
+- DOMAIN-SUFFIX,youtube.pe,Google Services
+- DOMAIN-SUFFIX,youtube.ph,Google Services
+- DOMAIN-SUFFIX,youtube.pk,Google Services
+- DOMAIN-SUFFIX,youtube.pl,Google Services
+- DOMAIN-SUFFIX,youtube.pr,Google Services
+- DOMAIN-SUFFIX,youtube.pt,Google Services
+- DOMAIN-SUFFIX,youtube.qa,Google Services
+- DOMAIN-SUFFIX,youtube.ro,Google Services
+- DOMAIN-SUFFIX,youtube.rs,Google Services
+- DOMAIN-SUFFIX,youtube.ru,Google Services
+- DOMAIN-SUFFIX,youtube.sa,Google Services
+- DOMAIN-SUFFIX,youtube.se,Google Services
+- DOMAIN-SUFFIX,youtube.sg,Google Services
+- DOMAIN-SUFFIX,youtube.si,Google Services
+- DOMAIN-SUFFIX,youtube.sk,Google Services
+- DOMAIN-SUFFIX,youtube.sn,Google Services
+- DOMAIN-SUFFIX,youtube.soy,Google Services
+- DOMAIN-SUFFIX,youtube.sv,Google Services
+- DOMAIN-SUFFIX,youtube.tn,Google Services
+- DOMAIN-SUFFIX,youtube.tv,Google Services
+- DOMAIN-SUFFIX,youtube.ua,Google Services
+- DOMAIN-SUFFIX,youtube.ug,Google Services
+- DOMAIN-SUFFIX,youtube.uy,Google Services
+- DOMAIN-SUFFIX,youtube.vn,Google Services
+- DOMAIN-SUFFIX,youtubeeducation.com,Google Services
+- DOMAIN-SUFFIX,youtubefanfest.com,Google Services
+- DOMAIN-SUFFIX,youtubegaming.com,Google Services
+- DOMAIN-SUFFIX,youtubego.co.id,Google Services
+- DOMAIN-SUFFIX,youtubego.co.in,Google Services
+- DOMAIN-SUFFIX,youtubego.com,Google Services
+- DOMAIN-SUFFIX,youtubego.com.br,Google Services
+- DOMAIN-SUFFIX,youtubego.id,Google Services
+- DOMAIN-SUFFIX,youtubego.in,Google Services
+- DOMAIN-SUFFIX,youtubekids.com,Google Services
+- DOMAIN-SUFFIX,youtubemobilesupport.com,Google Services
+- DOMAIN-SUFFIX,yt.be,Google Services
+- DOMAIN-SUFFIX,ytimg.com,Google Services
+- DOMAIN-SUFFIX,zukunftswerkstatt.de,Google Services
+- DOMAIN-REGEX,^r+[0-9]+(---|\.)sn-(2x3|ni5|j5o)\w{5}\.googlevideo\.com$,Google Services
+- DOMAIN-REGEX,^r+[0-9]+(---|\.)sn-(2x3|ni5|j5o)\w{5}\.xn--ngstr-lra8j\.com$,Google Services
+- DOMAIN-SUFFIX,netflix.com,Streaming Media
+- DOMAIN-SUFFIX,nflxvideo.net,Streaming Media
+- DOMAIN-SUFFIX,spotify.com,Streaming Media
+- GEOSITE,cn,Direct Route
+- GEOIP,CN,Direct Route,no-resolve
+- NETWORK,udp,UDP Guard
+- GEOSITE,geolocation-!cn,Catch-All
+- MATCH,Catch-All

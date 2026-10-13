@@ -10,7 +10,7 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
         var id = scheme.Text("Id"); if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-f0-9]{32}$")) throw new OperationException("方案标识无效。");
         return store.Paths.Resolve("private/client-schemes/" + id + ".dotnet.private.json");
     }
-    public void Save(JsonObject scheme) => store.WriteSecret(SchemeFile(scheme), scheme);
+    public void Save(JsonObject scheme) { ClientSchemes.UpgradeLayout(scheme); store.WriteSecret(SchemeFile(scheme), scheme); }
     public void Delete(JsonObject scheme)
     {
         var file = SchemeFile(scheme);
@@ -32,7 +32,10 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
     {
         var directory = store.Paths.Resolve("private/client-schemes"); if (!Directory.Exists(directory)) return [];
         SafePath.CheckTree(directory);
-        return Directory.EnumerateFiles(directory, "*.dotnet.private.json").Select(store.ReadSecret).ToArray();
+        return Directory.EnumerateFiles(directory, "*.dotnet.private.json").Select(file =>
+        {
+            var scheme = store.ReadSecret(file); if (ClientSchemes.UpgradeLayout(scheme)) Save(scheme); return scheme;
+        }).ToArray();
     }
     public async Task<JsonArray> ReadSourcesAsync(string clash, string sing, CancellationToken cancellationToken)
     {
@@ -44,6 +47,7 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
     }
     public async Task<JsonObject> BuildAsync(JsonObject scheme, CancellationToken cancellationToken)
     {
+        ClientSchemes.UpgradeLayout(scheme);
         MigrateManagedSources(scheme);
         if (scheme.Text("SourceMode") == "ExistingAuthority" && scheme["AuthorityNodes"] == null)
         {

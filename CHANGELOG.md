@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.22 - 2026-10-14
+
+- 配置设计同步 Google Services 分组及公开域名策略，位于 Academic Research 之后、Microsoft Services 之前；Google AI/Gemini 继续使用 AI Services，YouTube 等普通谷歌业务移出 Streaming Media。私有短名称、OpenXLA 和 FakeIP DNS 例外统一处理；已有权威来源的自定义规则与 DNS 保留。
+- 旧保存方案补齐 Google Services，保留节点和自定义出口选择，并使旧候选重新生成、校验。新方案和旧方案均可独立选择 Google 业务出口。
+- 网络调优优先比较 TCP 重传参考，差异在动态阈值内再比较重复吞吐收益；明确采样门槛、指标代价、原值恢复和判定理由。入口机可单独应用基础 fq + BBR，旧版或启动身份变化后的测量须先重新采集。
+- 本轮应用测试使用隔离 B 接口及合成实例，不调整生产 VPS、不删除外部实例材料。正式数据目录仍由应用 private 管理。
+
 ## 0.9.17 - 2026-10-11
 
 - 修复 Debian 13 使用 `sqv` 而没有 `gpgv` 时 BBR 最新版本检查失败；复用已有验证工具，两条路径均核对官方公钥指纹及已认证的索引正文，不绕过签名或哈希检查。
