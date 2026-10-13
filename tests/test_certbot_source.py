@@ -40,7 +40,8 @@ class CertbotSourceTests(unittest.TestCase):
             connection.create_connection(("api.cloudflare.com", 443), timeout=10)
             return 0
         certbot_main.main = main
-        modules = {"urllib3.util": util, "urllib3.util.connection": connection,
+        urllib3 = types.ModuleType("urllib3"); urllib3.util = util
+        modules = {"urllib3": urllib3, "urllib3.util": util, "urllib3.util.connection": connection,
                    "certbot": types.ModuleType("certbot"), "certbot.main": certbot_main}
         with patch.dict(sys.modules, modules), patch.object(socket, "getaddrinfo", resolve), patch.object(sys, 'argv', argv or ['runner', 'certonly']), patch.object(pathlib, 'Path', path_factory or Path):
             if invalid:
@@ -85,7 +86,7 @@ class CertbotSourceTests(unittest.TestCase):
                 (root/'renewal'/f'{name}.conf').write_text(f'version = 2.1.0\n[renewalparams]\nauthenticator = dns-cloudflare\ndns_cloudflare_credentials = /etc/letsencrypt/{credentials}\n')
                 (root/(credentials+'.mxh-source')).write_text(address+'\n')
             class FixturePath:
-                def __init__(self, value): self.path = Path(str(value).replace('/etc/letsencrypt', str(root)))
+                def __init__(self, value): self.path = type(root)(str(value).replace('/etc/letsencrypt', str(root)))
                 def is_symlink(self): return self.path.is_symlink()
                 @property
                 def name(self): return self.path.name
@@ -105,10 +106,12 @@ class CertbotSourceTests(unittest.TestCase):
             root = Path(folder)
             for name in ('mxh-anytls', 'mxh-reality-target'): (root/(name+'.conf')).write_text('fixture')
             class FixturePath:
-                def __init__(self, value): self.path = root if str(value) == '/etc/letsencrypt/renewal' else Path(value)
+                def __init__(self, value): self.path = root if str(value) == '/etc/letsencrypt/renewal' else type(root)(value)
                 def glob(self, pattern): return self.path.glob(pattern)
             import subprocess
-            with patch.object(pathlib, 'Path', FixturePath), patch.object(sys, 'argv', ['runner', 'renew', '--quiet']), patch.object(subprocess, 'run', side_effect=[types.SimpleNamespace(returncode=0), types.SimpleNamespace(returncode=1)]) as children:
+            util = types.ModuleType('urllib3.util'); util.connection = types.ModuleType('urllib3.util.connection')
+            urllib3 = types.ModuleType('urllib3'); urllib3.util = util
+            with patch.dict(sys.modules, {'urllib3': urllib3, 'urllib3.util': util}), patch.object(pathlib, 'Path', FixturePath), patch.object(sys, 'argv', ['runner', 'renew', '--quiet']), patch.object(subprocess, 'run', side_effect=[types.SimpleNamespace(returncode=0), types.SimpleNamespace(returncode=1)]) as children:
                 with self.assertRaises(SystemExit) as stopped: exec(compile(RUNNER, 'runner', 'exec'), {})
             self.assertEqual(stopped.exception.code, 1)
             self.assertEqual([call.args[0][-2:] for call in children.call_args_list], [['--cert-name', 'mxh-anytls'], ['--cert-name', 'mxh-reality-target']])
