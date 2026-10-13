@@ -29,7 +29,7 @@ else
       cp -a "$stage/$relative" "$target"
     fi
   }
-  for relative in usr/local/etc/xray etc/sing-box-anytls etc/sing-box etc/mxh-tls \
+  for relative in usr/local/etc/xray etc/sing-box-anytls etc/sing-box etc/mxh-tls/anytls etc/mxh-tls/reality-target \
     etc/nginx/sites-available/mxh-reality-target etc/nginx/sites-enabled/mxh-reality-target var/www/mxh-reality-target; do
     copy_path "$relative"
   done

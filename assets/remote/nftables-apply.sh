@@ -95,6 +95,10 @@ fi
 config='/etc/nftables.conf'
 if [[ -n "${VPS_PARAM_EXPECTED_TRANSACTION:-}" ]]; then
   mxh_firewall intent "$VPS_PARAM_EXPECTED_TRANSACTION/firewall-state.json" "$temporary"
+elif [[ -n "${VPS_PARAM_DEPLOYMENT_BASELINE:-}" ]]; then
+  mxh_firewall deployment-intent "$VPS_PARAM_DEPLOYMENT_BASELINE" "$temporary"
+  declare -f mxh_firewall > "$VPS_PARAM_DEPLOYMENT_BASELINE/firewall-tools.sh"
+  chmod 0600 "$VPS_PARAM_DEPLOYMENT_BASELINE/firewall-tools.sh"
 fi
 stamp="$(date -u +%Y%m%d-%H%M%S)"
 backup_dir="/root/vps-deploy-backups/${stamp}/nftables"

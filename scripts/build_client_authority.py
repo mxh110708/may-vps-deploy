@@ -198,10 +198,12 @@ def apply_clash_groups(document: dict[str, Any], groups: list[dict[str, Any]], o
 
 
 def apply_sing_groups(document: dict[str, Any], groups: list[dict[str, Any]], order: list[str], remove: set[str]) -> None:
+    generated = {str(item['name']) for item in groups}
     outbounds = [item for item in list(document.get("outbounds") or [])
-                 if not (item.get("type") == "selector" and str(item.get("tag")) in remove)]
+                 if not (item.get("type") in {"selector", "urltest"} and str(item.get("tag")) in remove)]
     selectors = {str(item.get("tag")): item for item in outbounds if item.get("type") == "selector"}
-    non_selectors = [item for item in outbounds if item.get("type") != "selector"]
+    non_selectors = [item for item in outbounds if item.get("type") != "selector"
+                     and not (item.get("type") == "urltest" and str(item.get("tag")) in generated)]
     for definition in groups:
         name = str(definition["name"])
         item = selectors.get(name, {"type": "selector", "tag": name})

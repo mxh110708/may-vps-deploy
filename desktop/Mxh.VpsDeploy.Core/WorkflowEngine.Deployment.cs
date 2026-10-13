@@ -11,7 +11,7 @@ public sealed partial class WorkflowEngine
     }
     private async Task Import(Context c)
     {
-        var result = await c.Run("existing-vps-import-audit.sh", marker: "EXISTING_IMPORT_OK", bootstrap: true);
+        var result = await c.Run("existing-vps-import-audit.sh", new() { ["NATIVE_IMPORT"] = "true" }, marker: "EXISTING_IMPORT_OK", bootstrap: true);
         var audit = JsonNode.Parse(RemoteAssets.Marker(result.Output, "IMPORT_AUDIT"))!.AsObject();
         var privateData = JsonNode.Parse(RemoteAssets.Marker(result.Output, "IMPORT_PRIVATE"))!.AsObject(); Supported(audit);
         if (audit.Text("PubkeyAuthentication") != "yes") throw new OperationException("远端未启用公钥认证，不能自动纳管；现有策略未修改。");
@@ -47,6 +47,9 @@ public sealed partial class WorkflowEngine
     }
     private async Task Deploy(Context c)
     {
+        // Earlier native drafts used an alias which the deploy hook never
+        // copied. A recovered draft must issue the canonical managed lineage.
+        if (c.Plan.Text("Reality.TargetMode") == "LocalOwnedTls" && c.Plan.Text("TrustedTls.RealityCertificateName") == "mxh-reality") c.Plan.Put("TrustedTls.RealityCertificateName", JsonValue.Create("mxh-reality-target"));
         var selection = c.Plan["InstallationVersions"] as JsonObject;
         var components = InstallationVersions.DeploymentComponents(c.Plan);
         var accepted = c.Request.Kind == OperationKind.Resume && selection != null && c.State.Text("InstallationVersionPin") == ArchiveStore.Fingerprint(selection);
@@ -180,7 +183,9 @@ public sealed partial class WorkflowEngine
     private async Task Firewall(Context c, bool final)
     {
         if (c.Plan.Text("Firewall.Mode") == "PreserveExisting") return;
-        await c.Run("nftables-apply.sh", FirewallParameters(c.Plan, final), true);
+        var parameters = FirewallParameters(c.Plan, final);
+        if (c.Request.Kind is OperationKind.Deploy or OperationKind.Resume && c.State.Text("DeploymentTransaction.Status") == "Armed") parameters["DEPLOYMENT_BASELINE"] = c.State.Text("DeploymentTransaction.RemoteBaselineDirectory");
+        await c.Run("nftables-apply.sh", parameters, true);
         await VerifyManagement(c);
     }
     private static Dictionary<string, string> FirewallParameters(JsonObject plan, bool final)

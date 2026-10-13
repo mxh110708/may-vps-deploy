@@ -7,16 +7,23 @@ check_only="${VPS_PARAM_CHECK_ONLY:-false}"
 (( VPS_PARAM_KEEP_LATEST >= 0 && VPS_PARAM_KEEP_LATEST <= 100 ))
 [[ "$check_only" == 'true' || "$check_only" == 'false' ]]
 
-if systemctl is-active --quiet mxh-protocol-migration-rollback.timer 2>/dev/null; then
-  echo 'An active rollback timer protects a protocol backup; cleanup is refused.' >&2
-  exit 1
-fi
+assert_no_transaction(){
+  [[ ! -e /var/lib/mxh-vps-deploy/transaction.owner ]] || { echo 'An unfinished transaction protects backups; cleanup refused.' >&2; return 1; }
+  for service in mxh-protocol-migration-rollback.timer mxh-protocol-migration-rollback.service mxh-ssh-maintenance-rollback.timer mxh-ssh-maintenance-rollback.service; do
+    if systemctl is-active --quiet "$service" 2>/dev/null; then echo 'An active rollback actor protects backups; cleanup refused.' >&2; return 1; fi
+  done
+}
+assert_no_transaction
 if [[ "$check_only" == 'true' ]]; then
   printf 'VPSDEPLOY_REMOTE_BACKUPS_REMOVED_B64=%s\n' "$(printf '0' | base64 | tr -d '\n')"
   printf '%s\n' 'VPSDEPLOY_PROTOCOL_BACKUP_PRUNE_OK'
   exit 0
 fi
 
+install -d -m 0700 /var/lib/mxh-vps-deploy
+exec 9>/var/lib/mxh-vps-deploy/transaction.lock
+flock -n 9 || exit 1
+assert_no_transaction
 root='/root/vps-deploy-backups'
 if [[ ! -d "$root" ]]; then
   printf 'VPSDEPLOY_REMOTE_BACKUPS_REMOVED_B64=%s\n' "$(printf '0' | base64 | tr -d '\n')"

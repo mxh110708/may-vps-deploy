@@ -51,7 +51,7 @@ internal sealed partial class BoundaryTests
         // Remaining tests use the fixture's independent deterministic protector.
         File.Delete(secretFile); f.Store.WriteSecret(secretFile, credentials);
 
-        var c = f.Paths.Resolve("private/authority-a.yaml"); var s = f.Paths.Resolve("private/authority-b.json"); var cc = f.Paths.Resolve("private/candidate-a.yaml"); var ss = f.Paths.Resolve("private/candidate-b.json");
+        var c = f.Paths.Resolve("authority-a.yaml"); var s = f.Paths.Resolve("authority-b.json"); var cc = f.Paths.Resolve("private/candidate-a.yaml"); var ss = f.Paths.Resolve("private/candidate-b.json");
         File.WriteAllText(c, "old-a"); File.WriteAllText(s, "old-b"); File.WriteAllText(cc, "new-a"); File.WriteAllText(ss, "new-b");
         var candidate = new JsonObject { ["ValidationStatus"] = "Passed", ["Clash"] = cc, ["SingBox"] = ss, ["ClashHash"] = ClientSchemes.SourceFingerprint(cc), ["SingBoxHash"] = ClientSchemes.SourceFingerprint(ss), ["Sources"] = new JsonObject(), ["Targets"] = new JsonObject { [c] = ClientSchemes.SourceFingerprint(c), [s] = ClientSchemes.SourceFingerprint(s) } };
         Refuses(() => new CandidatePublisher(f.Paths, (path, bytes) => { ArchiveStore.AtomicWrite(path, bytes); if (path == c) File.WriteAllText(s, "midpoint-external-edit"); }).Publish(candidate, c, s), "second-file external edit overwritten");

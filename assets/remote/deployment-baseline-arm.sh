@@ -50,8 +50,18 @@ paths=(
   etc/sing-box-anytls
   var/lib/sing-box-anytls
   etc/systemd/system/sing-box-anytls.service
-  etc/letsencrypt
-  etc/mxh-tls
+  etc/mxh-tls/anytls
+  etc/mxh-tls/reality-target
+  etc/letsencrypt/cloudflare.ini
+  etc/letsencrypt/cloudflare.ini.mxh-source
+  etc/letsencrypt/mxh-anytls-cloudflare.ini
+  etc/letsencrypt/mxh-anytls-cloudflare.ini.mxh-source
+  etc/letsencrypt/archive/mxh-anytls
+  etc/letsencrypt/live/mxh-anytls
+  etc/letsencrypt/renewal/mxh-anytls.conf
+  etc/letsencrypt/archive/mxh-reality-target
+  etc/letsencrypt/live/mxh-reality-target
+  etc/letsencrypt/renewal/mxh-reality-target.conf
   usr/local/libexec/mxh-certbot-dns
   usr/local/libexec/mxh-certbot-deploy
   etc/systemd/system/mxh-certbot-renew.service

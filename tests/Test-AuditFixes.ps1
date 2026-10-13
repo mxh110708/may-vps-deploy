@@ -12,6 +12,15 @@ $module=Get-Module VpsDeploy.Core
     $work=Join-Path $root ('.tmp/audit-fixes-'+[Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($work)|Out-Null
     try {
+        # The fresh baseline guard is absent from completed maintenance payloads.
+        $payloadContext=[pscustomobject]@{ProjectRoot=$root;State=@{DeploymentTransaction=@{Status='Armed';RemoteBaselineDirectory='/root/vps-deploy-transaction-baselines/'+'a'*32}}}
+        $payload=New-VpsRemoteScriptPayload $payloadContext 'nftables-apply.sh' @{TCP_PORTS='22,443'}
+        Check ($payload.Contains('export VPS_PARAM_DEPLOYMENT_BASELINE=') -and -not $payload.Contains("`r")) 'fresh deployment uses owned firewall baseline with LF payload'
+        $payloadContext.State.DeploymentTransaction.Status='Committed'
+        $payload=New-VpsRemoteScriptPayload $payloadContext 'nftables-apply.sh' @{TCP_PORTS='22,443'}
+        Check (-not $payload.Contains('export VPS_PARAM_DEPLOYMENT_BASELINE=')) 'completed deployment baseline is not reused by maintenance'
+        $payload=New-VpsRemoteScriptPayload $payloadContext 'maintenance-ssh-apply.sh' @{FIREWALL_REQUIRED='false'}
+        Check ($payload.Contains('mxh_firewall()')) 'CLI SSH payload includes the shared firewall helper'
         # Rotation preserves advanced routing, ports, source binding and unmodified secret fields.
         $old=@{Shadowsocks=@{ServerKey='fixture-server';PrimaryUserKey='fixture-old4';SecondaryUserKey='fixture-old6'}}
         $new=@{Shadowsocks=@{ServerKey='fixture-server';PrimaryUserKey='fixture-new4';SecondaryUserKey='fixture-new6'}}

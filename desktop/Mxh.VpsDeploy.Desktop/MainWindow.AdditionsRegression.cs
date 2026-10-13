@@ -31,6 +31,23 @@ public sealed partial class MainWindow
         var originalScheme = scheme; var originalStep = designerStep; var originalTheme = settings.Text("Appearance", "Dark");
         try
         {
+            var jobFile = NetworkJobFile(paths.Instance(instance.RelativePath));
+            var previousJob = File.Exists(jobFile) ? File.ReadAllBytes(jobFile) : null;
+            try
+            {
+                var job = NetworkSchedules.Create(instance.RelativePath, NetworkTuning.Defaults(instance.Plan), "synthetic-unreachable-source", DateTimeOffset.UtcNow);
+                job["DueAt"] = DateTimeOffset.UtcNow.AddSeconds(-1).ToString("O"); ArchiveStore.WriteJson(jobFile, job);
+                var modal = OperationDialog("审阅期间不启动补测", Text("合成界面回归"), "返回");
+                var pending = ShowDialog(modal); await Task.Delay(90);
+                await PollNetworkSchedules();
+                Require(ArchiveStore.ReadJson(jobFile).Text("Status") == "Waiting" && taskCancellation == null && activeTestDialog == modal, "审阅弹窗期间后台计划启动或篡改了任务状态。");
+                modal.Hide(); await pending;
+            }
+            finally
+            {
+                activeTestDialog?.Hide();
+                if (previousJob == null) File.Delete(jobFile); else ArchiveStore.AtomicWrite(jobFile, previousJob);
+            }
             foreach (var theme in new[] { "Dark", "Light" })
             {
                 SetAppearance(theme); SelectPage("instances"); await Task.Delay(90);
@@ -138,6 +155,6 @@ public sealed partial class MainWindow
             if (createdDirectory != null) { SafePath.CheckTree(createdDirectory); Directory.Delete(createdDirectory, true); }
             SelectPage("instances");
         }
-        return new JsonObject { ["inline_execution"] = true, ["explicit_completion_and_failure"] = true, ["drag_handles_and_scheme_order"] = true, ["drag_preview_cancel_scroll_and_keys"] = true, ["generation_validation_export_guidance"] = true, ["separate_component_installation"] = true, ["themes"] = new JsonArray("Dark", "Light"), ["remote_connections"] = 0 };
+        return new JsonObject { ["scheduler_waits_for_review"] = true, ["inline_execution"] = true, ["explicit_completion_and_failure"] = true, ["drag_handles_and_scheme_order"] = true, ["drag_preview_cancel_scroll_and_keys"] = true, ["generation_validation_export_guidance"] = true, ["separate_component_installation"] = true, ["themes"] = new JsonArray("Dark", "Light"), ["remote_connections"] = 0 };
     }
 }

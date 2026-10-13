@@ -488,7 +488,7 @@ public sealed partial class WorkflowEngine
         var record = matches[0]; var oldPlan = record["OldPlan"]!.AsObject(); var oldState = record["OldState"]!.AsObject();
         if (c.Request.Options.Text("RestoreMode") == "ConfigOnly")
         {
-            foreach (var role in DeploymentPlans.Roles[..3]) if (Enabled(c.Plan, role) != Enabled(oldPlan, role)) throw new OperationException("配置恢复需要相同的协议启用状态，请选择完整协议恢复。");
+            foreach (var role in DeploymentPlans.Roles[..3]) if (ComponentInstallations.ProtocolInstalled(c.Plan, role) != ComponentInstallations.ProtocolInstalled(oldPlan, role) || Enabled(c.Plan, role) != Enabled(oldPlan, role)) throw new OperationException("配置恢复需要相同的协议安装与启用状态，请选择完整协议恢复。");
             foreach (var field in new[] { "Reality.XrayVersion", "AnyTls.SingBoxVersion", "Shadowsocks.SingBoxVersion", "Ports.XrayPrimary", "Ports.XrayBackup", "Ports.AnyTlsPrimary", "Ports.LandingShadowsocks" }) if (c.Plan.Text(field) != oldPlan.Text(field)) throw new OperationException("当前程序版本或监听端口与配置归档不兼容。");
         }
         if (c.Plan.Text("Firewall.Mode") != "PreserveExisting" && !FirewallParameters(c.Plan, true).OrderBy(p => p.Key).SequenceEqual(FirewallParameters(oldPlan, true).OrderBy(p => p.Key))) throw new OperationException("协议恢复点需要的监听或可信入口与当前防火墙不同。此次范围保留防火墙，请先切换到兼容的协议状态，未开始恢复。");

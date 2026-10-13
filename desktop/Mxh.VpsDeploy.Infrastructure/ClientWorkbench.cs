@@ -116,7 +116,7 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
         var candidate = scheme["Candidate"]?.AsObject() ?? throw new OperationException("请先生成候选。"); VerifyCandidate(scheme, candidate);
         if (candidate.Text("ValidationStatus") != "Passed") throw new OperationException("请先校验候选配置。");
         var targets = new JsonObject(); var seen = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        foreach (var selected in ClientSchemes.SelectedTargets(scheme, clash, sing)) { ClientSchemes.ValidateAuthorityPath(selected.Path); var path = Path.GetFullPath(selected.Path); if (!seen.Add(path)) throw new OperationException("配置文件不能使用同一路径。"); targets[path] = ClientSchemes.SourceFingerprint(path); }
+        foreach (var selected in ClientSchemes.SelectedTargets(scheme, clash, sing)) { ClientSchemes.ValidatePublishPath(store.Paths, selected.Path); var path = Path.GetFullPath(selected.Path); if (!seen.Add(path)) throw new OperationException("配置文件不能使用同一路径。"); targets[path] = ClientSchemes.SourceFingerprint(path); }
         candidate["Targets"] = targets; Save(scheme);
     }
     public void Publish(JsonObject scheme, string clash, string sing)

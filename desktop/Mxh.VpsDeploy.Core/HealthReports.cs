@@ -35,6 +35,9 @@ public static class HealthReports
             Check(ComponentInstallations.Label(name == "Cloudflared" ? "Tunnel" : name), Booleans(service, "Installed", "Enabled", "Active", "SupportedLayout") && (!expectedInstalled || service.Flag("Installed")) && (!service.Flag("Installed") || service.Flag("SupportedLayout") && (!service.Flag("Enabled") || service.Flag("Active")) && (!service.Flag("Active") || service.Flag("ProcessMatchesBinary"))), "监控组件缺失，或布局、运行状态、程序身份未通过检查。");
         }
         if (ComponentInstallations.ProtocolInstalled(plan, "AnyTlsEntry")) Check("AnyTLS 证书", audit.Flag("Certificates.AnyTls.Present") && audit.Number("Certificates.AnyTls.DaysRemaining", -1) >= 14, "AnyTLS 证书缺失、已过期或将在 14 天内到期。");
+        var localReality = ComponentInstallations.ProtocolInstalled(plan, "RealityEntry") && plan.Text("Reality.TargetMode") == "LocalOwnedTls";
+        if (localReality) Check("Reality 本机目标证书", audit.Flag("Certificates.Reality.Present") && audit.Number("Certificates.Reality.DaysRemaining", -1) >= 14, "Reality 本机目标证书缺失、已过期或将在 14 天内到期。");
+        if (localReality || ComponentInstallations.ProtocolInstalled(plan, "AnyTlsEntry")) Check("受管证书自动续期", Booleans(audit["Timers"], "CertbotRenewEnabled", "CertbotRenewActive") && audit.Flag("Timers.CertbotRenewEnabled") && audit.Flag("Timers.CertbotRenewActive"), "证书续期计时器未启用、未运行或检查证据缺失。");
         foreach (var check in audit.Strings("ChecksIncomplete")) Check("未完成检查", false, check + " 未取得完整证据。");
         return new JsonObject { ["At"] = audit["CollectedAt"]?.DeepClone(), ["Status"] = checks.Any(c => c!.Text("Status") != "Passed") ? "Warnings" : "Passed", ["Checks"] = checks };
     }

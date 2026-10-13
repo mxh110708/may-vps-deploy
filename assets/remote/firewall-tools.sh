@@ -2,7 +2,7 @@
 # Limit maintenance and recovery to the application's inet/filter table.
 mxh_firewall() {
   python3 - "$@" <<'PY'
-import hashlib, ipaddress, json, os, re, subprocess, sys
+import hashlib, ipaddress, json, os, re, subprocess, sys, tarfile
 from pathlib import Path
 action = sys.argv[1]
 config = Path('/etc/nftables.conf')
@@ -65,6 +65,59 @@ def matches(state):
     return all(current[key] in (state['Original'][key], state.get('Applied', {}).get(key)) for key in current)
 def scoped(text):
     return '#!/usr/sbin/nft -f\n# Managed by MXH VPS Deploy.\ntable inet filter {}\nflush table inet filter\n\n' + table(text)
+
+def baseline_identity():
+    if config.exists(): regular(config)
+    elif config.is_symlink() or any(p.is_symlink() for p in config.parents): raise SystemExit('Linked firewall configuration.')
+    tables = json.loads(subprocess.run(['nft', '-j', 'list', 'tables'], capture_output=True, text=True, check=True).stdout)
+    present = any(item.get('table', {}).get('family') == 'inet' and item.get('table', {}).get('name') == 'filter' for item in tables['nftables'])
+    return {'File': hashlib.sha256(config.read_bytes()).hexdigest() if config.exists() else None,
+            'Table': hashlib.sha256(runtime().encode()).hexdigest() if present else None}
+
+def baseline_matches(state):
+    current = baseline_identity()
+    return state.get('Version') == 2 and state.get('Kind') == 'Deployment' and all(current[key] in (state['Original'][key], state.get('BeforeApply', {}).get(key), state.get('Applied', {}).get(key)) for key in current)
+
+def baseline_action():
+    root = Path(sys.argv[2])
+    if not re.fullmatch(r'/root/vps-deploy-transaction-baselines/[a-f0-9]{32}', str(root)) or root.is_symlink() or any(p.is_symlink() for p in root.parents): raise SystemExit('Invalid deployment firewall scope.')
+    regular(root/'baseline.complete')
+    statefile = root/'firewall-state.json'
+    if action == 'deployment-intent':
+        candidate = Path(sys.argv[3]); regular(candidate)
+        current = baseline_identity()
+        if not statefile.exists():
+            if current['Table'] is not None: raise SystemExit('A firewall appeared after fresh-machine audit; refusing to replace it.')
+            regular(root/'files.tar.gz')
+            with tarfile.open(root/'files.tar.gz') as archive:
+                matches = [member for member in archive.getmembers() if member.name == 'etc/nftables.conf']
+                if len(matches) > 1 or matches and not matches[0].isfile(): raise SystemExit('Invalid initial firewall snapshot.')
+                original = hashlib.sha256(archive.extractfile(matches[0]).read()).hexdigest() if matches else None
+            if current['File'] != original:
+                # APT may add its default conffile after the baseline on a
+                # minimal VPS. Accept only the package's untouched conffile.
+                conffiles = subprocess.run(['dpkg-query', '-W', '-f=${Conffiles}', 'nftables'], capture_output=True, text=True, check=True).stdout
+                md5 = re.findall(r'^ /etc/nftables\.conf ([a-f0-9]{32})(?:\s|$)', conffiles, re.M)
+                if original is not None or current['File'] is None or len(md5) != 1 or hashlib.md5(config.read_bytes()).hexdigest() != md5[0]: raise SystemExit('Initial firewall configuration changed externally.')
+            state = {'Version': 2, 'Kind': 'Deployment', 'Original': {'File': original, 'Table': None}, 'BeforeApply': current}
+        else:
+            regular(statefile); state = json.loads(statefile.read_text())
+            if not baseline_matches(state): raise SystemExit('Deployment firewall changed externally.')
+        content = scoped(candidate.read_text()); candidate.write_bytes(content.encode())
+        state['Applied'] = {'File': hashlib.sha256(content.encode()).hexdigest(), 'Table': hashlib.sha256(canonical(content).encode()).hexdigest()}
+        temporary = statefile.with_suffix('.new')
+        if temporary.exists() or temporary.is_symlink(): raise SystemExit('Firewall intent path occupied.')
+        with temporary.open('x') as output: json.dump(state, output)
+        os.chmod(temporary, 0o600); os.replace(temporary, statefile)
+    elif action in ('deployment-check', 'deployment-clear'):
+        regular(statefile); state = json.loads(statefile.read_text())
+        if not baseline_matches(state): raise SystemExit('Deployment firewall changed externally; restore refused.')
+        if action == 'deployment-clear' and baseline_identity()['Table'] is not None:
+            subprocess.run(['nft', 'delete', 'table', 'inet', 'filter'], check=True, capture_output=True)
+    else: raise SystemExit('Unknown deployment firewall operation.')
+
+if action.startswith('deployment-'):
+    baseline_action(); raise SystemExit(0)
 def verify_archive():
     if 'VPS_PARAM_TCP_PORTS' not in os.environ: return
     ports = [int(p) for p in os.environ['VPS_PARAM_TCP_PORTS'].split(',')]

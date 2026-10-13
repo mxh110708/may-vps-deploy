@@ -659,13 +659,19 @@ function Invoke-MxhSshMaintenance {
     $sshJournal=$null;$sshJournalPath=Join-Path $Context.ArchivePath 'ssh-maintenance-pending.private.json'
     $localMutationStarted=$false
     try{
-        $r=Invoke-VpsRemoteScript $Context 'maintenance-ssh-apply.sh' @{OLD_PORTS=$oldPorts-join',';NEW_PRIMARY=[string]$primary;NEW_RESCUE=[string]$rescue;NEW_PUBLIC_KEY=$newPublic;ADMIN_USER=[string]$Context.Plan.AdminUser} -TimeoutSeconds 180
+        $sshParameters=@{OLD_PORTS=$oldPorts-join',';NEW_PRIMARY=[string]$primary;NEW_RESCUE=[string]$rescue;NEW_PUBLIC_KEY=$newPublic;ADMIN_USER=[string]$Context.Plan.AdminUser;FIREWALL_REQUIRED=$changePorts.ToString().ToLowerInvariant()}
+        if($changePorts){
+            $oldFirewall=Get-MxhProtocolFirewallParameters $Context.Plan $Context.State (Get-MxhProtocolInventory -Plan $Context.Plan -State $Context.State)
+            foreach($key in $oldFirewall.Keys){$sshParameters[$key]=$oldFirewall[$key]}
+        }
+        $r=Invoke-VpsRemoteScript $Context 'maintenance-ssh-apply.sh' $sshParameters -TimeoutSeconds 180
         if($r.StdOut -notmatch 'VPSDEPLOY_SSH_MAINTENANCE_STAGED'){throw 'SSH 候选入口未确认。'}
         $sshBackup=Get-VpsMarkerValue $r.StdOut BACKUP_DIR -Required
         if($changePorts){
             $tempPlan=Copy-MxhHashtable $Context.Plan; $tempPlan.Ports.SshPrimary=$primary;$tempPlan.Ports.SshRescue=$rescue
             $parameters=Get-MxhProtocolFirewallParameters $tempPlan $Context.State (Get-MxhProtocolInventory -Plan $Context.Plan -State $Context.State)
             $parameters.TCP_PORTS=(@($oldPorts+$primary+$rescue+($parameters.TCP_PORTS-split','|ForEach-Object{[int]$_}))|Sort-Object -Unique)-join','
+            $parameters.EXPECTED_TRANSACTION=$sshBackup
             Invoke-VpsRemoteScript $Context 'nftables-apply.sh' $parameters -TimeoutSeconds 180|Out-Null
         }
         $portChecks=@([pscustomobject]@{Label='Primary';Port=$primary},[pscustomobject]@{Label='Rescue';Port=$rescue})|Sort-Object Port -Unique
@@ -685,7 +691,7 @@ function Invoke-MxhSshMaintenance {
         $r=Invoke-VpsRemoteScript $Context 'maintenance-ssh-commit.sh' @{EXPECTED_BACKUP=$sshBackup;NEW_PRIMARY=[string]$primary;NEW_RESCUE=[string]$rescue;NEW_PUBLIC_KEY=$newPublic;OLD_PUBLIC_KEY=$oldPublic;ADMIN_USER=[string]$Context.Plan.AdminUser} -TimeoutSeconds 180
         if($r.StdOut -notmatch 'VPSDEPLOY_SSH_MAINTENANCE_COMMITTED'){throw 'SSH 维护提交失败。'}
         $Context.Plan.Ports.SshPrimary=$primary;$Context.Plan.Ports.SshRescue=$rescue;$Context.State.CurrentManagementPort=$primary
-        if($changePorts){Invoke-MxhProtocolFirewall $Context (Get-MxhProtocolInventory -Plan $Context.Plan -State $Context.State) 'SshMaintenanceFinalFirewall'}
+        if($changePorts){Invoke-MxhProtocolFirewall $Context (Get-MxhProtocolInventory -Plan $Context.Plan -State $Context.State) 'SshMaintenanceFinalFirewall' -ExpectedTransaction $sshBackup}
         Save-MxhMaintenanceContext $Context
         $sshJournal.Phase='LocalPrepared';Save-VpsJson $sshJournal $sshJournalPath -Private
         $finalized=Invoke-VpsRemoteScript $Context 'maintenance-ssh-finalize.sh' @{EXPECTED_BACKUP=$sshBackup}

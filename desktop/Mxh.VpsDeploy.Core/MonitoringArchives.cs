@@ -4,6 +4,12 @@ namespace Mxh.VpsDeploy.Core;
 
 public static class MonitoringArchives
 {
+    public static string NormalizeEndpoint(string endpoint)
+    {
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https") || uri.UserInfo != "" || uri.Fragment != "" || endpoint.Any(char.IsControl))
+            throw new OperationException("Komari 地址需要完整的 HTTP/HTTPS URL，不包含登录凭据或片段。");
+        return endpoint.TrimEnd('/');
+    }
     public static void ApplyHealth(JsonObject plan, JsonObject state, JsonObject audit)
     {
         if (audit.Number("SchemaVersion") != 2 || audit["ChecksIncomplete"] is not JsonArray incomplete || incomplete.Count != 0 ||
@@ -54,7 +60,8 @@ public static class MonitoringArchives
         if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https") || string.IsNullOrEmpty(token) || token.Any(char.IsControl))
             throw new OperationException("Agent 连接配置不完整，未更新监控归档。", code: "AgentConfigurationIncomplete");
         var previousEndpoint = plan.Text("Komari.Endpoint"); var previousToken = secrets.Text("KomariAgent.Token");
-        if (previousEndpoint != "" && previousEndpoint != endpoint || previousToken != "" && previousToken != token) return false;
+        endpoint = NormalizeEndpoint(endpoint);
+        if (previousEndpoint != "" && NormalizeEndpoint(previousEndpoint) != endpoint || previousToken != "" && previousToken != token) return false;
         plan.Put("Komari.Endpoint", JsonValue.Create(endpoint));
         secrets["KomariAgent"] ??= new JsonObject();
         secrets.Put("KomariAgent.Token", JsonValue.Create(token));

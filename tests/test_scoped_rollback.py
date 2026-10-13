@@ -129,6 +129,53 @@ class ScopedRollbackTests(unittest.TestCase):
         self.assertFalse((self.root/'opt/komari/data/metrics.db').exists())
         self.assertEqual(len(list(self.backup.glob('failed-komari-data-*/**/metrics.db'))),1)
 
+    def test_protocol_tls_snapshot_and_legacy_restore_preserve_unrelated_lineages(self):
+        owned=self.root/'etc/mxh-tls/anytls/fullchain.pem'
+        foreign=self.root/'etc/letsencrypt/archive/another-site/fullchain1.pem'
+        for file,content in ((owned,'old-owned-cert'),(foreign,'old-foreign-cert')):
+            file.parent.mkdir(parents=True,exist_ok=True);file.write_text(content)
+        self.arm('Protocols')
+        archive_path=self.backup/'protocol-files.tar.gz'
+        with tarfile.open(archive_path) as archive:
+            members=archive.getnames()
+            self.assertIn('etc/mxh-tls/anytls/fullchain.pem',members)
+            self.assertTrue(all('another-site' not in name for name in members))
+        # Construct the historical broad TLS archive, exercising the installed
+        # production rollback helper's member filter rather than a model.
+        historical=self.backup/'old.tar.gz'
+        with tarfile.open(archive_path) as old, tarfile.open(historical,'w:gz') as new:
+            for item in old.getmembers():
+                new.addfile(item,old.extractfile(item) if item.isfile() else None)
+            new.add(foreign,arcname='etc/letsencrypt/archive/another-site/fullchain1.pem')
+        archive_path.write_bytes(historical.read_bytes())
+        owned.write_text('new-owned-cert');foreign.write_text('new-foreign-cert')
+        self.restore('--protocol-files-only')
+        self.assertEqual(owned.read_text(),'old-owned-cert')
+        self.assertEqual(foreign.read_text(),'new-foreign-cert')
+
+    def test_initial_baseline_tls_restore_preserves_unrelated_certificate(self):
+        owned=self.root/'etc/mxh-tls/anytls/fullchain.pem'
+        foreign=self.root/'etc/letsencrypt/archive/another-site/fullchain1.pem'
+        for file,content in ((owned,'old-owned-cert'),(foreign,'old-foreign-cert')):
+            file.parent.mkdir(parents=True,exist_ok=True);file.write_text(content)
+        preamble=PREAMBLE+'''\nid(){ return 1; }\nsysctl(){ return 0; }\ndpkg-query(){ echo package; }\nsshd(){ return 0; }\nnft(){ [[ "$*" != 'list table inet filter' ]]; }\n'''
+        def source(name):
+            text=(ROOT/'assets/remote'/name).read_text()
+            for prefix in ('/usr/local','/etc','/var/lib','/var/www','/var/log','/run/systemd','/root'):
+                text=text.replace(prefix,shell_path(self.root)+prefix)
+            return text.replace('"/$path"','"$TEST_ROOT/$path"').replace('"/${path:?}"','"$TEST_ROOT/${path:?}"')
+        self.env.update(VPS_PARAM_TRANSACTION_ID='a'*32,VPS_PARAM_ADMIN_USER='synthetic-admin')
+        result=subprocess.run([BASH,'--noprofile','--norc','-s'],input=preamble+source('deployment-baseline-arm.sh'),text=True,capture_output=True,timeout=20,env=self.env)
+        self.assertEqual(result.returncode,0,result.stderr)
+        baseline=self.root/'root/vps-deploy-transaction-baselines'/('a'*32)
+        with tarfile.open(baseline/'files.tar.gz') as archive:
+            self.assertTrue(all('another-site' not in name for name in archive.getnames()))
+        owned.write_text('new-owned-cert');foreign.write_text('new-foreign-cert')
+        self.env['VPS_PARAM_BASELINE_DIR']=shell_path(baseline)
+        result=subprocess.run([BASH,'--noprofile','--norc','-s'],input=preamble+source('deployment-baseline-rollback.sh'),text=True,capture_output=True,timeout=20,env=self.env)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(owned.read_text(),'old-owned-cert');self.assertEqual(foreign.read_text(),'new-foreign-cert')
+
     def test_historical_full_protocol_restore_filters_monitor_files(self):
         runner=self.root/'usr/local/libexec/mxh-certbot-dns'
         runner.parent.mkdir(parents=True,exist_ok=True)

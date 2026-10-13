@@ -51,7 +51,7 @@ public sealed partial class MainWindow
     private void StopNetworkScheduler() { networkTimer?.Stop(); networkTimer = null; }
     private async Task PollNetworkSchedules()
     {
-        if (checkingNetworkJobs || taskCancellation != null || closing || dialogs.CurrentCount == 0) return;
+        if (checkingNetworkJobs || taskCancellation != null || activeTestDialog != null || closing || dialogs.CurrentCount == 0) return;
         checkingNetworkJobs = true;
         try
         {

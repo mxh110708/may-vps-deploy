@@ -11,8 +11,9 @@ if [[ "$VPS_PARAM_SCOPE" == 'RemoveManaged' ]]; then
   rm -f /etc/systemd/system/xray.service /etc/systemd/system/xray@.service /etc/systemd/system/sing-box-anytls.service /etc/systemd/system/sing-box.service /etc/systemd/system/komari-agent.service
   rm -rf /etc/systemd/system/xray.service.d /etc/systemd/system/sing-box.service.d
   rm -f /etc/nginx/sites-enabled/mxh-reality-target /etc/nginx/sites-available/mxh-reality-target
-  rm -rf /var/www/mxh-reality-target /etc/mxh-tls
-  rm -f /etc/systemd/system/mxh-certbot-renew.timer /etc/systemd/system/mxh-certbot-renew.service /usr/local/libexec/mxh-certbot-dns /usr/local/libexec/mxh-certbot-deploy
+  rm -rf /var/www/mxh-reality-target
+  # Certificates and their renewal owner are shared, retained materials, just
+  # as in individual protocol uninstall. Keep them for safe reinstallation.
   systemctl daemon-reload
 fi
 if [[ "$remove_controller" == 'true' ]]; then

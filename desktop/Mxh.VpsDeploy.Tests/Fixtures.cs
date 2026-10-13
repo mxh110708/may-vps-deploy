@@ -42,6 +42,7 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
     private readonly JsonObject protocolInventory = new();
     public void SeedProtocols(JsonObject plan)
     {
+        HealthAudit["Timers"] = new JsonObject { ["CertbotRenewEnabled"] = true, ["CertbotRenewActive"] = true };
         HealthAudit["Ssh"] = new JsonObject { ["Valid"] = true, ["PubkeyAuthentication"] = "yes", ["Ports"] = new JsonArray(plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue")) };
         HealthAudit["Nftables"] = new JsonObject { ["Valid"] = true };
         foreach (var role in DeploymentPlans.Roles[..3])

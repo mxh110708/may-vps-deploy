@@ -23,6 +23,12 @@ public static class SafeFailures
     {
         try
         {
+            var certificate = RemoteAssets.Marker(result.Output, "CERTBOT_SAFE_ERROR", false);
+            if (certificate.Length is > 0 and <= 1200 && !certificate.Any(char.IsControl)) return new(certificate, code: "CertificateProvisioningFailed", nextAction: "按提示核对 DNS Token、区域权限与出口；保留恢复记录，核对后重新审阅。");
+        }
+        catch (FormatException) { }
+        try
+        {
             var phase = RemoteAssets.Marker(result.Output, "PROXY_UPGRADE_FAILURE", false);
             var detail = phase switch { "download" => "代理核心发行包下载失败。", "checksum" => "代理核心发行包 SHA256 不匹配，未替换程序。", "archive" => "代理核心发行包内容不受支持，未替换程序。", "version" => "代理核心程序版本与目标不一致，未替换程序。", "configuration" => "新核心未通过现有配置检查，未替换程序。", "install" => "代理核心程序替换或写入后校验失败。", _ => "" };
             if (detail != "") return new(detail, code: "ProxyCoreUpgradeFailed", nextAction: "核对任务中的目标版本和失败阶段；本轮按协议范围恢复后可重新审阅。");

@@ -7,8 +7,10 @@ umask 077
 install -d -m 700 /root/.ssh
 touch /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
-grep -qxF "$VPS_PARAM_PUBLIC_KEY" /root/.ssh/authorized_keys || \
+if ! grep -qxF "$VPS_PARAM_PUBLIC_KEY" /root/.ssh/authorized_keys; then
+  [[ ! -s /root/.ssh/authorized_keys ]] || printf '\n' >> /root/.ssh/authorized_keys
   printf '%s\n' "$VPS_PARAM_PUBLIC_KEY" >> /root/.ssh/authorized_keys
+fi
 
 managed=/etc/ssh/sshd_config.d/00-00-mxh-bootstrap-access.conf
 effective="$(sshd -T)"

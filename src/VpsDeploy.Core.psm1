@@ -2463,6 +2463,13 @@ function New-VpsRemoteScriptPayload {
     # such as "pipefail\r", so build the complete payload with explicit LF.
     $preamble = [Text.StringBuilder]::new()
     [void]$preamble.Append("set -euo pipefail`n")
+    if ($Asset -eq 'nftables-apply.sh' -and -not $Parameters.Contains('EXPECTED_TRANSACTION') -and
+        $Context.PSObject.Properties['State'] -and $Context.State.Contains('DeploymentTransaction') -and
+        [string]$Context.State.DeploymentTransaction.Status -eq 'Armed' -and
+        $Context.State.DeploymentTransaction.Contains('RemoteBaselineDirectory') -and
+        $Context.State.DeploymentTransaction.RemoteBaselineDirectory) {
+        $Parameters['DEPLOYMENT_BASELINE'] = [string]$Context.State.DeploymentTransaction.RemoteBaselineDirectory
+    }
     foreach ($key in $Parameters.Keys) {
         $name = ([string]$key).ToUpperInvariant()
         if ($name -notmatch '^[A-Z][A-Z0-9_]*$') { throw "远端参数名无效：$key" }
@@ -2472,7 +2479,7 @@ function New-VpsRemoteScriptPayload {
         [void]$preamble.Append($exportLine + "`n")
     }
     $guard=if($Parameters.Contains('EXPECTED_TRANSACTION')){(Get-VpsRemoteAsset -Context $Context -Name 'maintenance-mutation-guard.sh')+"`nvps_begin_mutation || exit 1`n"}else{''}
-    if ($Asset -in @('nftables-apply.sh','component-firewall-add.sh','firewall-preflight.sh','protocol-migration-arm-rollback.sh')) { [void]$preamble.Append((Get-VpsRemoteAsset -Context $Context -Name 'firewall-tools.sh') + "`n") }
+    if ($Asset -in @('nftables-apply.sh','component-firewall-add.sh','firewall-preflight.sh','protocol-migration-arm-rollback.sh','maintenance-ssh-apply.sh')) { [void]$preamble.Append((Get-VpsRemoteAsset -Context $Context -Name 'firewall-tools.sh') + "`n") }
     return "(`nset -euo pipefail`n" + $preamble.ToString() + $guard + (Get-VpsRemoteAsset -Context $Context -Name $Asset) + "`n)`n"
 }
 

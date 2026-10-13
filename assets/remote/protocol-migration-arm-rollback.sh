@@ -111,7 +111,12 @@ if scope_has Protocols; then candidate_paths+=(
   usr/local/bin/xray usr/local/etc/xray usr/local/share/xray
   etc/systemd/system/xray.service etc/systemd/system/xray@.service etc/systemd/system/xray.service.d
   etc/nginx/sites-available/mxh-reality-target etc/nginx/sites-enabled/mxh-reality-target var/www/mxh-reality-target
-  etc/mxh-tls etc/letsencrypt etc/systemd/system/mxh-certbot-renew.timer etc/systemd/system/mxh-certbot-renew.service
+  etc/mxh-tls/anytls etc/mxh-tls/reality-target
+  etc/letsencrypt/cloudflare.ini etc/letsencrypt/cloudflare.ini.mxh-source
+  etc/letsencrypt/mxh-anytls-cloudflare.ini etc/letsencrypt/mxh-anytls-cloudflare.ini.mxh-source
+  etc/letsencrypt/archive/mxh-anytls etc/letsencrypt/live/mxh-anytls etc/letsencrypt/renewal/mxh-anytls.conf
+  etc/letsencrypt/archive/mxh-reality-target etc/letsencrypt/live/mxh-reality-target etc/letsencrypt/renewal/mxh-reality-target.conf
+  etc/systemd/system/mxh-certbot-renew.timer etc/systemd/system/mxh-certbot-renew.service
   usr/local/libexec/mxh-certbot-dns usr/local/libexec/mxh-certbot-deploy
   usr/local/bin/sing-box-anytls etc/systemd/system/sing-box-anytls.service etc/sing-box-anytls var/lib/sing-box-anytls
   usr/local/bin/sing-box etc/systemd/system/sing-box.service etc/systemd/system/sing-box.service.d etc/sing-box var/lib/sing-box
@@ -119,7 +124,7 @@ if scope_has Protocols; then candidate_paths+=(
 if scope_has RealityEntry; then candidate_paths+=(usr/local/bin/xray usr/local/etc/xray usr/local/share/xray etc/systemd/system/xray.service etc/systemd/system/xray@.service etc/systemd/system/xray.service.d); fi
 if scope_has AnyTlsEntry; then candidate_paths+=(usr/local/bin/sing-box-anytls etc/systemd/system/sing-box-anytls.service etc/sing-box-anytls var/lib/sing-box-anytls); fi
 if scope_has ShadowsocksLanding; then candidate_paths+=(usr/local/bin/sing-box etc/systemd/system/sing-box.service etc/systemd/system/sing-box.service.d etc/sing-box var/lib/sing-box); fi
-if scope_has TrustedTls; then candidate_paths+=(etc/letsencrypt etc/mxh-tls etc/systemd/system/mxh-certbot-renew.timer etc/systemd/system/mxh-certbot-renew.service usr/local/libexec/mxh-certbot-dns usr/local/libexec/mxh-certbot-deploy etc/letsencrypt/mxh-anytls-cloudflare.ini etc/letsencrypt/archive/mxh-anytls etc/letsencrypt/live/mxh-anytls etc/letsencrypt/renewal/mxh-anytls.conf etc/mxh-tls/anytls); fi
+if scope_has TrustedTls; then candidate_paths+=(etc/systemd/system/mxh-certbot-renew.timer etc/systemd/system/mxh-certbot-renew.service usr/local/libexec/mxh-certbot-dns usr/local/libexec/mxh-certbot-deploy etc/letsencrypt/cloudflare.ini.mxh-source etc/letsencrypt/mxh-anytls-cloudflare.ini etc/letsencrypt/mxh-anytls-cloudflare.ini.mxh-source etc/letsencrypt/archive/mxh-anytls etc/letsencrypt/live/mxh-anytls etc/letsencrypt/renewal/mxh-anytls.conf etc/mxh-tls/anytls); fi
 if scope_has KomariAgent; then candidate_paths+=(usr/local/bin/komari-agent etc/komari-agent etc/systemd/system/komari-agent.service var/lib/komari-agent); fi
 if scope_has KomariController; then candidate_paths+=(usr/local/bin/komari usr/bin/komari opt/komari var/lib/komari etc/systemd/system/komari.service); fi
 if scope_has Cloudflared; then candidate_paths+=(usr/local/bin/cloudflared usr/bin/cloudflared etc/systemd/system/cloudflared.service etc/cloudflared); fi
@@ -209,7 +214,7 @@ for role in RealityEntry AnyTlsEntry ShadowsocksLanding; do
 done
 if scope_has TrustedTls; then
   systemctl stop mxh-certbot-renew.timer mxh-certbot-renew.service >/dev/null 2>&1 || true
-  for relative in etc/systemd/system/mxh-certbot-renew.timer etc/systemd/system/mxh-certbot-renew.service usr/local/libexec/mxh-certbot-dns usr/local/libexec/mxh-certbot-deploy etc/letsencrypt/mxh-anytls-cloudflare.ini etc/letsencrypt/archive/mxh-anytls etc/letsencrypt/live/mxh-anytls etc/letsencrypt/renewal/mxh-anytls.conf etc/mxh-tls/anytls; do
+  for relative in etc/systemd/system/mxh-certbot-renew.timer etc/systemd/system/mxh-certbot-renew.service usr/local/libexec/mxh-certbot-dns usr/local/libexec/mxh-certbot-deploy etc/letsencrypt/cloudflare.ini.mxh-source etc/letsencrypt/mxh-anytls-cloudflare.ini etc/letsencrypt/mxh-anytls-cloudflare.ini.mxh-source etc/letsencrypt/archive/mxh-anytls etc/letsencrypt/live/mxh-anytls etc/letsencrypt/renewal/mxh-anytls.conf etc/mxh-tls/anytls; do
     if ! grep -Fxq "$relative" "$backup_dir/existing-paths"; then rm -rf -- "/${relative:?}"; fi
   done
 fi
@@ -232,10 +237,20 @@ if [[ -f "$backup_dir/protocol-files.tar.gz" ]]; then
       leaf="${directory#/}"; mv "$directory" "$failed_dir/${leaf//\//-}"
     done
   fi
+  # Old snapshots captured all of /etc/letsencrypt. Filter their TLS members
+  # too, so another site's current lineage and ACME account cannot be reverted.
+  tls_member_allowed(){
+    case "$1" in
+      etc/letsencrypt/cloudflare.ini|etc/letsencrypt/cloudflare.ini.mxh-source|etc/letsencrypt/mxh-anytls-cloudflare.ini|etc/letsencrypt/mxh-anytls-cloudflare.ini.mxh-source|etc/letsencrypt/archive/mxh-anytls/*|etc/letsencrypt/live/mxh-anytls/*|etc/letsencrypt/renewal/mxh-anytls.conf|etc/letsencrypt/archive/mxh-reality-target/*|etc/letsencrypt/live/mxh-reality-target/*|etc/letsencrypt/renewal/mxh-reality-target.conf|etc/mxh-tls/anytls/*|etc/mxh-tls/reality-target/*) return 0;;
+      etc/letsencrypt|etc/letsencrypt/*|etc/mxh-tls|etc/mxh-tls/*) return 1;;
+      *) return 0;;
+    esac
+  }
   if [[ "$protocol_only" == true ]]; then
     # Historical snapshots also contain monitoring data, which is outside a protocol restore.
     members="$(mktemp)"
     tar -tzpf "$backup_dir/protocol-files.tar.gz" | while IFS= read -r member; do
+      tls_member_allowed "$member" || continue
       case "$member" in
         usr/local/bin/xray|usr/local/bin/sing-box|usr/local/bin/sing-box-anytls|usr/local/etc/xray/*|usr/local/share/xray/*|etc/sing-box/*|etc/sing-box-anytls/*|var/lib/sing-box/*|var/lib/sing-box-anytls/*|etc/mxh-tls/*|etc/letsencrypt/*|var/www/mxh-reality-target/*|etc/nginx/sites-available/mxh-reality-target|etc/nginx/sites-enabled/mxh-reality-target|etc/systemd/system/xray.service|etc/systemd/system/xray@.service|etc/systemd/system/xray.service.d/*|etc/systemd/system/sing-box.service|etc/systemd/system/sing-box.service.d/*|etc/systemd/system/sing-box-anytls.service|etc/systemd/system/mxh-certbot-renew.timer|etc/systemd/system/mxh-certbot-renew.service|usr/local/libexec/mxh-certbot-dns|usr/local/libexec/mxh-certbot-deploy)
           [[ "$member" != /* && "/$member/" != *'/../'* ]] || exit 1
@@ -245,7 +260,10 @@ if [[ -f "$backup_dir/protocol-files.tar.gz" ]]; then
     tar --numeric-owner --no-recursion -xzpf "$backup_dir/protocol-files.tar.gz" -C / -T "$members"
     rm -f "$members"
   else
-    tar --numeric-owner -xzpf "$backup_dir/protocol-files.tar.gz" -C /
+    members="$(mktemp)"
+    tar -tzpf "$backup_dir/protocol-files.tar.gz" | while IFS= read -r member; do tls_member_allowed "$member" && printf '%s\n' "$member" || true; done > "$members"
+    tar --numeric-owner --no-recursion -xzpf "$backup_dir/protocol-files.tar.gz" -C / -T "$members"
+    rm -f "$members"
   fi
 fi
 if scope_has Firewall && [[ -f "$backup_dir/nftables.conf" ]]; then
@@ -301,7 +319,7 @@ if scope_has Protocols && command -v nginx >/dev/null 2>&1; then
   if [[ "$nginx_enabled" == 'true' ]]; then systemctl enable nginx.service >/dev/null; else systemctl disable nginx.service >/dev/null 2>&1 || true; fi
   if [[ "$nginx_active" == 'true' ]]; then
     nginx -t
-    systemctl start nginx.service
+    systemctl reload-or-restart nginx.service
   else
     systemctl stop nginx.service >/dev/null 2>&1 || true
   fi

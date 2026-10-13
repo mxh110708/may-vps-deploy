@@ -36,6 +36,7 @@ inventory = {
     "AnyTlsEntry": service_state("sing-box-anytls.service", "/usr/local/bin/sing-box-anytls", "/etc/sing-box-anytls/config.json"),
     "ShadowsocksLanding": service_state("sing-box.service", "/usr/local/bin/sing-box", "/etc/sing-box/config.json"),
 }
+native = os.environ.get("VPS_PARAM_NATIVE_IMPORT") == "true"
 komari_services = {
     "Agent": service_state("komari-agent.service", "/usr/local/bin/komari-agent", "/etc/komari-agent/config.json"),
     "Controller": service_state("komari.service", None, None),
@@ -47,9 +48,9 @@ for role in ("RealityEntry", "AnyTlsEntry", "ShadowsocksLanding"):
         raise RuntimeError(f"partial managed protocol installation: {role}")
     if (item["Enabled"] or item["Active"]) and not item["Installed"]:
         raise RuntimeError(f"invalid service state: {role}")
-if inventory["RealityEntry"]["Enabled"] and inventory["AnyTlsEntry"]["Enabled"]:
+if not native and inventory["RealityEntry"]["Enabled"] and inventory["AnyTlsEntry"]["Enabled"]:
     raise RuntimeError("Reality and AnyTLS are both enabled")
-if inventory["RealityEntry"]["Active"] and inventory["AnyTlsEntry"]["Active"]:
+if not native and inventory["RealityEntry"]["Active"] and inventory["AnyTlsEntry"]["Active"]:
     raise RuntimeError("Reality and AnyTLS are both active")
 
 sshd = run("sshd", "-T", check=True).stdout.splitlines()
@@ -110,8 +111,11 @@ if inventory["RealityEntry"]["Installed"]:
     if not match:
         raise RuntimeError("cannot derive Reality client key")
     ports = sorted({item["port"] for item in normalized})
-    primary = 443 if 443 in ports else ports[0]
-    if primary != 443:
+    primaries = {int(item['port']) for item in reality_inbounds if str(item.get('tag', '')).startswith('reality-primary-')}
+    if native and (len(ports) > 2 or len(primaries) > 1):
+        raise RuntimeError("ambiguous managed Reality listener identity")
+    primary = next(iter(primaries)) if native and primaries else 443 if 443 in ports else ports[0]
+    if not native and primary != 443:
         raise RuntimeError("existing Reality primary port must be TCP 443 for managed lifecycle")
     backups = [port for port in ports if port != primary]
     version = run("/usr/local/bin/xray", "version", check=True).stdout.splitlines()[0].split()[1]
@@ -132,6 +136,8 @@ if inventory["RealityEntry"]["Installed"]:
             "ShortId": first["short"],
         },
     }
+    if protocols["RealityEntry"]["TargetMode"] == "LocalOwnedTls":
+        protocols["RealityEntry"]["LocalHttpsPort"] = int(first["target"].rsplit(":", 1)[1])
 
 if inventory["AnyTlsEntry"]["Installed"]:
     config = json.loads(Path("/etc/sing-box-anytls/config.json").read_text(encoding="utf-8"))
@@ -166,6 +172,10 @@ if inventory["AnyTlsEntry"]["Installed"]:
             "EchServerKeyPem": ech_key,
         },
     }
+
+if native and (inventory["RealityEntry"]["Enabled"] and inventory["AnyTlsEntry"]["Enabled"] or inventory["RealityEntry"]["Active"] and inventory["AnyTlsEntry"]["Active"]):
+    if {item["port"] for item in normalized} & {int(item.get("listen_port", 0)) for item in inbounds}:
+        raise RuntimeError("Reality and AnyTLS listener ports conflict")
 
 if inventory["ShadowsocksLanding"]["Installed"]:
     config = json.loads(Path("/etc/sing-box/config.json").read_text(encoding="utf-8"))

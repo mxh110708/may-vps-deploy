@@ -39,7 +39,7 @@ public static class DeploymentPlans
             ["Shadowsocks"] = new JsonObject { ["Method"] = "2022-blake3-aes-128-gcm", ["TrustedEntryIPv4s"] = new JsonArray(trusted.Where(x => x.AddressFamily == AddressFamily.InterNetwork).Select(x => (JsonNode?)JsonValue.Create(x.ToString())).ToArray()), ["TrustedEntryIPv6s"] = new JsonArray(trusted.Where(x => x.AddressFamily == AddressFamily.InterNetworkV6).Select(x => (JsonNode?)JsonValue.Create(x.ToString())).ToArray()), ["ClientTransitTag"] = form.Text("TransitGroup", "US-West Entry"), ["SecondaryIpv6Enabled"] = form.Flag("SecondaryIpv6Enabled"), ["SecondaryIpv6Address"] = form.Text("SecondaryIpv6Address"), ["SecondaryBindInterface"] = form.Text("SecondaryBindInterface"), ["SingBoxVersion"] = versions.Text("sing_box.version") },
             ["NetworkTuning"] = new JsonObject { ["Mode"] = "Manual", ["DeploymentPolicy"] = "ManualOnly", ["BandwidthMbps"] = 0, ["ReferenceRttMs"] = 0 },
             ["Komari"] = new JsonObject { ["Enabled"] = !existing && form.Flag("KomariEnabled"), ["Endpoint"] = !existing && form.Flag("KomariEnabled") ? form.Text("KomariEndpoint") : "", ["AgentVersion"] = versions.Text("komari_agent.version") },
-            ["TrustedTls"] = new JsonObject { ["Enabled"] = purposes.Contains("AnyTlsEntry") || purposes.Contains("RealityEntry") && form.Flag("LocalTarget"), ["ZoneName"] = form.Text("ZoneName"), ["CertbotEmail"] = form.Text("CertbotEmail"), ["AnyTlsCertificateName"] = "mxh-anytls", ["RealityCertificateName"] = "mxh-reality", ["CloudflareTokenFile"] = form.Text("CloudflareTokenFile") },
+            ["TrustedTls"] = new JsonObject { ["Enabled"] = purposes.Contains("AnyTlsEntry") || purposes.Contains("RealityEntry") && form.Flag("LocalTarget"), ["ZoneName"] = form.Text("ZoneName"), ["CertbotEmail"] = form.Text("CertbotEmail"), ["AnyTlsCertificateName"] = "mxh-anytls", ["RealityCertificateName"] = "mxh-reality-target", ["CloudflareTokenFile"] = form.Text("CloudflareTokenFile") },
             ["Paths"] = new JsonObject { ["Archive"] = paths.Instance(relative), ["KeyDirectory"] = SafePath.Resolve(paths.Instance(relative), "ssh") },
             ["Firewall"] = new JsonObject { ["Mode"] = existing ? "PreserveExisting" : "ManagedNftables" }
         };
@@ -67,12 +67,18 @@ public static class DeploymentPlans
         if (Uses(plan, "ShadowsocksLanding")) listeners.Add(("ShadowsocksLanding", plan.Number("Ports.LandingShadowsocks")));
         if (listeners.Any(p => p.Port is < 1 or > 65535 || new[] { plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue"), plan.Number("Server.BootstrapSshPort") }.Contains(p.Port)) || listeners.GroupBy(p => p.Port).Any(g => g.Count() > 1 && (g.Count() != 2 || g.Select(p => p.Role).Distinct().Count() != 2 || g.Any(p => p.Role == "ShadowsocksLanding")))) throw new OperationException("协议端口无效或与管理入口、落地端口冲突。");
         if (Uses(plan, "RealityEntry")) Domain(plan.Text("Reality.ServerName"));
+        if (Uses(plan, "RealityEntry") && plan.Text("Reality.TargetMode") == "LocalOwnedTls")
+        {
+            var port = plan.Number("Reality.LocalHttpsPort");
+            if (port is < 1 or > 65535 || listeners.Any(listener => listener.Port == port) || new[] { plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue"), plan.Number("Server.BootstrapSshPort") }.Contains(port)) throw new OperationException("本机 HTTPS 目标端口与协议或管理入口冲突，请选择独立端口。");
+            if (plan.Text("TrustedTls.RealityCertificateName") != "mxh-reality-target") throw new OperationException("本机 Reality 目标需要受管证书名称 mxh-reality-target，请重新创建部署计划。");
+        }
         if (Uses(plan, "AnyTlsEntry")) { Domain(plan.Text("AnyTls.ServerName")); Domain(plan.Text("AnyTls.EchPublicName")); }
         if (plan.Flag("TrustedTls.Enabled") && (plan.Text("TrustedTls.ZoneName") == "" || plan.Text("TrustedTls.CertbotEmail") == "" || !File.Exists(plan.Text("TrustedTls.CloudflareTokenFile")))) throw new OperationException("可信证书需要区域、邮件与私人 Token 文件。");
         if (plan.Flag("TrustedTls.Enabled")) CloudflareCredentials.ReadToken(plan.Text("TrustedTls.CloudflareTokenFile"));
         if (Uses(plan, "ShadowsocksLanding") && plan.Strings("Shadowsocks.TrustedEntryIPv4s").Length + plan.Strings("Shadowsocks.TrustedEntryIPv6s").Length == 0) throw new OperationException("落地至少需要一个可信入口地址。");
         if (Uses(plan, "ShadowsocksLanding") && plan.Flag("Shadowsocks.SecondaryIpv6Enabled") && (!IPAddress.TryParse(plan.Text("Shadowsocks.SecondaryIpv6Address"), out var source6) || source6.AddressFamily != AddressFamily.InterNetworkV6)) throw new OperationException("IPv6 专用用户需要明确的 IPv6 源地址。");
-        if (plan.Flag("Komari.Enabled") && (!Uri.TryCreate(plan.Text("Komari.Endpoint"), UriKind.Absolute, out var endpoint) || endpoint.Scheme is not ("http" or "https"))) throw new OperationException("Komari 地址需要完整的 HTTP/HTTPS URL。");
+        if (plan.Flag("Komari.Enabled")) plan.Put("Komari.Endpoint", JsonValue.Create(MonitoringArchives.NormalizeEndpoint(plan.Text("Komari.Endpoint"))));
     }
     internal static void Domain(string value)
     {

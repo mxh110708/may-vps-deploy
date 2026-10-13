@@ -98,7 +98,7 @@ public static class ComponentInstallations
                 if (plan.Text("Shadowsocks.SecondaryBindInterface") != "" && !Regex.IsMatch(plan.Text("Shadowsocks.SecondaryBindInterface"), "^[a-zA-Z0-9_.:-]{1,15}$")) throw new OperationException("网卡名称无效。");
                 plan.Put("Ports.LandingShadowsocks", JsonValue.Create(settings.Number("LandingPort", 45001))); break;
             case "KomariAgent":
-                HttpUrl(settings.Text("KomariEndpoint")); plan["Komari"] = new JsonObject { ["Enabled"] = true, ["Endpoint"] = settings.Text("KomariEndpoint"), ["AgentVersion"] = versions.Text("komari_agent.version") }; break;
+                plan["Komari"] = new JsonObject { ["Enabled"] = true, ["Endpoint"] = MonitoringArchives.NormalizeEndpoint(settings.Text("KomariEndpoint")), ["AgentVersion"] = versions.Text("komari_agent.version") }; break;
             case "KomariController": plan["KomariController"] = new JsonObject { ["Port"] = settings.Number("ControllerPort", 25774), ["ListenAddress"] = "127.0.0.1", ["Version"] = versions.Text("komari_controller.version") }; break;
             case "Tunnel":
                 if (settings.Text("PublicUrl") != "") HttpUrl(settings.Text("PublicUrl"));

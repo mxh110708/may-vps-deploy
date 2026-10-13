@@ -62,6 +62,7 @@ systemctl() {
                    MOCK_LOCK_FAIL='1' if lock_fail else '0', VPS_PARAM_EXPECTED_BACKUP=expected or shell_path(self.backup),
                    VPS_PARAM_SOURCE_ROLE='RealityEntry', VPS_PARAM_TARGET_ROLE='AnyTlsEntry',
                    VPS_PARAM_TIMEOUT_MINUTES='20', VPS_PARAM_ACTION=action)
+        env.update(VPS_PARAM_KEEP_LATEST='0', VPS_PARAM_CHECK_ONLY='false')
         return subprocess.run([BASH, '--noprofile', '--norc', '-s'], input=preamble + source,
                               text=True, encoding='utf-8', errors='replace', capture_output=True, timeout=10, env=env)
 
@@ -196,6 +197,15 @@ systemctl() {
 
     def test_current_transaction_allows_write(self):
         self.assertEqual(self.mutation().returncode,0)
+
+    def test_prune_refuses_unarmed_owner_running_restore_and_concurrent_writer(self):
+        self.assertNotEqual(self.run_script('protocol-backup-prune.sh').returncode, 0)
+        self.assertTrue(self.backup.exists()); self.owner.unlink()
+        for unit in ('mxh-protocol-migration-rollback.service', 'mxh-ssh-maintenance-rollback.service'):
+            self.assertNotEqual(self.run_script('protocol-backup-prune.sh', active=unit).returncode, 0)
+            self.assertTrue(self.backup.exists())
+        self.assertNotEqual(self.run_script('protocol-backup-prune.sh', lock_fail=True).returncode, 0)
+        self.assertTrue(self.backup.exists())
 
 
 class MaintenanceRuntimeTests(unittest.TestCase):

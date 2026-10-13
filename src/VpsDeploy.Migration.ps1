@@ -161,7 +161,8 @@ function Invoke-MxhProtocolFirewall {
     param(
         [Parameter(Mandatory)] $Context,
         [Parameter(Mandatory)] [Collections.IDictionary]$Inventory,
-        [Parameter(Mandatory)] [string]$BackupStateName
+        [Parameter(Mandatory)] [string]$BackupStateName,
+        [string]$ExpectedTransaction
     )
     $firewallMode = if ($Context.Plan.Contains('Firewall') -and $Context.Plan.Firewall.Contains('Mode')) {
         [string]$Context.Plan.Firewall.Mode
@@ -181,6 +182,7 @@ function Invoke-MxhProtocolFirewall {
         return
     }
     $parameters = Get-MxhProtocolFirewallParameters -Plan $Context.Plan -State $Context.State -Inventory $Inventory
+    if ($ExpectedTransaction) { $parameters.EXPECTED_TRANSACTION = $ExpectedTransaction }
     $result = Invoke-VpsRemoteScript -Context $Context -Asset 'nftables-apply.sh' -Parameters $parameters
     $backup = Get-VpsMarkerValue $result.StdOut BACKUP_DIR -Required
     if (-not $Context.State.Contains('BackupDirectories')) { $Context.State.BackupDirectories = @{} }

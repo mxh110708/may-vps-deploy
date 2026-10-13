@@ -75,6 +75,23 @@ public static class ClientSchemes
         var normalized = path.Replace('\\', '/').ToLowerInvariant();
         if (normalized.Contains("/appdata/") && (normalized.Contains("clash") || normalized.Contains("verge"))) throw new OperationException("请选择独立权威文件，不能发布到客户端 AppData 副本。");
     }
+    public static void ValidatePublishPath(AppPaths paths, string path)
+    {
+        ValidateAuthorityPath(path);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var full = Path.GetFullPath(path);
+        bool Inside(string directory) => full.Equals(directory, comparison) || full.StartsWith(directory + Path.DirectorySeparatorChar, comparison);
+        if (Inside(paths.Private)) throw new OperationException("导出位置不能覆盖应用的私人归档、凭据或候选文件，请选择独立配置位置。");
+        if (!Inside(paths.Root)) return;
+        var relative = Path.GetRelativePath(paths.Root, full).Replace('\\', '/');
+        var normalized = relative.ToLowerInvariant();
+        var first = relative.Split('/')[0].ToLowerInvariant();
+        if (new[] { "config", "runtime", "assets", "vendor", "templates", "scripts", "src", "desktop", "app-helpers", ".tmp", ".cache", ".git", "private" }.Contains(first)
+            || normalized is "application-files.json" or "installation.json" or "desktop-runtime.json" or "archive-location.private.json" or "archive-location.lock"
+            || !relative.Contains('/') && Path.GetExtension(relative).ToLowerInvariant() is ".exe" or ".dll" or ".cmd" or ".ps1") throw new OperationException("导出位置属于应用程序或运行材料，请选择独立配置位置。");
+        var manifest = paths.Resolve("application-files.json");
+        if (File.Exists(manifest) && (ArchiveStore.ReadJson(manifest)["files"] as JsonArray ?? []).Any(item => item.Text("path").Equals(relative, comparison))) throw new OperationException("导出位置属于受管应用文件，请选择独立配置位置。");
+    }
 }
 
 public sealed class CandidatePublisher(AppPaths paths, Action<string, byte[]>? writer = null, Action<JsonObject>? verifyManagedSources = null)
@@ -85,7 +102,7 @@ public sealed class CandidatePublisher(AppPaths paths, Action<string, byte[]>? w
         if (Pending().Any()) throw new OperationException("存在未完成的客户端发布，请先在记录页恢复。");
         if (candidate.Text("ValidationStatus") != "Passed") throw new OperationException("候选尚未通过所选客户端的核心校验，不能导出。");
         var selected = ClientSchemes.SelectedTargets(candidate, clashTarget, singTarget).ToArray();
-        foreach (var target in selected) ClientSchemes.ValidateAuthorityPath(target.Path);
+        foreach (var target in selected) ClientSchemes.ValidatePublishPath(paths, target.Path);
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         if (selected.Select(t => Path.GetFullPath(t.Path)).Distinct(comparer).Count() != selected.Length) throw new OperationException("配置文件不能使用同一路径。");
         foreach (var pair in candidate["Sources"]!.AsObject()) if (ClientSchemes.SourceFingerprint(pair.Key) != pair.Value!.ToString()) throw new OperationException("来源在生成候选后发生变化，请重新生成并校验。");
@@ -149,7 +166,7 @@ public sealed class CandidatePublisher(AppPaths paths, Action<string, byte[]>? w
         var held = new List<FileStream>();
         try
         {
-            foreach (var target in targets.Order(StringComparer.Ordinal)) { ClientSchemes.ValidateAuthorityPath(target); SafePath.CheckLinks(target + ".mxh-publish.lock"); held.Add(new FileStream(target + ".mxh-publish.lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)); }
+            foreach (var target in targets.Order(StringComparer.Ordinal)) { ClientSchemes.ValidatePublishPath(paths, target); SafePath.CheckLinks(target + ".mxh-publish.lock"); held.Add(new FileStream(target + ".mxh-publish.lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)); }
             byte[]?[] backups = new byte[]?[targets.Length];
             for (var i = 0; i < targets.Length; i++)
             {

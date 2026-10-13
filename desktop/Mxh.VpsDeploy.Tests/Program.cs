@@ -29,6 +29,7 @@ internal sealed partial class BoundaryTests(string repository)
         await TunnelAccessExperience(f); await NetworkExperience(f); await KernelExperience(f); await InstallationVersionExperience(f);
         await BackgroundTestTransport(f);
         await ReviewRepairExperience();
+        await GlobalReviewExperience();
         await BackgroundFaultExperience(f);
         var sshPython = Environment.GetEnvironmentVariable("MXH_TEST_SSH_PYTHON"); if (!string.IsNullOrEmpty(sshPython)) await LocalSshConfirmation(f, sshPython);
         var python = Environment.GetEnvironmentVariable("MXH_TEST_PYTHON"); if (!string.IsNullOrEmpty(python)) { using var clients = new Fixture(repository); await RealClientWorkbench(clients, python); }
@@ -230,11 +231,18 @@ internal sealed partial class BoundaryTests(string repository)
             var singleWorkbench = new ClientWorkbench(f.Store, new ExternalToolRunner(), new SelectedAssets(assets, mode == "Clash" ? "mihomo" : "sing-box"), python);
             var onlyCandidate = await singleWorkbench.BuildAsync(single, default); await singleWorkbench.ValidateAsync(single, default); Check(onlyCandidate.Text("ValidationStatus") == "Passed" && onlyCandidate[other] == null, "single build or validation used unselected client");
             var target = f.Paths.Resolve("real-authority/" + mode + "/config" + (mode == "Clash" ? ".yaml" : ".json")); singleWorkbench.PreparePublish(single, mode == "Clash" ? target : "", mode == "SingBox" ? target : ""); singleWorkbench.Publish(single, mode == "Clash" ? target : "", mode == "SingBox" ? target : ""); Check(File.Exists(target), "single core-validated export failed");
+            if (mode == "SingBox")
+            {
+                var existing = ArchiveStore.ReadJson(target); var group = existing["outbounds"]!.AsArray().Single(item => item!.Text("tag") == "US-West Entry")!.AsObject();
+                group["type"] = "urltest"; group.Remove("default"); group["url"] = "https://example.com/"; group["interval"] = "10m";
+                ArchiveStore.WriteJson(target, existing);
+            }
             var fingerprint = ClientSchemes.SourceFingerprint(target); var imported = await singleWorkbench.ReadSourcesAsync(mode == "Clash" ? target : "", mode == "SingBox" ? target : "", default);
             Check(imported.Count == 1 && imported[0]![other == "Clash" ? "clash" : "sing_box"] == null && fingerprint == ClientSchemes.SourceFingerprint(target), "single source import changed source or required pair");
             single["Nodes"] = imported; single[format] = target; single["SourceMode"] = "ExistingAuthority"; single["SourceFingerprints"] = new JsonObject { [format] = fingerprint };
             foreach (var item in imported) { item!["region_group"] = "US-West Entry"; item["transit_group"] = "US-West Entry"; }
             await singleWorkbench.BuildAsync(single, default); await singleWorkbench.ValidateAsync(single, default); Check(single.Text("Candidate.ValidationStatus") == "Passed", "single imported config did not rebuild");
+            if (mode == "SingBox") Check(ArchiveStore.ReadJson(single.Text("Candidate.SingBox"))["outbounds"]!.AsArray().Count(item => item!.Text("tag") == "US-West Entry") == 1, "actual urltest source rebuild duplicated the generated group");
             File.AppendAllText(target, "\n "); await RefusesAsync(() => singleWorkbench.BuildAsync(single, default), "changed imported source accepted");
             singleWorkbench.Delete(single); Check(!singleWorkbench.List().Any(s => s.Text("Id") == single.Text("Id")) && File.Exists(target), "deleting scheme removed exported authority");
         }
