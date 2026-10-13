@@ -51,6 +51,15 @@ class ReviewRepairs(unittest.TestCase):
         update_node_references(sing, {'B'}, {'B': 'C'}, 'sing_box')
         self.assertEqual(sing['route']['rule_set'][0]['download_detour'], 'C')
 
+    def test_node_rename_preserves_independent_dns_server_names(self):
+        sing = {'outbounds': [], 'route': {'final': 'B'}, 'dns': {'servers': [{'tag': 'B', 'detour': 'B'}, {'tag': 'C'}], 'final': 'B', 'rules': [{'server': 'B'}]}}
+        update_node_references(sing, {'B'}, {'B': 'C'}, 'sing_box')
+        self.assertEqual(sing['route']['final'], 'C')
+        self.assertEqual(sing['dns']['final'], 'B')
+        self.assertEqual(sing['dns']['rules'][0]['server'], 'B')
+        self.assertEqual(sing['dns']['servers'][0]['tag'], 'B')
+        self.assertEqual(sing['dns']['servers'][0]['detour'], 'C')
+
     def test_actual_builder_deletion_preserves_source_and_advanced_settings(self):
         with tempfile.TemporaryDirectory(dir=ROOT/'.tmp') as folder:
             root = Path(folder); clash = root/'source.yaml'; sing = root/'source.json'; specification = root/'layout.json'; output = root/'candidate'

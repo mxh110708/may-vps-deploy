@@ -131,7 +131,7 @@ def update_node_references(document: dict[str, Any], removed: set[str], renamed:
     def rename(value: Any) -> None:
         if isinstance(value, dict):
             for key, item in list(value.items()):
-                if key in {"outbound", "final", "detour", "dialer-proxy"} and isinstance(item, str):
+                if (key in {"outbound", "detour", "dialer-proxy"} or key == "final" and value is document.get("route")) and isinstance(item, str):
                     value[key] = renamed.get(item, item)
                 elif key == "download_detour" and isinstance(item, str):
                     value[key] = renamed.get(item, item)
