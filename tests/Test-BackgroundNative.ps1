@@ -130,6 +130,15 @@ try {
     @{Provider='Example';Instance='Native-Landing';NodeName='原生合成落地';Role='ShadowsocksLanding';Roles=@('ShadowsocksLanding');Server=@{IPv4='192.0.2.20';IPv6='2001:db8::20'};Ports=@{SshPrimary=22022;SshRescue=33022;LandingShadowsocks=4000};Import=@{Status='Completed'};Shadowsocks=@{Method='2022-blake3-aes-128-gcm';SecondaryIpv6Enabled=$true;SecondaryIpv6Address='2001:db8:1::20'};ProtocolInventory=@{ShadowsocksLanding=@{Installed=$true;Enabled=$true}}} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $peerDirectory 'deployment-plan.json') -Encoding utf8
     @{Engine='dotnet-v1';CurrentManagementPort=22022} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $peerDirectory 'deployment-state.json') -Encoding utf8
     Click 'network'; Choose '目标实例' 'Example/Managed-Demo/MXH-VPS-Deploy'
+    $canonical=Join-Path $FixtureRoot 'private/instances/Example/Managed-Demo/MXH-VPS-Deploy'
+    $backup=Join-Path $canonical 'ip-change-example'
+    [IO.Directory]::CreateDirectory($backup) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $canonical 'deployment-plan.json') -Destination (Join-Path $backup 'deployment-plan.json')
+    Click 'instances'
+    Check (@((Control '选择实例').choices|Where-Object value -eq 'Example/Managed-Demo/MXH-VPS-Deploy').Count -eq 1 -and @((Control '选择实例').choices|Where-Object value -Like '*ip-change-example*').Count -eq 0) 'nested IP-change backup is not a duplicate native instance choice'
+    Choose '选择实例' 'Example/Managed-Demo/MXH-VPS-Deploy'; Click '删除实例'; $null=Wait-Ui {param($ui) $ui.dialog -eq '删除本地实例'}
+    Check (((Read-Ui).elements.name -join ' ') -match '删除范围' -and (Test-Path -LiteralPath (Join-Path $backup 'deployment-plan.json'))) 'canonical instance deletion review opens while backup data is preserved'
+    Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}; Click 'network'; Choose '目标实例' 'Example/Managed-Demo/MXH-VPS-Deploy'
     Check ((Control '优化偏好').value -eq 'Balanced') 'balanced diagnostics is the normal default'
     Choose '入口连接地址族' 'Both'
     Check (((Read-Ui).elements.name -join ' ') -match '每条路径有效载荷最多 204 MiB') 'dual stack shares one total payload budget'

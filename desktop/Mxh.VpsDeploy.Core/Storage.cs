@@ -136,12 +136,29 @@ public sealed class ArchiveStore(AppPaths paths, ISecretProtector protector)
     {
         if (!Directory.Exists(Paths.Instances)) yield break;
         SafePath.CheckTree(Paths.Instances);
-        foreach (var file in Directory.EnumerateFiles(Paths.Instances, "deployment-plan.json", SearchOption.AllDirectories))
+        // A plan inside an instance's backup is data, not another instance.
+        // Discovery and operations must agree on the same canonical archive boundary.
+        foreach (var providerDirectory in Directory.EnumerateDirectories(Paths.Instances).Order(StringComparer.Ordinal))
         {
-            JsonObject? plan = null;
-            try { plan = ReadJson(file); } catch (JsonException) { }
-            if (plan != null) yield return (Path.GetRelativePath(Paths.Instances, Path.GetDirectoryName(file)!).Replace('\\', '/'), plan);
+            var provider = Path.GetFileName(providerDirectory);
+            if (!ArchiveSegment(provider)) continue;
+            foreach (var instanceDirectory in Directory.EnumerateDirectories(providerDirectory).Order(StringComparer.Ordinal))
+            {
+                var instance = Path.GetFileName(instanceDirectory);
+                if (!ArchiveSegment(instance)) continue;
+                var relative = provider + "/" + instance + "/MXH-VPS-Deploy";
+                var file = SafePath.Resolve(Paths.Instance(relative), "deployment-plan.json");
+                if (!File.Exists(file)) continue;
+                JsonObject? plan = null;
+                try { plan = ReadJson(file); } catch (JsonException) { }
+                if (plan != null && plan.Text("Provider") == provider && plan.Text("Instance") == instance) yield return (relative, plan);
+            }
         }
+    }
+    private static bool ArchiveSegment(string name)
+    {
+        try { return AppPaths.Segment(name) == name; }
+        catch (OperationException) { return false; }
     }
     public void AppendHistory(TaskRecord record) => new TaskHistory(this).Append(record);
 }

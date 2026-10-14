@@ -63,6 +63,7 @@ internal sealed partial class BoundaryTests
     }
     private void LocalDeletion(Fixture f)
     {
+        InstanceDiscovery(f);
         var plan = f.Plan("DeleteLocal"); f.SaveInstance(plan); var relative = f.Relative(plan); var directory = f.Paths.Instance(relative);
         var source = f.Paths.Resolve("external/source-key"); Directory.CreateDirectory(Path.GetDirectoryName(source)!); File.WriteAllText(source, "synthetic-source-key");
         var settings = f.Paths.Resolve("private/desktop-settings.json"); File.WriteAllText(settings, "{}");
@@ -82,6 +83,25 @@ internal sealed partial class BoundaryTests
         Check(!Directory.Exists(directory) && !Directory.Exists(Path.GetDirectoryName(directory)!), "deleted instance or useless parent remains");
         Check(ClientSchemes.SourceFingerprint(otherFile) == otherHash && File.ReadAllText(source) == "synthetic-source-key" && File.ReadAllText(settings) == "{}", "delete affected another archive, original key or settings");
         Check(!Directory.Exists(f.Paths.Resolve("private/instance-deletions")), "delete left useless backup staging");
+    }
+    private void InstanceDiscovery(Fixture f)
+    {
+        var original = f.Plan("ArchiveDiscovery"); f.SaveInstance(original);
+        var relative = f.Relative(original); var directory = f.Paths.Instance(relative);
+        var backup = SafePath.Resolve(directory, "ip-change-example/deployment-plan.json"); ArchiveStore.WriteJson(backup, original);
+        var nested = SafePath.Resolve(directory, "backups/example/instance-copy/deployment-plan.json"); ArchiveStore.WriteJson(nested, original);
+        var misplaced = f.Paths.Resolve("private/instances/Example/MisplacedArchive/copy/deployment-plan.json"); ArchiveStore.WriteJson(misplaced, original);
+        var mismatch = f.Plan("ArchiveIdentityMismatch"); var mismatchFile = SafePath.Resolve(f.Paths.Instance(f.Relative(mismatch)), "deployment-plan.json"); ArchiveStore.WriteJson(mismatchFile, original);
+        var peer = f.Plan("ArchiveDiscoveryPeer"); peer["NodeName"] = original["NodeName"]!.DeepClone(); f.SaveInstance(peer);
+        var draft = f.Plan("ArchiveDiscoveryDraft"); ArchiveStore.WriteJson(SafePath.Resolve(f.Paths.Instance(f.Relative(draft)), "deployment-plan.json"), draft);
+        var hash = ClientSchemes.SourceFingerprint(backup); var records = f.Store.ListInstances().ToArray();
+        Check(records.Count(r => r.RelativePath == relative) == 1 && !records.Any(r => r.RelativePath.StartsWith(relative + "/", StringComparison.Ordinal)), "nested IP-change backup became a duplicate instance");
+        Check(!records.Any(r => r.RelativePath.Contains("MisplacedArchive", StringComparison.Ordinal)) && !records.Any(r => r.RelativePath == f.Relative(mismatch)), "discovery accepted noncanonical layout or mismatched plan identity");
+        Check(records.Any(r => r.RelativePath == f.Relative(peer)) && records.Any(r => r.RelativePath == f.Relative(draft)), "display-name deduplication hid legitimate peers or drafts");
+        Check(File.Exists(nested) && File.Exists(misplaced) && ClientSchemes.SourceFingerprint(backup) == hash, "instance discovery changed backup data");
+        foreach (var record in records) OperationPolicy.Validate(new(OperationKind.HealthAudit, record.RelativePath, new()));
+        Refuses(() => new InstanceDeletion(f.Store).Review(relative + "/ip-change-example"), "deletion path validation was relaxed to delete backup entries");
+        Check(new InstanceDeletion(f.Store).Review(relative).FileCount >= 4 && ClientSchemes.SourceFingerprint(backup) == hash, "normal deletion review failed or modified nested backups");
     }
 }
 
