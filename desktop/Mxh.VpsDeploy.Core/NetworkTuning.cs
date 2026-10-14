@@ -31,24 +31,27 @@ public static partial class NetworkTuning
         ["CapacityType"] = plan.Text("NetworkPreferences.CapacityType", "Unknown"),
         ["Protocol"] = !IsEntry(plan) ? "ShadowsocksLanding" : plan.Text("ActiveEntry", plan.Text("Role")) is "AnyTlsEntry" ? "AnyTlsEntry" : "RealityEntry",
         ["Topology"] = plan.Text("NetworkPreferences.Topology", IsEntry(plan) ? "Entry" : "Landing"),
-        ["PriorityDirection"] = plan.Text("NetworkPreferences.PriorityDirection", "Download"),
+        ["PriorityDirection"] = plan.Text("NetworkPreferences.EvidencePolicy") == EvidencePolicy ? plan.Text("NetworkPreferences.PriorityDirection", "Balanced") : "Balanced",
         ["PeerInstance"] = plan.Text("NetworkPreferences.PeerInstance"), ["PeerFamily"] = plan.Text("NetworkPreferences.PeerFamily", "IPv4"), ["PeerEgress"] = plan.Text("NetworkPreferences.PeerEgress", "IPv4"),
-        ["Family"] = plan.Text("NetworkPreferences.Family", "IPv4"), ["TestSize"] = "Light",
+        ["Family"] = plan.Text("NetworkPreferences.Family", "IPv4"), ["TestSize"] = plan.Text("NetworkPreferences.TestSize", "Standard"), ["TrafficBudgetMiB"] = plan.Number("NetworkPreferences.TrafficBudgetMiB", 1024),
         ["TimeZoneId"] = plan.Text("NetworkPreferences.TimeZoneId", TimeZoneInfo.Local.Id),
         ["PeakStartHour"] = plan.Number("NetworkPreferences.PeakStartHour", 20),
         ["PeakEndHour"] = plan.Number("NetworkPreferences.PeakEndHour", 23)
     };
-    public static long PayloadBudget(JsonObject options) => options.Text("TestSize") == "Full" ? 256L * 1048576 : 32L * 1048576;
-    public static int DurationSeconds(JsonObject options) => options.Text("TestSize") == "Full" ? 240 : 100;
+    // Reserve 20% for small probes/protocol overhead and half of the remaining payload for the retest.
+    public static long PayloadBudget(JsonObject options) => FlowBudgetMiB(options) * 1048576L * 4 / 10 / (options.Text("Family") == "Both" ? 2 : options.Number("BudgetFamilyCount", 1));
+    public static int DurationSeconds(JsonObject options) => (options.Text("TestSize") == "Light" ? 100 : options.Text("TestSize") == "Full" ? 240 : FlowBudgetMiB(options) <= 128 ? 120 : FlowBudgetMiB(options) <= 1024 ? 360 : FlowBudgetMiB(options) <= 4096 ? 900 : 1800) / (options.Text("Family") == "Both" ? 2 : options.Number("BudgetFamilyCount", 1));
     public static void ValidateMeasurement(JsonObject options)
     {
-        var allowed = new[] { "BandwidthMbps", "UploadMbps", "CapacityType", "Protocol", "Family", "TestSize", "TimeZoneId", "PeakStartHour", "PeakEndHour", "Scheduled", "Topology", "PriorityDirection", "PeerInstance", "PeerFamily", "PeerEgress" };
+        var allowed = new[] { "BandwidthMbps", "UploadMbps", "CapacityType", "Protocol", "Family", "TestSize", "TrafficBudgetMiB", "BudgetFamilyCount", "TimeZoneId", "PeakStartHour", "PeakEndHour", "Scheduled", "Topology", "PriorityDirection", "PeerInstance", "PeerFamily", "PeerEgress" };
         if (options.Any(p => !allowed.Contains(p.Key))) throw new OperationException("测速参数包含不支持的字段；RTT 由应用自动采集。");
         foreach (var key in new[] { "BandwidthMbps", "UploadMbps", "PeakStartHour", "PeakEndHour" })
             if (options.Text(key).Trim() != "" && !int.TryParse(options.Text(key), NumberStyles.Integer, CultureInfo.InvariantCulture, out _)) throw new OperationException("带宽与高峰时间请填写整数；带宽未知可留空。");
         if (options.Number("BandwidthMbps") is < 0 or > 100000 || options.Number("UploadMbps") is < 0 or > 100000) throw new OperationException("标称带宽应为 1–100000 Mbps；未知可留空。");
-        if (options.Text("CapacityType") is not ("Unknown" or "Shared" or "Dedicated" or "Burst") || options.Text("Protocol") is not ("RealityEntry" or "AnyTlsEntry" or "ShadowsocksLanding") || options.Text("Family") is not ("IPv4" or "IPv6") || options.Text("TestSize") is not ("Light" or "Full")) throw new OperationException("请选择有效的测速用途、协议和测试档位。");
-        if (Topology(options) is not ("Entry" or "Relay" or "Landing" or "ForwardOnly") || Priority(options) is not ("Download" or "Upload")) throw new OperationException("请选择有效的 TCP 角色和关键方向。");
+        if (options.Text("CapacityType") is not ("Unknown" or "Shared" or "Dedicated" or "Burst") || options.Text("Protocol") is not ("RealityEntry" or "AnyTlsEntry" or "ShadowsocksLanding") || options.Text("Family") is not ("IPv4" or "IPv6" or "Both") || options.Text("TestSize") is not ("Light" or "Full" or "Quick" or "Standard" or "Deep" or "Extended" or "Maximum" or "Custom")) throw new OperationException("请选择有效的测速用途、协议和测试档位。");
+        if (options.Text("TestSize") == "Custom" && (!int.TryParse(options.Text("TrafficBudgetMiB"), out var total) || total is < 64 or > MaximumFlowBudgetMiB)) throw new OperationException("自定义总预算应为 64–20480 MiB（最多 20 GiB，覆盖双栈、双向和前后复测）。");
+        if (options.ContainsKey("BudgetFamilyCount") && options.Text("BudgetFamilyCount") is not ("1" or "2")) throw new OperationException("路径预算分配无效。");
+        if (Topology(options) is not ("Entry" or "Relay" or "Landing" or "ForwardOnly") || Priority(options) is not ("Download" or "Upload" or "Balanced")) throw new OperationException("请选择有效的 TCP 角色和优化偏好。");
         if (Topology(options) == "Landing" && options.Text("Protocol") != "ShadowsocksLanding" || Topology(options) is "Entry" or "Relay" && options.Text("Protocol") == "ShadowsocksLanding") throw new OperationException("测试路径与协议用途不一致。");
         if (Topology(options) == "Relay")
         {
@@ -101,7 +104,7 @@ public static partial class NetworkTuning
         var file = SafePath.Resolve(directory, "network-measurements/" + Id(id) + ".json");
         if (!File.Exists(file) || new FileInfo(file).Length > 1048576) throw new OperationException("测量记录不存在或大小异常，请重新测量。");
         var report = ArchiveStore.ReadJson(file);
-        if (report.Text("Id") != id || report.Number("SchemaVersion") != 1) throw new OperationException("测量记录身份不一致。");
+        if (report.Text("Id") != id || report.Number("SchemaVersion") is not (1 or 2) || report.Number("SchemaVersion") == 2 && report["Paths"] is not JsonArray) throw new OperationException("测量记录身份不一致。");
         return report;
     }
     public static IEnumerable<JsonObject> History(string directory)
@@ -116,19 +119,19 @@ public static partial class NetworkTuning
             if (report != null) yield return report;
         }
     }
-    public static JsonObject Analyze(JsonObject report, IEnumerable<JsonObject>? history = null)
+    private static JsonObject AnalyzeSingle(JsonObject report, IEnumerable<JsonObject>? history = null)
     {
         var options = report["Options"]!.AsObject(); var client = report["Client"]!.AsObject(); var server = report["ServerAfter"]!.AsObject();
         var idle = Values(client, "IdleLatencyMs"); var loaded = Values(client, "LoadedLatencyMs");
         var all = (client["Transfers"] as JsonArray ?? []).OfType<JsonObject>().ToArray();
-        double Speed(string direction) => Percentile(all.Where(t => t.Text("Direction") == direction && t.Flag("Complete") && Value(t, "Seconds") >= .25).Select(t => Value(t, "Mbps")), .5);
-        double StreamSpeed(string direction, int streams) => Percentile(all.Where(t => t.Text("Direction") == direction && t.Number("Streams") == streams && t.Flag("Complete") && Value(t, "Seconds") >= .25).Select(t => Value(t, "Mbps")), .5);
+        double Speed(string direction) => Percentile(all.Where(t => t.Text("Direction") == direction && t.Flag("Complete") && Value(t, "Seconds") >= MinimumTransferSeconds).Select(t => Value(t, "Mbps")), .5);
+        double StreamSpeed(string direction, int streams) => Percentile(all.Where(t => t.Text("Direction") == direction && t.Number("Streams") == streams && t.Flag("Complete") && Value(t, "Seconds") >= MinimumTransferSeconds).Select(t => Value(t, "Mbps")), .5);
         var download = Speed("Download"); var upload = Speed("Upload");
         var planningDownload = download;
         // Only actual kernel TCP samples are used to size buffers. HTTP timings include application/TLS work.
         var directional = report.Text("Client.EvidencePolicy") == EvidencePolicy;
         var preferred = Priority(options);
-        var preferredTransfers = all.Where(t => t.Text("Direction") == preferred && t.Flag("Complete") && Value(t, "Seconds") >= .25 && t.Flag("TcpEvidence.CountersValid") && t.Flag("TcpEvidence.PayloadMatched")).ToArray();
+        var preferredTransfers = all.Where(t => t.Text("Direction") == preferred && t.Flag("Complete") && Value(t, "Seconds") >= MinimumTransferSeconds && t.Flag("TcpEvidence.CountersValid") && t.Flag("TcpEvidence.PayloadMatched")).ToArray();
         var rtts = directional ? preferredTransfers.Select(t => Value(t, "TcpEvidence.RttMs")).Where(x => x > 0).ToArray() : Values(server, "Tcp.RttMs"); var rtt = Percentile(rtts, .2);
         var notes = new JsonArray();
         var peak = InPeak(DateTimeOffset.Parse(report.Text("At"), CultureInfo.InvariantCulture), options);
@@ -140,7 +143,7 @@ public static partial class NetworkTuning
         if (options.Text("CapacityType") is "Unknown" or "Shared" or "Burst") notes.Add("套餐可能共享或突发；不依据单次峰值设定发送限速。");
         if (!client.Flag("EgressVerified")) notes.Add("所选代理的出口尚未验证，精细调优不可用。");
         if (client.Text("Status") != "Measured") notes.Add("本轮采集未完整完成；只提供基础配置建议，不调整缓冲区。");
-        if (all.Count(t => t.Flag("Complete") && Value(t, "Seconds") >= .25) < 4) notes.Add("有效传输样本不足，或受流量/时间限制；未确认链路容量。");
+        if (all.Count(t => t.Flag("Complete") && Value(t, "Seconds") >= MinimumTransferSeconds) < 4) notes.Add("有效持续传输样本不足，或受流量/时间限制；预算耗尽不代表测试充分。");
         if (rtt <= 0) notes.Add("未获取真实 TCP RTT，保留内核自动缓冲，不用 HTTP 响应时间代替。");
         if (options.Number("BandwidthMbps") <= 0) notes.Add("套餐标称带宽未知，暂不生成缓冲区调整。");
         var cpu = Value(server, "Cpu.BusyPercent"); var steal = Value(server, "Cpu.StealPercent");
@@ -153,7 +156,7 @@ public static partial class NetworkTuning
         var retrans = loss.Long("RetransmittedSegments"); var sent = loss.Long("SentSegments");
         notes.Add(directional ? "重传参考只取关键方向中匹配端口和对端的 TCP socket 差量，未采到的连接不按零计算；同对端其他业务仍可能干扰。全机计数只作诊断。" : "历史记录使用 VPS 全机计数，不能支持新版精细建议；请重新采集方向证据。");
         if (!loss.Flag("Eligible")) notes.Add("重传计数缺失、重置或新发送段少于 " + MinimumLossSegments + "，不足以判断丢包变化；精细参数复测不会仅凭速度提高而自动保留。");
-        notes.Add("吞吐为本机→所选代理→Cloudflare 测试点的实测有效载荷速率；不是套餐带宽，也不是纯 VPS 网卡速率。");
+        notes.Add("吞吐为本机→所选代理→独立测试点的实测有效载荷速率；不是套餐带宽，也不是纯 VPS 网卡速率。");
         var memoryMiB = server.Long("MemoryKiB") / 1024; var cap = (memoryMiB <= 512 ? 4L : memoryMiB <= 1024 ? 8L : memoryMiB <= 2048 ? 16L : 32L) * 1048576;
         long Ceiling(string key) => long.TryParse(Sysctl(server, key).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).LastOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : 0;
         var ceilings = new[] { "net.ipv4.tcp_rmem", "net.ipv4.tcp_wmem", "net.core.rmem_max", "net.core.wmem_max" }.Select(Ceiling).ToArray();
@@ -173,7 +176,7 @@ public static partial class NetworkTuning
         var queueSafe = loaded.Length >= 3 && loaded95 <= Math.Max(idle95 * 1.5, idle95 + 30);
         var sameWindow = DateTimeOffset.TryParse(report.Text("StartedAt"), out var started) && started <= DateTimeOffset.Parse(report.Text("At"), CultureInfo.InvariantCulture) && InPeak(started, options) == peak;
         if (!sameWindow) notes.Add("测量跨越高峰边界或缺少开始时间，不将这一轮作为精细参数依据。");
-        var eligible = evidence && sameWindow && queueSafe && client.Text("Status") == "Measured" && client.Flag("EgressVerified") && loss.Flag("Eligible") && rtt > 0 && download > 0 && upload > 0 && options.Number("BandwidthMbps") > 0 && cpu < 85 && steal < 10 && idle.Length >= 3 && loaded.Length >= 3 && server.Long("MemoryKiB") > 0 && Sysctl(server, "net.ipv4.tcp_moderate_rcvbuf") == "1" && ceilings.All(value => value > 0 && value <= cap) && all.Count(t => t.Flag("Complete") && Value(t, "Seconds") >= .25) >= 4;
+        var eligible = evidence && sameWindow && queueSafe && client.Text("Status") == "Measured" && client.Flag("EgressVerified") && loss.Flag("Eligible") && rtt > 0 && download > 0 && upload > 0 && options.Number("BandwidthMbps") > 0 && cpu < 85 && steal < 10 && idle.Length >= 3 && loaded.Length >= 3 && server.Long("MemoryKiB") > 0 && Sysctl(server, "net.ipv4.tcp_moderate_rcvbuf") == "1" && ceilings.All(value => value > 0 && value <= cap) && all.Count(t => t.Flag("Complete") && Value(t, "Seconds") >= MinimumTransferSeconds) >= 4;
         var rate = preferred == "Upload" ? Math.Min(options.Number("UploadMbps", options.Number("BandwidthMbps")), upload) : Math.Min(options.Number("BandwidthMbps"), planningDownload);
         // A socket ceiling, not a preallocation. Preserve auto-tuning and existing higher values.
         var target = eligible ? Math.Min(cap, Math.Max(2097152L, (long)Math.Ceiling(rate * rtt * 125 * 2 + 2097152))) : 0;

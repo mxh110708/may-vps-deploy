@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using Mxh.VpsDeploy.Core;
@@ -14,6 +15,8 @@ public sealed class NetworkMeasurement(IValidationAssets assets, IExternalToolRu
     {
         NetworkTuning.ValidateMeasurement(options);
         var node = path.Entry ?? path.Node;
+        var capture = observe;
+        observe = t => { if (node.Family == "IPv6") path.ObservedInboundAddress = ProbeIpv6Source(node.SingBox); return capture(t); };
         var executable = assets.ResolveCore("sing-box");
         await ProtocolValidation.VerifyVersion(assets, tools, "sing-box", executable, cancellationToken);
         var work = SafePath.Resolve(directory, "network-core-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(work);
@@ -49,7 +52,7 @@ public sealed class NetworkMeasurement(IValidationAssets assets, IExternalToolRu
             }
             if (!ready) throw new OperationException("测速核心未就绪。");
             using var handler = Handler(port);
-            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
+            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(90) };
             http.DefaultRequestHeaders.TryAddWithoutValidation("Accept-Encoding", "identity");
             http.DefaultRequestHeaders.CacheControl = new() { NoCache = true, NoStore = true };
             progress.Report("正在核对所选入口的真实代理出口。");
@@ -126,11 +129,22 @@ public sealed class NetworkMeasurement(IValidationAssets assets, IExternalToolRu
             result["ServerAfter"] = server;
         }
         result["ReservedPayloadBytes"] = reservedPayload;
+        result["SustainedSamples"] = transfers.OfType<JsonObject>().Count(t => t.Flag("Complete") && NetworkTuning.Value(t, "Seconds") >= NetworkTuning.MinimumTransferSeconds);
         cancellationToken.ThrowIfCancellationRequested(); return result;
     }
     private static SocketsHttpHandler Handler(int port) => new() { Proxy = new WebProxy("http://127.0.0.1:" + port), UseProxy = true,
         AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.None, MaxConnectionsPerServer = 8,
         ConnectTimeout = TimeSpan.FromSeconds(8), PooledConnectionLifetime = TimeSpan.FromSeconds(60), MaxResponseDrainSize = 0 };
+    private static string ProbeIpv6Source(JsonObject node)
+    {
+        if (!IPAddress.TryParse(node.Text("server"), out var address)) return "";
+        try
+        {
+            var sources = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpConnections().Where(c => c.State == TcpState.Established && c.RemoteEndPoint.Address.Equals(address) && c.RemoteEndPoint.Port == node.Number("server_port") && c.LocalEndPoint.Address.AddressFamily == AddressFamily.InterNetworkV6).Select(c => c.LocalEndPoint.Address).Distinct().ToArray();
+            return sources.Length == 1 ? sources[0].ToString() : "";
+        }
+        catch (Exception error) when (error is NetworkInformationException or PlatformNotSupportedException) { return ""; }
+    }
     private static async Task SampleSockets(Func<CancellationToken, Task<JsonObject>> observe, List<JsonObject> points, CancellationToken stop, CancellationToken token)
     {
         while (!stop.IsCancellationRequested)
@@ -157,20 +171,37 @@ public sealed class NetworkMeasurement(IValidationAssets assets, IExternalToolRu
     }
     private static async Task<long> Transfer(HttpClient http, string direction, string endpoint, long amount, CancellationToken token)
     {
-        using var request = new HttpRequestMessage(direction == "Download" ? HttpMethod.Get : HttpMethod.Post,
-            direction == "Download" ? endpoint == "Hetzner" ? "https://fsn1-speed.hetzner.com/100MB.bin" : "https://speed.cloudflare.com/__down?bytes=" + amount : "https://speed.cloudflare.com/__up");
-        if (endpoint == "Hetzner") request.Headers.Range = new(0, amount - 1);
-        if (direction == "Upload") { var content = new byte[checked((int)amount)]; RandomNumberGenerator.Fill(content); request.Content = new ByteArrayContent(content); }
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token); response.EnsureSuccessStatusCode();
-        if (endpoint == "Hetzner" && response.StatusCode != HttpStatusCode.PartialContent) throw new OperationException("独立测速目标未遵守流量范围，停止该项。");
-        if (direction == "Download" && response.Content.Headers.ContentLength is { } length && (length < amount || endpoint == "Cloudflare" && length != amount) || direction == "Upload" && response.Content.Headers.ContentLength is > 65536) throw new OperationException("测速响应长度不符合预算。");
-        using var stream = await response.Content.ReadAsStreamAsync(token); var buffer = new byte[32768]; long bytes = 0; var cap = direction == "Download" ? amount : 65536;
-        while (bytes < cap)
+        long completed = 0;
+        while (completed < amount)
         {
-            var received = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, cap - bytes)), token);
-            if (received == 0) break; bytes += received;
+            token.ThrowIfCancellationRequested(); var part = Math.Min(8L * 1048576, amount - completed);
+            using var request = new HttpRequestMessage(direction == "Download" ? HttpMethod.Get : HttpMethod.Post,
+                direction == "Download" ? endpoint == "Hetzner" ? "https://fsn1-speed.hetzner.com/100MB.bin" : "https://speed.cloudflare.com/__down?bytes=" + part : "https://speed.cloudflare.com/__up");
+            if (endpoint == "Hetzner") request.Headers.Range = new(0, part - 1);
+            if (direction == "Upload") request.Content = new ProbeContent(part);
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token); response.EnsureSuccessStatusCode();
+            if (endpoint == "Hetzner" && response.StatusCode != HttpStatusCode.PartialContent) throw new OperationException("独立测速目标未遵守流量范围，停止该项。");
+            if (direction == "Download" && response.Content.Headers.ContentLength is { } length && length != part || direction == "Upload" && response.Content.Headers.ContentLength is > 65536) throw new OperationException("测速响应长度不符合预算。");
+            using var stream = await response.Content.ReadAsStreamAsync(token); var buffer = new byte[32768]; long bytes = 0; var cap = direction == "Download" ? part : 65536;
+            while (bytes < cap)
+            {
+                var received = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, cap - bytes)), token);
+                if (received == 0) break; bytes += received;
+            }
+            if (direction == "Download" && bytes != part) return completed + bytes;
+            completed += part;
         }
-        return direction == "Download" ? bytes : amount;
+        return completed;
+    }
+    private sealed class ProbeContent(long length) : HttpContent
+    {
+        protected override bool TryComputeLength(out long result) { result = length; return true; }
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => SerializeToStreamAsync(stream, context, CancellationToken.None);
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken token)
+        {
+            var buffer = new byte[65536]; RandomNumberGenerator.Fill(buffer);
+            for (long sent = 0; sent < length; sent += Math.Min(buffer.Length, length - sent)) await stream.WriteAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, length - sent)), token);
+        }
     }
     private static async Task Latency(HttpClient http, List<double> points, CancellationToken token)
     {

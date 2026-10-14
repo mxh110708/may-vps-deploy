@@ -9,12 +9,17 @@ public static partial class NetworkTuning
     public const double LossTolerancePercentagePoints = .2;
     public const double LossToleranceRelative = .2;
     public const double ThroughputGainFraction = .1;
-    public const string ComparisonPolicy = "LossFirst.v2";
-    public const string ComparisonPolicyDescription = "优先降低关键方向的匹配 TCP 重传参考，阈值为 0.2 个百分点与基线比例 20% 中较大者。差异接近时，关键方向须在多个目标、多数同轮样本中提速至少 10%；短连接启动和排队延迟不能明显恶化。全机计数和 5 次 UDP 响应不决定精细调优。";
+    public const string ComparisonPolicy = "LossFirst.v3";
+    public const string ComparisonPolicyDescription = "默认双向均衡，上传与下载分别验收；也可选择下载优先或上传优先，另一方向仍受保护。先看匹配 TCP 重传，容差为 0.2 个百分点与基线比例 20% 中较大者，接近时再看多目标重复提速至少 10%。所选 IPv4/IPv6 均须复测，网页启动和排队延迟不能明显恶化。";
 
     public static JsonObject LossEvidence(JsonObject report)
     {
-        if (report.Text("Client.EvidencePolicy") == EvidencePolicy) return DirectionEvidence(report);
+        if (report.Text("Client.EvidencePolicy") == EvidencePolicy)
+        {
+            if (Priority(report["Options"]!.AsObject()) != "Balanced") return DirectionEvidence(report);
+            var download = DirectionEvidence(report, "Download"); var upload = DirectionEvidence(report, "Upload");
+            return new JsonObject { ["Scope"] = "SeparateDirections", ["Eligible"] = download.Flag("Eligible") && upload.Flag("Eligible"), ["CountersValid"] = download.Flag("CountersValid") && upload.Flag("CountersValid"), ["Download"] = download, ["Upload"] = upload };
+        }
         bool Counter(string phase, string name, out long value)
         {
             var counters = report.At(phase + ".Counters") as JsonObject;
@@ -34,7 +39,7 @@ public static partial class NetworkTuning
             ["Status"] = !valid ? "CountersUnavailableOrReset" : sent < MinimumLossSegments ? "InsufficientSegments" : "Available" };
     }
 
-    public static JsonObject CompareDetailed(JsonObject before, JsonObject after)
+    private static JsonObject CompareDirectionalDetailed(JsonObject before, JsonObject after)
     {
         var b = before["Analysis"] as JsonObject ?? new(); var a = after["Analysis"] as JsonObject ?? new();
         var bl = LossEvidence(before); var al = LossEvidence(after);
@@ -45,7 +50,7 @@ public static partial class NetworkTuning
         if (before.Text("Client.Status") != "Measured" || after.Text("Client.Status") != "Measured" || !before.Flag("Client.EgressVerified") || !after.Flag("Client.EgressVerified")
             || before.Text("SourceFingerprint") != after.Text("SourceFingerprint") || b.Text("Profile") != "EntryMeasured"
             || before.Text("Client.EvidencePolicy") != EvidencePolicy || after.Text("Client.EvidencePolicy") != EvidencePolicy || before.Text("PathFingerprint") != after.Text("PathFingerprint")
-            || new[] { "Protocol", "Family", "TestSize", "TimeZoneId", "PeakStartHour", "PeakEndHour", "BandwidthMbps", "UploadMbps", "CapacityType", "Topology", "PriorityDirection", "PeerInstance", "PeerFamily", "PeerEgress" }.Any(k => before.Text("Options." + k) != after.Text("Options." + k))
+            || new[] { "Protocol", "Family", "TestSize", "TrafficBudgetMiB", "BudgetFamilyCount", "TimeZoneId", "PeakStartHour", "PeakEndHour", "BandwidthMbps", "UploadMbps", "CapacityType", "Topology", "PriorityDirection", "PeerInstance", "PeerFamily", "PeerEgress" }.Any(k => before.Text("Options." + k) != after.Text("Options." + k))
             || before.Text("ServerAfter.Kernel") != after.Text("ServerAfter.Kernel") || before.Text("ServerAfter.BootId") != after.Text("ServerAfter.BootId"))
             return Finish("Inconclusive", "IncompatibleSamples", "采集未完成，或前后路径、套餐、内核及使用时段不同，不能比较。");
         if (!DateTimeOffset.TryParse(before.Text("At"), out var bt) || !DateTimeOffset.TryParse(after.Text("At"), out var at) || at < bt || InPeak(bt, before["Options"]!.AsObject()) != InPeak(at, after["Options"]!.AsObject()))
@@ -116,6 +121,6 @@ public static partial class NetworkTuning
             return Finish("Tradeoff", "SpeedImprovedWithCost", "重传差异在阈值内，吞吐有所提高，但其他传输速度下降超过 20% 或延迟代价较大。");
         return Finish("Improved", "StableLossFaster", "重传差异在阈值内，吞吐提升至少 10% 且多数同轮样本一致，速度和延迟检查通过。");
     }
-    private static JsonObject[] Transfers(JsonObject report) => (report.At("Client.Transfers") as JsonArray ?? []).OfType<JsonObject>().Where(x => x.Flag("Complete") && Value(x, "Seconds") >= .25).ToArray();
+    private static JsonObject[] Transfers(JsonObject report) => (report.At("Client.Transfers") as JsonArray ?? []).OfType<JsonObject>().Where(x => x.Flag("Complete") && Value(x, "Seconds") >= MinimumTransferSeconds).ToArray();
     private static string Key(JsonObject transfer) => transfer.Text("Endpoint") + ":" + transfer.Text("Direction") + ":" + transfer.Number("Streams") + ":" + transfer.Number("Round");
 }

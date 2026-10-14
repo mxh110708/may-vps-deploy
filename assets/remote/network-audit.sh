@@ -60,7 +60,8 @@ for index in range(len(snmp)-1):
     if snmp[index].startswith('Tcp:') and snmp[index+1].startswith('Tcp:'):
         tcp = dict(zip(snmp[index].split()[1:], map(int, snmp[index+1].split()[1:])))
 port = os.environ.get('VPS_PARAM_TCP_PORT', '')
-peer = os.environ.get('SSH_CONNECTION', '').split(' ')[0]
+peer = os.environ.get('VPS_PARAM_TCP_PEER_ADDRESS') or os.environ.get('SSH_CONNECTION', '').split(' ')[0]
+family = os.environ.get('VPS_PARAM_TCP_FAMILY', '')
 rtts = []
 sockets = []
 upstream = os.environ.get('VPS_PARAM_UPSTREAM_ADDRESS', '')
@@ -99,7 +100,7 @@ if re.fullmatch(r'[0-9]{1,5}', port):
             offset = 1 if fields[0] == 'ESTAB' else 0
             local_ip, local_port = endpoint(fields[offset+2])
             remote_ip, remote_port = endpoint(fields[offset+3])
-            inbound = local_port == int(port) and bool(peer) and remote_ip == str(ipaddress.ip_address(peer))
+            inbound = local_port == int(port) and bool(peer) and remote_ip == str(ipaddress.ip_address(peer)) and (not family or ipaddress.ip_address(remote_ip).version == (6 if family == 'IPv6' else 4))
             outbound = remote_ip == upstream and remote_port == int(upstream_port) if upstream else remote_port == 443 and remote_ip in targets
             if not inbound and not outbound:
                 continue

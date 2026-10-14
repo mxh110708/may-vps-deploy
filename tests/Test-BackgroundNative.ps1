@@ -130,11 +130,17 @@ try {
     @{Provider='Example';Instance='Native-Landing';NodeName='原生合成落地';Role='ShadowsocksLanding';Roles=@('ShadowsocksLanding');Server=@{IPv4='192.0.2.20';IPv6='2001:db8::20'};Ports=@{SshPrimary=22022;SshRescue=33022;LandingShadowsocks=4000};Import=@{Status='Completed'};Shadowsocks=@{Method='2022-blake3-aes-128-gcm';SecondaryIpv6Enabled=$true;SecondaryIpv6Address='2001:db8:1::20'};ProtocolInventory=@{ShadowsocksLanding=@{Installed=$true;Enabled=$true}}} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $peerDirectory 'deployment-plan.json') -Encoding utf8
     @{Engine='dotnet-v1';CurrentManagementPort=22022} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $peerDirectory 'deployment-state.json') -Encoding utf8
     Click 'network'; Choose '目标实例' 'Example/Managed-Demo/MXH-VPS-Deploy'
-    Choose 'TCP 角色与测试路径' 'Relay'; Choose '关键业务方向' 'Upload'
+    Check ((Control '优化偏好').value -eq 'Balanced') 'balanced diagnostics is the normal default'
+    Choose '入口连接地址族' 'Both'
+    Check (((Read-Ui).elements.name -join ' ') -match '每条路径有效载荷最多 204 MiB') 'dual stack shares one total payload budget'
+    Choose '调优总流量预算' 'Custom'; Set-Text '自定义总预算（MiB，64–20480）' '20481'; Click '采集并生成建议'
+    Check (-not (Read-Ui).dialog -and (Read-Ui).notice) 'over 20 GiB is rejected before any review or connection'
+    Set-Text '自定义总预算（MiB，64–20480）' '20480'; Choose '调优总流量预算' 'Maximum'
+    Choose 'TCP 角色与测试路径' 'Relay'; Choose '优化偏好' 'Upload'
     Check ((Control '中转后的已有落地（仅读取归档）').value -eq 'Example/Native-Landing/MXH-VPS-Deploy') 'relay selector discovers managed landing and preserves source instance'
     Choose '入口 → 落地连接地址族' 'IPv6'; Choose '落地访问目标的出口' 'IPv6'
     Click '采集并生成建议'; $ui=Wait-Ui {param($ui) [bool]$ui.dialog}
-    Check (($ui.elements.name -join ' ') -match '用户上传|下一跳' -and ($ui.elements.name -join ' ') -match 'Native-Landing') 'normal network review includes chosen priority and relay archive'
+    Check (($ui.elements.name -join ' ') -match '上传优先' -and ($ui.elements.name -join ' ') -match 'Native-Landing' -and ($ui.elements.name -join ' ') -match '20 GiB' -and ($ui.elements.name -join ' ') -match 'IPv4、IPv6') 'normal network review includes priority relay dual stack and shared flow budget'
     Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}
     Choose 'TCP 角色与测试路径' 'Entry'
     Check (@((Read-Ui).elements|Where-Object name -eq '中转后的已有落地（仅读取归档）').Count -eq 0) 'single-hop path hides unused relay fields'

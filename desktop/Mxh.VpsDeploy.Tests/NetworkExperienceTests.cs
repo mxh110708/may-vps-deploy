@@ -35,9 +35,11 @@ internal sealed partial class BoundaryTests
     {
         var plan = f.Plan("NetworkRead"); f.SaveInstance(plan); var options = NetworkTuning.Defaults(plan); options["BandwidthMbps"] = 500; options["UploadMbps"] = 500;
         Check(!options.ContainsKey("ReferenceRttMs") && options.Text("CapacityType") == "Unknown", "measurement invented user RTT/capacity");
+        Check(options.Text("PriorityDirection") == "Balanced" && options.Text("TestSize") == "Standard", "new sessions did not default to balanced standard diagnostics");
+        options["PriorityDirection"] = "Download";
         var invalid = options.DeepClone().AsObject(); invalid["ReferenceRttMs"] = 10; Refuses(() => NetworkTuning.ValidateMeasurement(invalid), "manual RTT accepted");
         Refuses(() => OperationPolicy.Validate(new(OperationKind.TuneNetwork, f.Relative(plan), new JsonObject { ["BandwidthMbps"] = 500, ["ReferenceRttMs"] = 50 })), "old unsafe tuning inputs accepted");
-        Check(NetworkTuning.PayloadBudget(options) == 32L * 1048576 && NetworkTuning.DurationSeconds(options) == 100, "light budget changed");
+        Check(NetworkTuning.FlowBudgetMiB(options) == 1024 && NetworkTuning.PayloadBudget(options) * 2 <= 1024L * 1048576 * .8, "baseline and retest escaped the total budget");
         var now = new DateTimeOffset(2026, 10, 11, 0, 0, 0, TimeSpan.Zero); options["TimeZoneId"] = "UTC"; options["PeakStartHour"] = 20; options["PeakEndHour"] = 23;
         var job = NetworkSchedules.Create(f.Relative(plan), options, "source", now);
         var due = DateTimeOffset.Parse(job.Text("DueAt")); Check(due.Hour == 20 && NetworkSchedules.StatusAt(job, due) == "Due" && NetworkSchedules.StatusAt(job, due, true) == "Missed", "closed app replayed missed peak");
@@ -73,6 +75,8 @@ internal sealed partial class BoundaryTests
         var worse = report.DeepClone().AsObject(); worse["Client"] = NetworkTestData.Client(50, 400); worse["Analysis"] = NetworkTuning.Analyze(worse); Check(NetworkTuning.Compare(report, worse) == "Regression", "clear regression ignored");
         NetworkComparisonExperience(report);
         await NetworkPathExperience(f, report);
+        await NetworkSelectionExperience(f, report);
+        await NetworkTransportExperience();
         var landing = f.Plan("NetworkLanding"); landing["Role"] = "ShadowsocksLanding"; landing["Roles"] = new JsonArray("ShadowsocksLanding"); f.SaveInstance(landing); var landingRemote = new FakeRemote();
         var landingOutcome = await f.Engine(landingRemote).ExecuteAsync(new(OperationKind.TuneNetwork, f.Relative(landing), new JsonObject { ["Scope"] = "Network", ["Profile"] = "LandingBasic" }), Guid.NewGuid().ToString("N"), new InlineProgress<TaskProgress>(_ => { }), default);
         Check(landingOutcome == TaskOutcome.Completed, "verified BBR reported a warning through dotted sysctl lookup");

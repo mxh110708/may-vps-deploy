@@ -14,7 +14,7 @@ CODE = (ROOT / 'assets/remote/network-audit.sh').read_text(encoding='utf-8-sig')
 
 
 class NetworkAuditTests(unittest.TestCase):
-    def audit(self, lines='', peer='198.51.100.10', upstream='', snmp=True, action='Observe'):
+    def audit(self, lines='', peer='198.51.100.10', upstream='', snmp=True, action='Observe', family='', probe_peer=''):
         files = {'/proc/stat': 'cpu 100 0 100 800 0 0 0 0\n', '/proc/meminfo': 'MemTotal: 1048576 kB\n',
                  '/proc/sys/kernel/random/boot_id': 'test-boot', '/proc/net/softnet_stat': '0000 0001\n',
                  '/proc/net/snmp': 'Tcp: OutSegs RetransSegs\nTcp: 1000 10\n' if snmp else '',
@@ -37,6 +37,7 @@ class NetworkAuditTests(unittest.TestCase):
             elif args[0] == 'curl': out = '1048576 1 1048576' if 'size_download' in args[-2] else '.05'
             return subprocess.CompletedProcess(args, 0, out, '')
         env = {'VPS_PARAM_ACTION': action, 'VPS_PARAM_TCP_PORT': '4000', 'SSH_CONNECTION': peer + ' 50000 192.0.2.10 22',
+               'VPS_PARAM_TCP_FAMILY': family, 'VPS_PARAM_TCP_PEER_ADDRESS': probe_peer,
                'VPS_PARAM_UPSTREAM_ADDRESS': upstream, 'VPS_PARAM_UPSTREAM_PORT': '5000' if upstream else '', 'VPS_PARAM_BYTES': '1048576'}
         output = io.StringIO()
         with patch('pathlib.Path', ReadPath), patch('subprocess.run', side_effect=run), patch('time.sleep'), patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(output):
@@ -74,6 +75,14 @@ class NetworkAuditTests(unittest.TestCase):
         self.assertEqual(audit['Tcp']['Sockets'][0]['TotalRetrans'], 0)
         audit, _ = self.audit(self.socket().replace('sk:123', ''))
         self.assertEqual(audit['Tcp']['Sockets'], [])
+
+    def test_ipv6_probe_uses_observed_peer_not_ipv4_ssh(self):
+        lines = '\n'.join((self.socket(), self.socket(remote='[2001:db8::a]:50000', local='[2001:db8::b]:4000')))
+        audit, _ = self.audit(lines, family='IPv6')
+        self.assertEqual(audit['Tcp']['Sockets'], [])
+        audit, _ = self.audit(lines, family='IPv6', probe_peer='2001:db8::a')
+        self.assertEqual(len(audit['Tcp']['Sockets']), 1)
+        self.assertEqual(audit['Tcp']['Sockets'][0]['Leg'], 'ToUser')
 
     def test_missing_global_counters_remain_missing(self):
         audit, _ = self.audit(snmp=False)

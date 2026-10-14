@@ -43,7 +43,24 @@ public sealed partial class MainWindow
             landingEgress = Choice("落地访问目标的出口", options, "PeerEgress", plan.Flag("Shadowsocks.SecondaryIpv6Enabled") && plan.Text("Shadowsocks.SecondaryIpv6Address") != "" ? [("IPv4", "IPv4"), ("IPv6", "IPv6")] : [("IPv4", "IPv4")]);
         }
         return Card(Column(SectionHeading("优化目标与 TCP 边界", Symbol.Globe, "先降低关键方向重传，再在接近时比较持续吞吐；网页、视频起步与排队延迟同时验收。"),
-            Fields(topology, Choice("关键业务方向", options, "PriorityDirection", [("Download", "用户下载 · VPS 向用户发送"), ("Upload", "用户上传 · VPS 向下一跳发送")])), peerPanel, landingEgress, description,
+            Fields(topology, Choice("优化偏好", options, "PriorityDirection", [("Balanced", "双向均衡（默认）"), ("Download", "下载优先 · 同时保护上传"), ("Upload", "上传优先 · 同时保护下载")])), peerPanel, landingEgress, description,
+            Text("三种模式均测量上传和下载，并分别检查重传和速度；任何方向明显退化均不保留参数。", 13, true),
             Text("中转不能用本机直出推断整条链路；纯转发流量不受本机 TCP 拥塞窗口控制。落地保持 fq + BBR，出站诊断用于定位问题。", 13, true)));
+    }
+    private FrameworkElement NetworkBudgetFields(JsonObject options, ComboBox family)
+    {
+        if (options.Text("TestSize") is "Light" or "Full") options["TestSize"] = options.Text("TestSize") == "Light" ? "Quick" : "Standard";
+        var size = Choice("调优总流量预算", options, "TestSize", [("Quick", "快速 · 128 MiB"), ("Standard", "标准 · 1 GiB（默认）"), ("Deep", "深入 · 4 GiB"), ("Extended", "扩展 · 10 GiB"), ("Maximum", "最大 · 20 GiB"), ("Custom", "自定义 · 不超过 20 GiB")], preventWheelSelection: true);
+        var custom = Field("自定义总预算（MiB，64–20480）", options, "TrafficBudgetMiB", numeric: true);
+        var description = Text("", 13, true);
+        void Refresh()
+        {
+            custom.Visibility = options.Text("TestSize") == "Custom" ? Visibility.Visible : Visibility.Collapsed;
+            description.Text = options.Text("TestSize") == "Custom" && (!int.TryParse(options.Text("TrafficBudgetMiB"), out var amount) || amount is < 64 or > NetworkTuning.MaximumFlowBudgetMiB)
+                ? "请输入 64–20480 MiB。20 GiB 是整个流程的总预算，双栈与前后复测不能各自再用一份。"
+                : NetworkTuning.BudgetDescription(options) + " 本轮所选路径合计时限约 " + NetworkTuning.DurationSeconds(options) * NetworkTuning.Families(options).Length + " 秒，另加有限 SSH 采集。预算或时间不足时会明确记录覆盖不足。";
+        }
+        size.SelectionChanged += (_, _) => Refresh(); family.SelectionChanged += (_, _) => Refresh(); custom.TextChanged += (_, _) => Refresh(); Refresh();
+        return Column(size, custom, description);
     }
 }

@@ -5,15 +5,16 @@ namespace Mxh.VpsDeploy.Core;
 
 public sealed record NetworkMeasurementPath(ClientProfiles.NodePair Node, ClientProfiles.NodePair? Entry, string ExpectedEgress, string Fingerprint) : IDisposable
 {
+    public string ObservedInboundAddress { get; set; } = "";
     public void Dispose() { Node.Clash.Clear(); Node.SingBox.Clear(); Entry?.Clash.Clear(); Entry?.SingBox.Clear(); }
 }
 
 public static partial class NetworkTuning
 {
-    public const string EvidencePolicy = "Directional.v1";
+    public const string EvidencePolicy = "Directional.v2";
     public static string Topology(JsonObject options) => options.Text("Topology", "Entry");
-    public static string Priority(JsonObject options) => options.Text("PriorityDirection", "Download");
-    public static string DirectionLabel(JsonObject options) => Priority(options) == "Upload" ? "用户上传 / VPS 向下一跳发送" : "用户下载 / VPS 向用户发送";
+    public static string Priority(JsonObject options) => options.Text("PriorityDirection", "Balanced");
+    public static string DirectionLabel(JsonObject options) => Priority(options) switch { "Upload" => "上传优先 · 双向测量并保护下载", "Download" => "下载优先 · 双向测量并保护上传", _ => "双向均衡 · 上传和下载分别验收" };
     public static string PathDescription(JsonObject options) => Topology(options) switch
     {
         "Relay" => "本机 → 所选入口 → 已纳管 Shadowsocks 落地 → 测试目标；只调整入口，不修改落地。",
@@ -23,7 +24,7 @@ public static partial class NetworkTuning
     };
     public static string MeasurementSummary(JsonObject options) => "只读采集 VPS 状态。" + PathDescription(options) + "\n关键方向：" + DirectionLabel(options)
         + (Topology(options) == "Relay" ? "\n落地归档：" + options.Text("PeerInstance") : "")
-        + (Topology(options) == "ForwardOnly" ? "\n本次只观察转发和本机状态，不发起公网吞吐测试，不推导 TCP 缓冲参数。" : "\n通过隔离代理测试 Cloudflare 与 Hetzner 的有限下载和重复短连接启动；公共上传目标覆盖有限时只给基础建议。不修改系统代理或对端 VPS。\n有效载荷预算：" + PayloadBudget(options) / 1048576 + " MiB（不含 TLS、协议与重传开销）；路径采集最长 " + DurationSeconds(options) + " 秒，另加有限 SSH 状态采集。")
+        + (Topology(options) == "ForwardOnly" ? "\n本次只观察转发和本机状态，不发起公网吞吐测试，不推导 TCP 缓冲参数。" : "\n通过隔离代理测试 Cloudflare 与 Hetzner 的有限下载和重复短连接启动；独立目标不足的方向不宣称全局优化通过。不修改系统代理或对端 VPS。\n" + BudgetDescription(options) + "\n地址族：" + string.Join("、", Families(options)) + "；每条路径最长 " + DurationSeconds(options) + " 秒，另加有限 SSH 状态采集。")
         + "\n标称下载/上传：" + options.Number("BandwidthMbps") + "/" + options.Number("UploadMbps") + " Mbps（0 表示未知）；套餐类型：" + options.Text("CapacityType")
         + "。\n使用地时区：" + options.Text("TimeZoneId") + "；高峰：" + options.Number("PeakStartHour") + "–" + options.Number("PeakEndHour") + " 时。结果只代表所选路径与时段。";
     public static string PeerArchiveFingerprint(ArchiveStore store, JsonObject options)
@@ -85,10 +86,10 @@ public static partial class NetworkTuning
             ["RttMs"] = Percentile(pairs.Select(p => Value(p.Last, "RttMs")).Where(x => x > 0), .2),
             ["SendBufferLimitedPercent"] = Percentile(pairs.Where(p => p.First.ContainsKey("BusyMs") && p.Last.ContainsKey("BusyMs") && p.First.ContainsKey("SendBufferLimitedMs") && p.Last.ContainsKey("SendBufferLimitedMs") && Value(p.Last, "BusyMs") > Value(p.First, "BusyMs") && Value(p.Last, "SendBufferLimitedMs") >= Value(p.First, "SendBufferLimitedMs")).Select(p => 100 * (Value(p.Last, "SendBufferLimitedMs") - Value(p.First, "SendBufferLimitedMs")) / (Value(p.Last, "BusyMs") - Value(p.First, "BusyMs"))), .5) };
     }
-    public static JsonObject DirectionEvidence(JsonObject report)
+    public static JsonObject DirectionEvidence(JsonObject report, string? selectedDirection = null)
     {
-        var direction = Priority(report["Options"] as JsonObject ?? new());
-        var transfers = (report.At("Client.Transfers") as JsonArray ?? []).OfType<JsonObject>().Where(t => t.Text("Direction") == direction && t.Flag("Complete") && t.Flag("TcpEvidence.CountersValid") && t.Flag("TcpEvidence.PayloadMatched")).ToArray();
+        var direction = selectedDirection ?? Priority(report["Options"] as JsonObject ?? new());
+        var transfers = (report.At("Client.Transfers") as JsonArray ?? []).OfType<JsonObject>().Where(t => t.Text("Direction") == direction && t.Flag("Complete") && Value(t, "Seconds") >= MinimumTransferSeconds && t.Flag("TcpEvidence.CountersValid") && t.Flag("TcpEvidence.PayloadMatched")).ToArray();
         var unique = transfers.Select(t => t.Text("Endpoint") + ":" + t.Number("Streams") + ":" + t.Number("Round")).Distinct().Count() == transfers.Length;
         var boot = report.Text("ServerAfter.BootId");
         var valid = report.Text("Client.EvidencePolicy") == EvidencePolicy && unique && transfers.Length >= 4 && boot != "" && report.Text("ServerBefore.BootId") == boot && transfers.All(t => t.Text("TcpEvidence.BootId") == boot);
