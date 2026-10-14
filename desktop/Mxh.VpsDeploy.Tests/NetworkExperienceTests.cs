@@ -12,14 +12,16 @@ internal static class NetworkTestData
     };
     public static JsonObject Client(double speed = 100, double latency = 120)
     {
-        var transfers = new JsonArray(); foreach (var direction in new[] { "Download", "Upload" }) for (var i = 0; i < 3; i++) foreach (var streams in new[] { 1, 4 }) transfers.Add(new JsonObject { ["Direction"] = direction, ["Streams"] = streams, ["Round"] = i + 1, ["Mbps"] = speed, ["Seconds"] = 1, ["Complete"] = true });
-        return new JsonObject { ["Status"] = "Measured", ["EgressVerified"] = true, ["Transfers"] = transfers, ["IdleLatencyMs"] = new JsonArray(100, 105, 100, 110), ["LoadedLatencyMs"] = new JsonArray(latency, latency, latency) };
+        var transfers = new JsonArray(); foreach (var direction in new[] { "Download", "Upload" }) foreach (var endpoint in direction == "Download" ? new[] { "Cloudflare", "Hetzner" } : new[] { "Cloudflare" }) for (var i = 0; i < 3; i++) foreach (var streams in new[] { 1, 4 }) transfers.Add(new JsonObject { ["Endpoint"] = endpoint, ["Direction"] = direction, ["Streams"] = streams, ["Round"] = i + 1, ["Mbps"] = speed, ["Seconds"] = 1, ["Complete"] = true,
+            ["TcpEvidence"] = new JsonObject { ["CountersValid"] = true, ["PayloadMatched"] = true, ["BootId"] = "test-boot", ["SentSegments"] = 10000, ["RetransmittedSegments"] = 100, ["RttMs"] = 100, ["SendBufferLimitedPercent"] = 20 } });
+        var startup = new JsonArray(); foreach (var endpoint in new[] { "Cloudflare", "Hetzner" }) for (var i = 1; i <= 3; i++) startup.Add(new JsonObject { ["Endpoint"] = endpoint, ["Round"] = i, ["Complete"] = true, ["Milliseconds"] = 100 });
+        return new JsonObject { ["Status"] = "Measured", ["EvidencePolicy"] = NetworkTuning.EvidencePolicy, ["EgressVerified"] = true, ["Transfers"] = transfers, ["Startup"] = startup, ["IdleLatencyMs"] = new JsonArray(100, 105, 100, 110), ["LoadedLatencyMs"] = new JsonArray(latency, latency, latency) };
     }
 }
 internal sealed class FakeNetwork(double speed = 100, double loaded = 120) : INetworkMeasurement
 {
     public int Calls { get; private set; }
-    public async Task<JsonObject> MeasureAsync(JsonObject plan, JsonObject secrets, JsonObject options, string directory, Func<CancellationToken, Task<JsonObject>> observe, IProgress<string> progress, CancellationToken token)
+    public async Task<JsonObject> MeasureAsync(NetworkMeasurementPath path, JsonObject options, string directory, Func<CancellationToken, Task<JsonObject>> observe, IProgress<string> progress, CancellationToken token)
     {
         Calls++; var client = NetworkTestData.Client(speed, loaded); var after = await observe(token);
         after["Counters"]!["TcpOutSegs"] = after.Long("Counters.TcpOutSegs") + 100000;
@@ -49,7 +51,7 @@ internal sealed partial class BoundaryTests
         Check(report.Text("Analysis.Profile") == "EntryMeasured" && report.Long("Analysis.BufferTargetBytes") <= report.Long("Analysis.BufferCapBytes"), "automatic measured suggestion invalid");
         Check(ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-state.json"))["NetworkTuning"] == null, "measurement promoted applied state");
         var incomplete = report.DeepClone().AsObject(); incomplete["Client"]!["EgressVerified"] = false; Check(NetworkTuning.Analyze(incomplete).Text("Profile") == "EntryBasic", "unverified egress tuned buffers");
-        incomplete = report.DeepClone().AsObject(); incomplete["ServerAfter"]!["Tcp"]!["RttMs"] = new JsonArray(); Check(NetworkTuning.Analyze(incomplete).Long("BufferTargetBytes") == 0, "HTTP timing used as TCP RTT");
+        incomplete = report.DeepClone().AsObject(); foreach (var transfer in incomplete["Client"]!["Transfers"]!.AsArray().OfType<JsonObject>()) transfer["TcpEvidence"]!["RttMs"] = 0; Check(NetworkTuning.Analyze(incomplete).Long("BufferTargetBytes") == 0, "HTTP timing used as TCP RTT");
         incomplete = report.DeepClone().AsObject(); incomplete["ServerAfter"]!["Cpu"]!["StealPercent"] = 20; Check(NetworkTuning.Analyze(incomplete).Text("Profile") == "EntryBasic", "host steal ignored");
         incomplete = report.DeepClone().AsObject(); incomplete["ServerAfter"]!["Sysctl"]!["net.core.rmem_max"] = "67108864"; Check(NetworkTuning.Analyze(incomplete).Text("Profile") == "EntryBasic", "existing buffers above budget offered unapplied fine tuning");
         incomplete = report.DeepClone().AsObject(); incomplete["ServerAfter"]!["Sysctl"]!.AsObject().Remove("net.ipv4.tcp_wmem"); Check(NetworkTuning.Analyze(incomplete).Text("Profile") == "EntryBasic", "unknown current buffers offered fine tuning");
@@ -70,6 +72,7 @@ internal sealed partial class BoundaryTests
         var improved = report.DeepClone().AsObject(); improved["Client"] = NetworkTestData.Client(150); improved["Analysis"] = NetworkTuning.Analyze(improved); Check(NetworkTuning.Compare(report, improved) == "Improved", "improvement not identified");
         var worse = report.DeepClone().AsObject(); worse["Client"] = NetworkTestData.Client(50, 400); worse["Analysis"] = NetworkTuning.Analyze(worse); Check(NetworkTuning.Compare(report, worse) == "Regression", "clear regression ignored");
         NetworkComparisonExperience(report);
+        await NetworkPathExperience(f, report);
         var landing = f.Plan("NetworkLanding"); landing["Role"] = "ShadowsocksLanding"; landing["Roles"] = new JsonArray("ShadowsocksLanding"); f.SaveInstance(landing); var landingRemote = new FakeRemote();
         var landingOutcome = await f.Engine(landingRemote).ExecuteAsync(new(OperationKind.TuneNetwork, f.Relative(landing), new JsonObject { ["Scope"] = "Network", ["Profile"] = "LandingBasic" }), Guid.NewGuid().ToString("N"), new InlineProgress<TaskProgress>(_ => { }), default);
         Check(landingOutcome == TaskOutcome.Completed, "verified BBR reported a warning through dotted sysctl lookup");

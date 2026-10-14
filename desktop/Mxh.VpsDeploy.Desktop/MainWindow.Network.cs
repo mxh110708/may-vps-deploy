@@ -21,19 +21,20 @@ public sealed partial class MainWindow
             selectedInstance = selection.Text("Instance"); var relative = selectedInstance; var plan = instances.First(i => i.RelativePath == relative).Plan;
             var directory = paths.Instance(relative); var state = ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-state.json")); panel.Children.Clear();
             var entry = NetworkTuning.IsEntry(plan);
-            panel.Children.Add(Card(SectionHeading(plan.Text("NodeName"), Symbol.World, entry ? "入口机：自动采集实际线路，结合套餐与时段生成建议，应用后复测。" : "落地机：只启用 fq 和当前内核可用的 BBR，无需精细测速。")));
+            panel.Children.Add(Card(SectionHeading(plan.Text("NodeName"), Symbol.World, entry ? "入口 / 中转：按关键方向采集路径与 TCP 证据，保护短连接起步，应用后复测。" : "落地机：只启用 fq 与可用 BBR，可额外只读诊断出站稳定性。")));
             var runtime = state.At("LastNetworkComparison.VerifiedRuntime") as JsonObject ?? state.At("NetworkTuning.AppliedRuntime") as JsonObject;
             if (runtime != null) panel.Children.Add(Card(Column(Text("上次已核验的运行配置", 17), Text("拥塞控制：" + NetworkTuning.Sysctl(runtime, "net.ipv4.tcp_congestion_control") + " · BBR 版本：" + (runtime.Text("BbrVersion") == "VersionUnverified" ? "未确认" : runtime.Text("BbrVersion"))), Text("记录时间：" + NetworkTime(state.Text("LastNetworkComparison.At", state.Text("NetworkTuning.At"))) + "；当前状态可通过重新采集核对。", 13, true))));
             KernelPanel(panel, relative, state);
             if (InstanceLifecycle.Read(store, relative, plan).NeedsRecovery) { pageAction.Content = null; return; }
-            if (!entry)
+            if (!entry && !plan.Flag("ProtocolInventory.ShadowsocksLanding.Enabled", DeploymentPlans.InitiallyEnabled(plan, "ShadowsocksLanding")))
             {
                 panel.Children.Add(Card(Column(SectionHeading("基础网络配置", Symbol.Setting), Text("启用 fq 与可用 BBR，核验真实接口队列，并保留恢复点。缓冲区、TFO 等参数沿用当前值。", 14, true))));
                 pageAction.Content = Action("审阅并启用 fq + BBR", () => Submit(new(OperationKind.TuneNetwork, relative, new JsonObject { ["Scope"] = "Network", ["Profile"] = "LandingBasic", ["BbrVersion"] = BbrChoice(relative) })), true); return;
             }
             if (!networkForms.TryGetValue(relative, out var options)) networkForms[relative] = options = NetworkTuning.Defaults(plan);
-            var protocols = DeploymentPlans.Roles[..2].Where(role => plan.Flag("ProtocolInventory." + role + ".Enabled", DeploymentPlans.InitiallyEnabled(plan, role))).Select(role => (role, RoleLabel(role))).ToArray();
+            var protocols = (entry ? DeploymentPlans.Roles[..2] : ["ShadowsocksLanding"]).Where(role => plan.Flag("ProtocolInventory." + role + ".Enabled", DeploymentPlans.InitiallyEnabled(plan, role))).Select(role => (role, RoleLabel(role))).ToArray();
             if (!protocols.Any(pair => pair.role == options.Text("Protocol"))) options["Protocol"] = protocols.First().role;
+            panel.Children.Add(NetworkPathFields(relative, options, entry));
             panel.Children.Add(Card(Column(SectionHeading("套餐与测试路径", Symbol.Link, "只填写套餐信息。RTT、吞吐和资源状况由应用采集；标称带宽不会用测速结果替代。"),
                 Fields(Field("标称下载带宽（Mbps，未知留空）", options, "BandwidthMbps", numeric: true), Field("标称上传带宽（Mbps，未知留空）", options, "UploadMbps", numeric: true)),
                 Fields(Choice("带宽类型", options, "CapacityType", [("Unknown", "未知"), ("Shared", "共享"), ("Dedicated", "独享"), ("Burst", "突发")]), Choice("所选入口协议", options, "Protocol", protocols)),
@@ -41,7 +42,7 @@ public sealed partial class MainWindow
             panel.Children.Add(NetworkTimeFields(options));
             panel.Children.Add(Row(Action("采集并生成建议", () => Submit(new(OperationKind.MeasureNetwork, relative, options)), true), Action("审阅晚高峰补测", () => ScheduleNetwork(relative, options))));
             panel.Children.Add(Text(NetworkTuning.ComparisonPolicyDescription, 14, true));
-            panel.Children.Add(Text("测速会产生有限流量，走本机→所选代理→Cloudflare 测试点；VPS 自身出口测速另列。UDP 仅采集 5 个样本，超时如实记录。结果不代表所有网站或线路。", 14, true));
+            panel.Children.Add(Text("测速走隔离代理，不占用鼠标、不切换系统代理。下载与短连接覆盖 Cloudflare / Hetzner，上传公共端点覆盖有限时只给基础建议。有效载荷受预算限制，TLS、协议及重传流量另计；UDP 只取 5 个可用性样本。", 14, true));
             ShowNetworkSchedule(panel, directory);
             JsonObject? report = null;
             if (state.Text("LastNetworkMeasurement.Id") != "")
@@ -51,10 +52,10 @@ public sealed partial class MainWindow
             }
             if (report != null) panel.Children.Add(NetworkReportCard(report));
             var kernelChanged = report != null && state.Text("KernelUpgrade.Runtime.Kernel") != "" && state.Text("KernelUpgrade.Runtime.Kernel") != report.Text("ServerAfter.Kernel");
-            var oldObservation = report != null && report.Text("ServerAfter.BootId") == "";
+            var oldObservation = report != null && (report.Text("ServerAfter.BootId") == "" || report.Text("Client.EvidencePolicy") != NetworkTuning.EvidencePolicy);
             if (kernelChanged) panel.Children.Add(Text("内核已经更换，此记录不能继续用于精细建议。请重新采集；现在仍可审阅 fq + BBR 基础配置。", 14, true));
-            if (oldObservation) panel.Children.Add(Text("此测量来自旧版采集，缺少启动身份。请重新采集后使用精细建议；基础 fq + BBR 仍可单独应用。", 14, true));
-            var apply = new JsonObject { ["Scope"] = "Network", ["Profile"] = "EntryBasic" };
+            if (oldObservation) panel.Children.Add(Text("此测量来自旧版采集，缺少新版方向和短连接证据。请重新采集；基础 fq + BBR 仍可单独应用。", 14, true));
+            var apply = new JsonObject { ["Scope"] = "Network", ["Profile"] = entry ? "EntryBasic" : "LandingBasic" };
             if (report != null && !kernelChanged && !oldObservation && report.Text("Analysis.Profile") == "EntryMeasured")
             {
                 apply["Profile"] = "EntryMeasured"; apply["MeasurementId"] = report.Text("Id");
@@ -77,12 +78,18 @@ public sealed partial class MainWindow
     private UIElement NetworkReportCard(JsonObject report)
     {
         var capacity = report.Text("Options.CapacityType") switch { "Shared" => "共享", "Dedicated" => "独享", "Burst" => "突发", _ => "未知" };
-        var content = Column(Text("最近一次测量 · " + NetworkTime(report.Text("At")), 17), NetworkMetrics(report), Text("入口协议：" + RoleLabel(report.Text("Options.Protocol")) + " · " + report.Text("Options.Family") + " · 套餐类型：" + capacity, 13, true));
+        var content = Column(Text("最近一次测量 · " + NetworkTime(report.Text("At")), 17), NetworkMetrics(report), Text("协议：" + RoleLabel(report.Text("Options.Protocol")) + " · " + report.Text("Options.Family") + " · 套餐类型：" + capacity, 13, true), Text("关键方向：" + NetworkTuning.DirectionLabel(report["Options"]!.AsObject()), 13, true), Text(NetworkTuning.PathDescription(report["Options"]!.AsObject()), 13, true));
         content.Children.Add(Text("CPU：" + NetworkTuning.Value(report, "ServerAfter.Cpu.BusyPercent").ToString("0.0") + "% · steal：" + NetworkTuning.Value(report, "ServerAfter.Cpu.StealPercent").ToString("0.0") + "% · 内存：" + report.Long("ServerAfter.MemoryKiB") / 1024 + " MiB"));
         var loss = NetworkTuning.LossEvidence(report);
-        content.Children.Add(Text("TCP 重传参考：" + (loss.Flag("Eligible") ? NetworkTuning.Value(loss, "Percent").ToString("0.00", CultureInfo.InvariantCulture) + "%" : "样本不足或计数未确认") + " · 重传 " + loss.Long("RetransmittedSegments") + " / 新发 " + loss.Long("SentSegments") + " 段。VPS 全机计数可能包含其他连接。", 13, true));
+        content.Children.Add(Text("TCP 重传参考：" + (loss.Flag("Eligible") ? NetworkTuning.Value(loss, "Percent").ToString("0.00", CultureInfo.InvariantCulture) + "%" : "样本不足或计数未确认") + " · 重传 " + loss.Long("RetransmittedSegments") + " / 发送 " + loss.Long("SentSegments") + " 段。" + (loss.Text("Scope") == "MatchedTcpSockets" ? "关键方向的匹配 TCP 连接差量；同对端其他业务可能干扰。" : "历史全机计数，仅供参考。"), 13, true));
+        if (report.Flag("Analysis.SendBufferLimited")) content.Children.Add(Text("多数样本确认发送缓冲限制；仅考虑发送上限候选，接收缓冲和初始默认内存保持原值。", 13, true));
         content.Children.Add(Text("UDP 小样本：" + report.Number("Client.Udp.Received") + "/" + report.Number("Client.Udp.Sent") + " 收到响应；超时单列，不用于判定整条线路丢包率。", 13, true));
         content.Children.Add(Text("VPS→Cloudflare IPv4 补充测速：" + NetworkTuning.Value(report, "VpsOutbound.Outbound.Mbps").ToString("0.0") + " Mbps · " + (report.Text("VpsOutbound.Outbound.Status") == "Complete" ? "已完成" : "未取得") + "；此值不代替实际入口路径吞吐。", 13, true));
+        foreach (var target in (report.At("VpsOutbound.OutboundStability.Targets") as JsonArray ?? []).OfType<JsonObject>())
+        {
+            var attempts = (target["Attempts"] as JsonArray ?? []).OfType<JsonObject>().ToArray(); var complete = attempts.Where(t => t.Flag("Complete")).ToArray();
+            content.Children.Add(Text("VPS 出站 HTTPS · " + target.Text("Endpoint") + "：" + complete.Length + "/" + attempts.Length + " 响应；启动 p95 " + (complete.Length > 0 ? NetworkTuning.Percentile(complete.Select(t => NetworkTuning.Value(t, "Milliseconds")), .95).ToString("0.0") + " ms" : "未取得") + "。仅诊断目标路径，不能据此设全局限速。", 13, true));
+        }
         content.Children.Add(Text(report.Text("Client.Status") == "Measured" ? "测量完成；建议未自动应用。" : "测量未完整完成：" + report.Text("Client.SafeFailure", report.Text("Client.LimitReached", "部分传输未完成")), 14));
         foreach (var note in report.Strings("Analysis.Notes")) content.Children.Add(Text(note, 13, true));
         return Card(content);
@@ -90,7 +97,7 @@ public sealed partial class MainWindow
     private UIElement NetworkMetrics(JsonObject before, JsonObject? after = null)
     {
         var grid = new Grid { ColumnSpacing = 20, RowSpacing = 9 }; grid.ColumnDefinitions.Add(new()); grid.ColumnDefinitions.Add(new()); if (after != null) grid.ColumnDefinitions.Add(new());
-        var rows = new[] { ("指标", "", ""), ("TCP 重传比例 · 丢包参考", "TcpRetransmitPercent", "%"), ("下载 · 单连接", "DownloadSingleMbps", " Mbps"), ("下载 · 4 个连接", "DownloadMultiMbps", " Mbps"), ("上传 · 单连接", "UploadSingleMbps", " Mbps"), ("上传 · 4 个连接", "UploadMultiMbps", " Mbps"), ("实际 TCP RTT", "TcpRttMs", " ms"), ("空闲响应 p95", "IdleP95Ms", " ms"), ("传输中响应 p95", "LoadedP95Ms", " ms"), ("响应抖动", "JitterMs", " ms") };
+        var rows = new[] { ("指标", "", ""), ("关键方向 TCP 重传参考", "TcpRetransmitPercent", "%"), ("下载 · 单连接", "DownloadSingleMbps", " Mbps"), ("下载 · 4 个连接", "DownloadMultiMbps", " Mbps"), ("上传 · 单连接", "UploadSingleMbps", " Mbps"), ("上传 · 4 个连接", "UploadMultiMbps", " Mbps"), ("匹配 TCP RTT", "TcpRttMs", " ms"), ("短连接启动 p95", "StartupP95Ms", " ms"), ("空闲响应 p95", "IdleP95Ms", " ms"), ("传输中响应 p95", "LoadedP95Ms", " ms"), ("响应抖动", "JitterMs", " ms") };
         for (var i = 0; i < rows.Length; i++)
         {
             grid.RowDefinitions.Add(new() { Height = GridLength.Auto });

@@ -3,7 +3,7 @@ set -euo pipefail
 action="${VPS_PARAM_ACTION:-Observe}"
 [[ "$action" == Observe || "$action" == Outbound ]] || exit 1
 python3 - <<'PY'
-import base64, ipaddress, json, os, re, subprocess, time
+import base64, hashlib, ipaddress, json, os, re, subprocess, time
 from pathlib import Path
 
 def command(args, seconds=8):
@@ -62,32 +62,77 @@ for index in range(len(snmp)-1):
 port = os.environ.get('VPS_PARAM_TCP_PORT', '')
 peer = os.environ.get('SSH_CONNECTION', '').split(' ')[0]
 rtts = []
+sockets = []
+upstream = os.environ.get('VPS_PARAM_UPSTREAM_ADDRESS', '')
+upstream_port = os.environ.get('VPS_PARAM_UPSTREAM_PORT', '')
+if upstream:
+    try:
+        upstream = str(ipaddress.ip_address(upstream))
+        if not re.fullmatch(r'[0-9]{1,5}', upstream_port) or not 1 <= int(upstream_port) <= 65535:
+            raise ValueError()
+    except ValueError:
+        raise SystemExit('Invalid upstream socket selector.')
+
+def endpoint(value):
+    host, number = value.rsplit(':', 1)
+    address = ipaddress.ip_address(host.strip('[]'))
+    if address.version == 6:
+        address = address.ipv4_mapped or address
+    return str(address), int(number)
+
+targets = set()
+if not upstream:
+    for host in ('speed.cloudflare.com', 'fsn1-speed.hetzner.com'):
+        for row in command(['getent', 'ahosts', host], 3).splitlines():
+            try:
+                targets.add(str(ipaddress.ip_address(row.split()[0])))
+            except (ValueError, IndexError):
+                pass
 if re.fullmatch(r'[0-9]{1,5}', port):
-    output = command(['ss', '-Htin', 'state', 'established', '( sport = :'+port+' )'])
-    lines = output.splitlines()
-    for index, line in enumerate(lines):
-        if 'rtt:' not in line:
-            continue
-        header = lines[index-1] if index else ''
-        # SSH and the proxy may take different routes. Do not substitute other users' RTTs.
-        fields = header.split()
+    # Extended socket cookies distinguish a reused tuple from the old connection.
+    # -O keeps each socket on one line on iproute2 in supported Debian releases.
+    output = command(['ss', '-HtinOe', 'state', 'established', '( sport = :'+port+' or dport = :'+(upstream_port or '443')+' )'])
+    for line in output.splitlines()[:2048]:
+        fields = line.split()
         try:
-            remote = fields[-1].rsplit(':', 1)[0].strip('[]')
-            address = ipaddress.ip_address(remote)
-            address = address.ipv4_mapped or address if address.version == 6 else address
-            matches = bool(peer) and address == ipaddress.ip_address(peer)
+            # ss with a state filter omits the state column; accept both layouts.
+            offset = 1 if fields[0] == 'ESTAB' else 0
+            local_ip, local_port = endpoint(fields[offset+2])
+            remote_ip, remote_port = endpoint(fields[offset+3])
+            inbound = local_port == int(port) and bool(peer) and remote_ip == str(ipaddress.ip_address(peer))
+            outbound = remote_ip == upstream and remote_port == int(upstream_port) if upstream else remote_port == 443 and remote_ip in targets
+            if not inbound and not outbound:
+                continue
+            cookie = re.search(r'\bsk:([0-9a-fA-F]+)\b', line)
+            inode = re.search(r'\bino:(\d+)\b', line)
+            if not cookie or not inode:
+                continue
+            sample = {'Identity': hashlib.sha256((fields[offset+2]+'|'+fields[offset+3]+'|'+cookie.group(1)+'|'+inode.group(1)).encode()).hexdigest(),
+                      'Leg': 'ToUser' if inbound else 'ToNextHop'}
+            for name, pattern in (('RttMs', r'\brtt:([0-9.]+)/'), ('DataSegmentsOut', r'\bdata_segs_out:(\d+)\b'),
+                                  ('BytesSent', r'\bbytes_sent:(\d+)\b'),
+                                  ('TotalRetrans', r'\bretrans:\d+/(\d+)\b'), ('BusyMs', r'\bbusy:([0-9.]+)ms\b'),
+                                  ('SendBufferLimitedMs', r'\bsndbuf_limited:([0-9.]+)ms\b')):
+                match = re.search(pattern, line)
+                if match:
+                    sample[name] = float(match.group(1)) if name in ('RttMs', 'BusyMs', 'SendBufferLimitedMs') else int(match.group(1))
+            # ss elides retrans:0/0. Only accept that elision when data counters exist.
+            if 'DataSegmentsOut' in sample and not re.search(r'\bretrans:', line):
+                sample['TotalRetrans'] = 0
+            if 'BusyMs' in sample and not re.search(r'\bsndbuf_limited:', line):
+                sample['SendBufferLimitedMs'] = 0
+            sockets.append(sample)
+            if inbound and 'RttMs' in sample:
+                rtts.append(sample['RttMs'])
         except (ValueError, IndexError):
-            matches = False
-        if matches:
-            m = re.search(r'\brtt:([0-9.]+)/', line)
-            if m:
-                rtts.append(float(m.group(1)))
+            continue
 result = {'Kernel': command(['uname', '-r']), 'BootId': read('/proc/sys/kernel/random/boot_id').strip(), 'MemoryKiB': int(memory.group(1)) if memory else 0,
           'Cpu': {'BusyPercent': round(100*(total-(b[3]-a[3])-(b[4]-a[4]))/total, 2),
                   'StealPercent': round(100*(b[7]-a[7])/total, 2)},
           'Sysctl': sysctls, 'BbrVersion': bbr, 'BbrVersionEvidence': 'LoadedModule' if version else 'Unavailable',
-          'Devices': devices, 'Tcp': {'RttMs': rtts, 'Scope': 'SelectedInboundAndSshPeer'},
-          'Counters': {'TcpRetransSegs': tcp.get('RetransSegs', 0), 'TcpOutSegs': tcp.get('OutSegs', 0)},
+          'Devices': devices, 'Tcp': {'RttMs': rtts[:64], 'Scope': 'SelectedPortAndPeerOrNextHop', 'Sockets': sockets[:64], 'Truncated': len(sockets) > 64},
+          'Forwarding': {'IPv4': read('/proc/sys/net/ipv4/ip_forward').strip(), 'IPv6': read('/proc/sys/net/ipv6/conf/all/forwarding').strip()},
+          'Counters': {'TcpRetransSegs': tcp.get('RetransSegs'), 'TcpOutSegs': tcp.get('OutSegs')},
           'SoftnetDropped': sum(int(line.split()[1], 16) for line in read('/proc/net/softnet_stat').splitlines() if len(line.split()) > 1)}
 result.update(runtime_bbr)
 if os.environ.get('VPS_PARAM_ACTION') == 'Outbound':
@@ -105,6 +150,23 @@ if os.environ.get('VPS_PARAM_ACTION') == 'Outbound':
                           'Mbps': float(values[2])*8/1000000 if complete else 0,
                           'Seconds': float(values[1]) if complete else 0,
                           'Path': 'VpsToCloudflareIPv4'}
+    # Independent, bounded HTTPS startup checks diagnose the website-facing side.
+    # They do not establish a local NIC bottleneck and never choose a shaping rate.
+    targets = []
+    for name, url in (('Cloudflare', 'https://speed.cloudflare.com/__down?bytes=1024'),
+                      ('Hetzner', 'https://fsn1-speed.hetzner.com/100MB.bin')):
+        attempts = []
+        for _ in range(3):
+            output = command(['curl', '-4', '--noproxy', '*', '--fail', '--silent', '--show-error', '--range', '0-1023',
+                              '--connect-timeout', '2', '--max-time', '3', '--max-filesize', '1024', '-o', '/dev/null',
+                              '-w', '%{time_starttransfer}', url], 4)
+            try:
+                seconds = float(output)
+                attempts.append({'Complete': seconds > 0, 'Milliseconds': seconds*1000})
+            except ValueError:
+                attempts.append({'Complete': False})
+        targets.append({'Endpoint': name, 'Attempts': attempts})
+    result['OutboundStability'] = {'Scope': 'VpsOriginatedHttpsIPv4', 'Targets': targets}
 encoded = base64.b64encode(json.dumps(result, separators=(',', ':')).encode()).decode()
 print('VPSDEPLOY_NETWORK_AUDIT_B64='+encoded)
 PY

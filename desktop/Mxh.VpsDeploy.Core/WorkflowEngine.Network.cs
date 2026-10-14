@@ -5,12 +5,13 @@ namespace Mxh.VpsDeploy.Core;
 
 public sealed partial class WorkflowEngine
 {
-    private async Task<JsonObject> NetworkObservation(Context c, JsonObject? options = null, CancellationToken? token = null)
+    private async Task<JsonObject> NetworkObservation(Context c, JsonObject? options = null, CancellationToken? token = null, NetworkMeasurementPath? path = null)
     {
-        var port = options?.Text("Protocol") == "AnyTlsEntry" ? c.Plan.Number("Ports.AnyTlsPrimary") : c.Plan.Number("Ports.XrayPrimary");
+        var port = options?.Text("Protocol") == "AnyTlsEntry" ? c.Plan.Number("Ports.AnyTlsPrimary") : options?.Text("Protocol") == "ShadowsocksLanding" ? c.Plan.Number("Ports.LandingShadowsocks") : c.Plan.Number("Ports.XrayPrimary");
+        var parameters = new Dictionary<string, string> { ["ACTION"] = "Observe", ["TCP_PORT"] = port.ToString(CultureInfo.InvariantCulture) };
+        if (path?.Entry != null) { parameters["UPSTREAM_ADDRESS"] = path.Node.SingBox.Text("server"); parameters["UPSTREAM_PORT"] = path.Node.SingBox.Text("server_port"); }
         await using var session = await c.Session();
-        var result = await session.RunScriptAsync(assets.Payload("network-audit.sh", new Dictionary<string, string>
-        { ["ACTION"] = "Observe", ["TCP_PORT"] = port.ToString(CultureInfo.InvariantCulture) }), TimeSpan.FromSeconds(30), false, token ?? c.Cancellation);
+        var result = await session.RunScriptAsync(assets.Payload("network-audit.sh", parameters), TimeSpan.FromSeconds(30), false, token ?? c.Cancellation);
         result.RequireSuccess("网络只读采集失败。");
         return JsonNode.Parse(RemoteAssets.Marker(result.Output, "NETWORK_AUDIT"))!.AsObject();
     }
@@ -18,17 +19,27 @@ public sealed partial class WorkflowEngine
     {
         if (network == null) throw new OperationException("当前运行环境没有后台网络测量适配器。");
         NetworkTuning.ValidateMeasurement(options);
-        if (!NetworkTuning.IsEntry(c.Plan) || !Enabled(c.Plan, options.Text("Protocol"))) throw new OperationException("请选择正在启用的入口协议；落地机无需精细测速。");
+        var started = DateTimeOffset.UtcNow;
+        if (!Enabled(c.Plan, options.Text("Protocol"))) throw new OperationException("请选择正在启用的代理协议。");
+        if (NetworkTuning.Topology(options) is "Entry" or "Relay" && !NetworkTuning.IsEntry(c.Plan)) throw new OperationException("实例不具备入口用途。");
         if (options.Text("Family") == "IPv6" && c.Plan.Text("Server.IPv6") == "") throw new OperationException("实例没有 IPv6 地址。");
-        var before = await NetworkObservation(c, options);
-        var supplemental = await c.Run("network-audit.sh", new() { ["ACTION"] = "Outbound", ["BYTES"] = Math.Min(NetworkTuning.PayloadBudget(options) / 8, 8388608).ToString(CultureInfo.InvariantCulture) }, timeout: 30);
-        var outbound = JsonNode.Parse(RemoteAssets.Marker(supplemental.Output, "NETWORK_AUDIT"))!.AsObject();
-        var client = await network.MeasureAsync(c.Plan, c.Secrets, options, c.Directory, t => NetworkObservation(c, options, t),
-            new InlineProgress<string>(message => c.Report("网络路径测量", message)), c.Cancellation);
-        var after = client["ServerAfter"]?.DeepClone().AsObject() ?? await NetworkObservation(c, options);
+        using var path = NetworkTuning.ResolvePath(store, c.Plan, c.Secrets, options, c.Request.InstanceRelativePath);
+        var before = await NetworkObservation(c, options, path: path);
+        var outbound = new JsonObject(); JsonObject client;
+        if (NetworkTuning.Topology(options) == "ForwardOnly") client = new JsonObject { ["Status"] = "NotMeasured", ["EvidencePolicy"] = NetworkTuning.EvidencePolicy, ["EgressVerified"] = false };
+        else
+        {
+            var supplemental = await c.Run("network-audit.sh", new() { ["ACTION"] = "Outbound", ["BYTES"] = (Math.Min(NetworkTuning.PayloadBudget(options) / 8, 8388608) - 65536).ToString(CultureInfo.InvariantCulture) }, timeout: 60);
+            outbound = JsonNode.Parse(RemoteAssets.Marker(supplemental.Output, "NETWORK_AUDIT"))!.AsObject();
+            client = await network.MeasureAsync(path, options, c.Directory, t => NetworkObservation(c, options, t, path),
+                new InlineProgress<string>(message => c.Report("网络路径测量", message)), c.Cancellation);
+        }
+        var after = client["ServerAfter"]?.DeepClone().AsObject() ?? await NetworkObservation(c, options, path: path);
+        using var currentPath = NetworkTuning.ResolvePath(store, c.Plan, c.Secrets, options, c.Request.InstanceRelativePath);
+        if (path.Fingerprint != currentPath.Fingerprint) throw new OperationException("测量途中路径归档变化，未将结果作为调优依据。");
         client.Remove("ServerAfter");
-        var report = new JsonObject { ["SchemaVersion"] = 1, ["Id"] = NetworkTuning.Id(id), ["At"] = DateTimeOffset.UtcNow.ToString("O"),
-            ["SourceFingerprint"] = NetworkTuning.SourceFingerprint(c.Plan, c.Secrets), ["Options"] = options.DeepClone(),
+        var report = new JsonObject { ["SchemaVersion"] = 1, ["Id"] = NetworkTuning.Id(id), ["StartedAt"] = started.ToString("O"), ["At"] = DateTimeOffset.UtcNow.ToString("O"),
+            ["SourceFingerprint"] = NetworkTuning.SourceFingerprint(c.Plan, c.Secrets), ["PathFingerprint"] = path.Fingerprint, ["Options"] = options.DeepClone(),
             ["ServerBefore"] = before, ["ServerAfter"] = after, ["Client"] = client, ["VpsOutbound"] = outbound };
         report["Analysis"] = NetworkTuning.Analyze(report, NetworkTuning.History(c.Directory));
         ArchiveStore.WriteJson(c.File("network-measurements/" + id + ".json"), report);
@@ -63,6 +74,8 @@ public sealed partial class WorkflowEngine
                 if (ClientSchemes.SourceFingerprint(c.File("network-measurements/" + before.Text("Id") + ".json")) != c.Request.Options.Text("MeasurementSha256") || before.Text("SourceFingerprint") != NetworkTuning.SourceFingerprint(c.Plan, c.Secrets)) throw new OperationException("测量记录或实例协议已变化，请重新测速并审阅。");
                 if (!DateTimeOffset.TryParse(before.Text("At"), out var at) || at > DateTimeOffset.UtcNow.AddMinutes(1) || at < DateTimeOffset.UtcNow.AddHours(-24)) throw new OperationException("测量结果超过 24 小时，请重新采集。");
                 NetworkTuning.ValidateMeasurement(before["Options"]!.AsObject());
+                using var measuredPath = NetworkTuning.ResolvePath(store, c.Plan, c.Secrets, before["Options"]!.AsObject(), c.Request.InstanceRelativePath);
+                if (before.Text("PathFingerprint") != measuredPath.Fingerprint || before.Text("Client.EvidencePolicy") != NetworkTuning.EvidencePolicy) throw new OperationException("路径证据来自旧版，或中转落地已变化，请重新采集。");
                 var analysis = NetworkTuning.Analyze(before, NetworkTuning.History(c.Directory));
                 if (analysis.Text("Profile") != "EntryMeasured") throw new OperationException("该记录不足以支持缓冲调整，请重新测量或选择基础配置。");
                 before["Analysis"] = analysis;

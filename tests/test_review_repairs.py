@@ -321,6 +321,41 @@ sysctl(){
             self.assertEqual((root/'applied').read_text().splitlines(), ['net.core.default_qdisc=fq', 'net.ipv4.tcp_congestion_control=bbr'])
             self.assertIn('net.ipv4.tcp_fastopen = 3', config.read_text()); self.assertIn('net.core.rmem_max = 16777216', config.read_text())
 
+    def test_measured_network_only_raises_send_ceiling(self):
+        if not BASH: self.skipTest('Bash unavailable')
+        with tempfile.TemporaryDirectory(dir=ROOT/'.tmp') as folder:
+            root = Path(folder)
+            for relative in ('etc/sysctl.d', 'etc/systemd/system', 'usr/local/libexec', 'snapshot'): (root/relative).mkdir(parents=True)
+            (root/'snapshot/network-state.json').write_text('{}')
+            config = root/'etc/sysctl.d/99-mxh-vps-deploy.conf'
+            config.write_text('# Managed by MXH VPS Deploy.\nnet.core.rmem_max = 16777216\nnet.ipv4.tcp_rmem = 4096 131072 6291456\nnet.ipv4.tcp_fastopen = 3\n')
+            source = (ROOT/'assets/remote/network-apply.sh').read_text(encoding='utf-8')
+            for prefix in ('/etc', '/usr/local'): source = source.replace(prefix, shell_path(root)+prefix)
+            source = re.sub(r"(<<'PY'\n)(.*?)(\nPY)", lambda m: m[1]+m[2].replace(shell_path(root), root.as_posix())+m[3], source, flags=re.S)
+            preamble = '''python3(){ "$TEST_PYTHON" "$@"; }
+modprobe(){ return 0; }
+systemctl(){ return 0; }
+mxh_network(){ return 0; }
+sysctl(){
+  if [[ "$1" == -w ]]; then echo "$2" >> "$TEST_ROOT/applied"; return 0; fi
+  case "$2" in
+    net.ipv4.tcp_available_congestion_control) echo 'cubic bbr';;
+    net.ipv4.tcp_congestion_control) [[ -f "$TEST_ROOT/applied" ]] && echo bbr || echo cubic;;
+    net.core.default_qdisc) echo fq;;
+    net.ipv4.tcp_rmem) echo '4096 131072 6291456';;
+    net.ipv4.tcp_wmem) echo '4096 16384 4194304';;
+    net.core.rmem_max) echo 16777216;;
+    net.core.wmem_max) echo 212992;;
+    *) return 92;;
+  esac
+}
+'''
+            env = dict(os.environ, TEST_ROOT=shell_path(root), TEST_PYTHON=shell_path(sys.executable), VPS_PARAM_EXPECTED_TRANSACTION=shell_path(root/'snapshot'), VPS_PARAM_PROFILE='EntryMeasured', VPS_PARAM_BUFFER_TARGET_BYTES='25165824', VPS_PARAM_BUFFER_CAP_BYTES='33554432')
+            result = subprocess.run([BASH, '--noprofile', '--norc', '-s'], input=preamble+source, capture_output=True, text=True, env=env, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((root/'applied').read_text().splitlines(), ['net.core.default_qdisc=fq', 'net.ipv4.tcp_congestion_control=bbr', 'net.core.wmem_max=25165824', 'net.ipv4.tcp_wmem=4096 16384 25165824'])
+            for unchanged in ('net.core.rmem_max = 16777216', 'net.ipv4.tcp_rmem = 4096 131072 6291456', 'net.ipv4.tcp_fastopen = 3'): self.assertIn(unchanged, config.read_text())
+
     def test_anytls_reinstall_reuses_only_verified_managed_certificate_layout(self):
         with tempfile.TemporaryDirectory(dir=ROOT/'.tmp') as folder:
             root = Path(folder)

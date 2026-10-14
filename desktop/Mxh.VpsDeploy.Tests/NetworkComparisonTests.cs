@@ -10,6 +10,7 @@ internal sealed partial class BoundaryTests
             var r = original.DeepClone().AsObject(); r["Client"] = NetworkTestData.Client(speed, latency);
             r["ServerBefore"]!["Counters"] = new JsonObject { ["TcpOutSegs"] = 1000, ["TcpRetransSegs"] = 100 };
             r["ServerAfter"]!["Counters"] = new JsonObject { ["TcpOutSegs"] = 1000 + sent, ["TcpRetransSegs"] = 100 + retrans };
+            foreach (var transfer in r["Client"]!["Transfers"]!.AsArray().OfType<JsonObject>()) { transfer["TcpEvidence"]!["SentSegments"] = sent; transfer["TcpEvidence"]!["RetransmittedSegments"] = retrans; }
             r["Analysis"] = NetworkTuning.Analyze(r); return r;
         }
         var baseline = Sample(100, 1000); // 1% retransmission reference.
@@ -23,9 +24,9 @@ internal sealed partial class BoundaryTests
         Check(NetworkTuning.Compare(Sample(100, 10000), Sample(130, 11000)) == "Improved", "relative loss tolerance ignored");
         var unknown = Sample(200, 1, 50);
         Check(NetworkTuning.Compare(baseline, unknown) == "Inconclusive" && unknown.Text("Analysis.Profile") == "EntryBasic", "low sample count became zero-loss evidence");
-        unknown = Sample(200, 100); unknown["ServerAfter"]!["Counters"]!.AsObject().Remove("TcpRetransSegs");
+        unknown = Sample(200, 100); foreach (var transfer in unknown["Client"]!["Transfers"]!.AsArray().OfType<JsonObject>()) transfer["TcpEvidence"]!["CountersValid"] = false;
         Check(!NetworkTuning.LossEvidence(unknown).Flag("Eligible") && NetworkTuning.Compare(baseline, unknown) == "Inconclusive", "missing retransmissions became zero loss");
-        unknown = Sample(200, 100); unknown["ServerAfter"]!["Counters"]!["TcpOutSegs"] = 10;
+        unknown = Sample(200, 100); foreach (var transfer in unknown["Client"]!["Transfers"]!.AsArray().OfType<JsonObject>()) transfer["TcpEvidence"]!["CountersValid"] = false;
         Check(!NetworkTuning.LossEvidence(unknown).Flag("CountersValid"), "counter reset ignored");
         unknown = Sample(200, 100); unknown["ServerAfter"]!["BootId"] = "another-boot";
         Check(NetworkTuning.Compare(baseline, unknown) == "Inconclusive", "reboot mixed incomparable counter periods");

@@ -18,7 +18,7 @@ public sealed partial class MainWindow
         var directory = paths.Instance(relative); var plan = ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-plan.json"));
         var secretFile = SafePath.Resolve(directory, "secrets.dotnet.private.json");
         var secrets = File.Exists(secretFile) ? store.ReadSecret(secretFile) : ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-secrets.private.json"));
-        JsonObject job; try { job = NetworkSchedules.Create(relative, snapshot, NetworkTuning.SourceFingerprint(plan, secrets), DateTimeOffset.UtcNow); } finally { secrets.Clear(); }
+        JsonObject job; try { job = NetworkSchedules.Create(relative, snapshot, NetworkTuning.SourceFingerprint(plan, secrets), DateTimeOffset.UtcNow); job["PeerArchiveFingerprint"] = NetworkTuning.PeerArchiveFingerprint(store, snapshot); } finally { secrets.Clear(); }
         if (!await ConfirmAsync(new("安排一次晚高峰补测", "计划时间：" + NetworkTime(job.Text("DueAt")) + "（本机显示）\n\n" + OperationPolicy.Summary(new(OperationKind.MeasureNetwork, relative, snapshot)) + "\n\n请保持应用运行，可关闭到托盘。只执行一次测速，不自动应用调优。已信任的密钥连接才能后台运行；如需新身份或密码则停止。关闭应用错过时间会记为未执行，需重新安排。新安排会替换此实例原有的待测计划。"), CancellationToken.None)) return;
         ArchiveStore.WriteJson(NetworkJobFile(directory), job); SelectPage("network"); Show("已安排一次晚高峰补测，保持应用运行即可。", InfoBarSeverity.Success);
     }
@@ -63,7 +63,7 @@ public sealed partial class MainWindow
                 if (status != "Due") continue;
                 var secrets = store.ReadSecret(SafePath.Resolve(directory, "secrets.dotnet.private.json")); string source;
                 try { source = NetworkTuning.SourceFingerprint(instance.Plan, secrets); } finally { secrets.Clear(); }
-                if (source != job.Text("SourceFingerprint")) { job["Status"] = "SourceChanged"; ArchiveStore.WriteJson(file, job); continue; }
+                if (source != job.Text("SourceFingerprint") || NetworkTuning.PeerArchiveFingerprint(store, job["Options"]!.AsObject()) != job.Text("PeerArchiveFingerprint")) { job["Status"] = "SourceChanged"; ArchiveStore.WriteJson(file, job); continue; }
                 var request = new OperationRequest(OperationKind.MeasureNetwork, instance.RelativePath, job["Options"]!.DeepClone().AsObject());
                 request.Options["Scheduled"] = true; var review = coordinator.Review(request);
                 job["Status"] = "Running"; ArchiveStore.WriteJson(file, job); activeOperation = request;

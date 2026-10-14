@@ -125,6 +125,25 @@ try {
         Check ((Test-Path -LiteralPath (Join-Path $export 'test.yaml')) -and (Test-Path -LiteralPath (Join-Path $export 'test.json'))) 'two real core-validated configs exported through normal UI'
     } else { $cases.Add(@{name='real core generation validation export';state='skipped';reason='No bundled Python runtime supplied.'}) }
     Click '保存方案'; Click '退出编辑'; $null=Wait-Ui {param($ui) -not $ui.dialog}
+    $peerDirectory=Join-Path $FixtureRoot 'private/instances/Example/Native-Landing/MXH-VPS-Deploy'
+    [IO.Directory]::CreateDirectory($peerDirectory) | Out-Null
+    @{Provider='Example';Instance='Native-Landing';NodeName='原生合成落地';Role='ShadowsocksLanding';Roles=@('ShadowsocksLanding');Server=@{IPv4='192.0.2.20';IPv6='2001:db8::20'};Ports=@{SshPrimary=22022;SshRescue=33022;LandingShadowsocks=4000};Import=@{Status='Completed'};Shadowsocks=@{Method='2022-blake3-aes-128-gcm';SecondaryIpv6Enabled=$true;SecondaryIpv6Address='2001:db8:1::20'};ProtocolInventory=@{ShadowsocksLanding=@{Installed=$true;Enabled=$true}}} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $peerDirectory 'deployment-plan.json') -Encoding utf8
+    @{Engine='dotnet-v1';CurrentManagementPort=22022} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $peerDirectory 'deployment-state.json') -Encoding utf8
+    Click 'network'; Choose '目标实例' 'Example/Managed-Demo/MXH-VPS-Deploy'
+    Choose 'TCP 角色与测试路径' 'Relay'; Choose '关键业务方向' 'Upload'
+    Check ((Control '中转后的已有落地（仅读取归档）').value -eq 'Example/Native-Landing/MXH-VPS-Deploy') 'relay selector discovers managed landing and preserves source instance'
+    Choose '入口 → 落地连接地址族' 'IPv6'; Choose '落地访问目标的出口' 'IPv6'
+    Click '采集并生成建议'; $ui=Wait-Ui {param($ui) [bool]$ui.dialog}
+    Check (($ui.elements.name -join ' ') -match '用户上传|下一跳' -and ($ui.elements.name -join ' ') -match 'Native-Landing') 'normal network review includes chosen priority and relay archive'
+    Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}
+    Choose 'TCP 角色与测试路径' 'Entry'
+    Check (@((Read-Ui).elements|Where-Object name -eq '中转后的已有落地（仅读取归档）').Count -eq 0) 'single-hop path hides unused relay fields'
+    Choose 'TCP 角色与测试路径' 'ForwardOnly'; Click '采集并生成建议'; $ui=Wait-Ui {param($ui) [bool]$ui.dialog}
+    Check (($ui.elements.name -join ' ') -match '不发起公网吞吐测试') 'forward-only review does not promise irrelevant throughput tests'
+    Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}
+    Choose '目标实例' 'Example/Native-Landing/MXH-VPS-Deploy'
+    Check ((Control 'TCP 角色与测试路径').value -eq 'Landing' -and @((Read-Ui).elements|Where-Object name -eq '审阅并应用建议').Count -eq 0) 'landing offers diagnostics and only basic fq BBR tuning'
+    Choose '落地访问目标的出口' 'IPv6'; Send 'ui.capture' @{name='native-network-path.png'} | Out-Null
     Send 'suite.run' | Out-Null
     $until=[DateTimeOffset]::UtcNow.AddSeconds(75)
     do { $suite=Send 'suite.status'; if($suite.state -ne 'running'){break};Start-Sleep -Milliseconds 200 } while([DateTimeOffset]::UtcNow -lt $until)

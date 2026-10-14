@@ -9,17 +9,16 @@ namespace Mxh.VpsDeploy.Infrastructure;
 
 public sealed class NetworkMeasurement(IValidationAssets assets, IExternalToolRunner tools) : INetworkMeasurement
 {
-    public async Task<JsonObject> MeasureAsync(JsonObject plan, JsonObject secrets, JsonObject options, string directory,
+    public async Task<JsonObject> MeasureAsync(NetworkMeasurementPath path, JsonObject options, string directory,
         Func<CancellationToken, Task<JsonObject>> observe, IProgress<string> progress, CancellationToken cancellationToken)
     {
         NetworkTuning.ValidateMeasurement(options);
-        var node = ClientProfiles.Nodes(plan, secrets, true).SingleOrDefault(node => node.Role == options.Text("Protocol") && node.Family == options.Text("Family") && !node.IsBackup)
-            ?? throw new OperationException("所选入口未启用，或该地址族没有对应地址。请先核对实例。");
+        var node = path.Entry ?? path.Node;
         var executable = assets.ResolveCore("sing-box");
         await ProtocolValidation.VerifyVersion(assets, tools, "sing-box", executable, cancellationToken);
         var work = SafePath.Resolve(directory, "network-core-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(work);
         var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
-        var configuration = SafePath.Resolve(work, "probe.private.json"); ArchiveStore.WriteJson(configuration, ClientProfiles.SingProbe(node, port));
+        var configuration = SafePath.Resolve(work, "probe.private.json"); ArchiveStore.WriteJson(configuration, ClientProfiles.SingProbe(path.Node, port, path.Entry));
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var arg in new[] { "run", "-c", configuration }) start.ArgumentList.Add(arg);
         Process started;
@@ -34,7 +33,9 @@ public sealed class NetworkMeasurement(IValidationAssets assets, IExternalToolRu
         var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); deadline.CancelAfter(TimeSpan.FromSeconds(NetworkTuning.DurationSeconds(options)));
         var token = deadline.Token; var transfers = new JsonArray(); var idle = new List<double>(); var loaded = new List<double>(); var observations = new List<JsonObject>();
-        var result = new JsonObject { ["Status"] = "Incomplete", ["Path"] = "CurrentComputerViaSelectedProtocolToCloudflare", ["Family"] = node.Family,
+        var startup = new JsonArray();
+        long reservedPayload = 0;
+        var result = new JsonObject { ["Status"] = "Incomplete", ["EvidencePolicy"] = NetworkTuning.EvidencePolicy, ["Path"] = NetworkTuning.Topology(options), ["Family"] = node.Family, ["Startup"] = startup,
             ["Core"] = "sing-box", ["PayloadBudgetBytes"] = NetworkTuning.PayloadBudget(options), ["Transfers"] = transfers,
             ["EgressVerified"] = false, ["Udp"] = new JsonObject { ["Status"] = "NotMeasured" } };
         try
@@ -47,50 +48,59 @@ public sealed class NetworkMeasurement(IValidationAssets assets, IExternalToolRu
                 catch (SocketException) { await Task.Delay(100, token); }
             }
             if (!ready) throw new OperationException("测速核心未就绪。");
-            using var handler = new SocketsHttpHandler { Proxy = new WebProxy("http://127.0.0.1:" + port), UseProxy = true,
-                AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.None, MaxConnectionsPerServer = 8,
-                ConnectTimeout = TimeSpan.FromSeconds(8), PooledConnectionLifetime = TimeSpan.FromSeconds(10) };
+            using var handler = Handler(port);
             using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
             http.DefaultRequestHeaders.TryAddWithoutValidation("Accept-Encoding", "identity");
             http.DefaultRequestHeaders.CacheControl = new() { NoCache = true, NoStore = true };
             progress.Report("正在核对所选入口的真实代理出口。");
-            using (var response = await http.GetAsync("https://api.ipify.org", HttpCompletionOption.ResponseHeadersRead, token))
+            using (var response = await http.GetAsync(path.ExpectedEgress.Contains(':') ? "https://api6.ipify.org" : "https://api.ipify.org", HttpCompletionOption.ResponseHeadersRead, token))
             {
                 response.EnsureSuccessStatusCode(); if (response.Content.Headers.ContentLength is > 128) throw new OperationException("出口检查返回异常。");
                 using var stream = await response.Content.ReadAsStreamAsync(token); var bytes = new byte[129]; var count = 0;
                 while (count < bytes.Length) { var read = await stream.ReadAsync(bytes.AsMemory(count), token); if (read == 0) break; count += read; }
                 var address = System.Text.Encoding.UTF8.GetString(bytes, 0, count).Trim();
-                if (!IPAddress.TryParse(address, out var parsed) || !IPAddress.TryParse(plan.Text("Server.IPv4"), out var expected) || !parsed.Equals(expected)) throw new OperationException("所选代理的出口与实例不一致，测速未计为有效。");
+                if (!IPAddress.TryParse(address, out var parsed) || !IPAddress.TryParse(path.ExpectedEgress, out var expected) || !parsed.Equals(expected)) throw new OperationException("所选路径的最终出口与归档不一致，测速未计为有效。");
                 result["EgressVerified"] = true;
             }
+            progress.Report("重复测量两个独立目标的短连接启动，保护网页与视频起步。");
+            foreach (var endpoint in new[] { "Cloudflare", "Hetzner" })
+            for (var round = 1; round <= 3; round++) startup.Add(await Startup(port, endpoint, round, token));
             progress.Report("采集空闲响应时间；无需填写 RTT。");
             // Warm the HTTPS connection before measuring idle response latency.
             await Latency(http, new List<double>(), token);
             for (var i = 0; i < 8; i++) { await Latency(http, idle, token); await Task.Delay(150, token); }
             observations.Add(await observe(token));
-            // Twelve bounded rounds: each direction has three single-connection and three four-connection samples.
+            // Eighteen bounded rounds: two independent download peers, one public upload peer.
             // Payload reservations are global, including all parallel streams; diagnostics do not try to saturate indefinitely.
             var budget = NetworkTuning.PayloadBudget(options) - Math.Min(NetworkTuning.PayloadBudget(options) / 8, 8388608);
-            var roundBytes = budget / 12;
+            var roundBytes = budget / 18;
             for (var round = 0; round < 3; round++)
             foreach (var direction in new[] { "Download", "Upload" })
+            foreach (var endpoint in direction == "Download" ? new[] { "Cloudflare", "Hetzner" } : new[] { "Cloudflare" })
             foreach (var streams in new[] { 1, 4 })
             {
-                token.ThrowIfCancellationRequested(); progress.Report($"{direction switch { "Download" => "下载", _ => "上传" }} · {streams} 个连接 · 第 {round + 1}/3 轮。");
+                token.ThrowIfCancellationRequested(); progress.Report($"{endpoint} · {direction switch { "Download" => "下载", _ => "上传" }} · {streams} 个连接 · 第 {round + 1}/3 轮。");
+                var phasePoints = new List<JsonObject> { await observe(token) };
                 var amount = roundBytes / streams; var watch = Stopwatch.StartNew();
+                reservedPayload += amount * streams;
                 using var phase = CancellationTokenSource.CreateLinkedTokenSource(token);
                 var latency = SampleLoaded(http, loaded, phase.Token);
-                var operations = Enumerable.Range(0, streams).Select(_ => Transfer(http, direction, amount, token)).ToArray();
-                var resourceSample = round == 0 && streams == 4 ? ObserveDuringTransfer(observe, token) : null;
+                var socketSamples = SampleSockets(observe, phasePoints, phase.Token, token);
+                var operations = Enumerable.Range(0, streams).Select(_ => Transfer(http, direction, endpoint, amount, token)).ToArray();
                 long completedBytes = 0; var complete = false;
                 try { var payloads = await Task.WhenAll(operations); completedBytes = payloads.Sum(); complete = payloads.All(bytes => bytes == amount); }
-                catch (Exception error) when (error is HttpRequestException or IOException or OperationCanceledException && !token.IsCancellationRequested) { result["TransferFailure"] = "EndpointOrPathUnavailable"; }
+                catch (Exception error) when (error is HttpRequestException or IOException or OperationException || error is OperationCanceledException && !token.IsCancellationRequested) { result["TransferFailure"] = "EndpointOrPathUnavailable"; }
                 finally
                 {
                     watch.Stop(); phase.Cancel(); try { await latency; } catch (OperationCanceledException) { }
-                    if (resourceSample != null) observations.Add(await resourceSample);
+                    try { await socketSamples; } catch (OperationCanceledException) { }
+                    phasePoints.Add(await observe(token));
+                    if (round == 0 && streams == 4) observations.AddRange(phasePoints);
                 }
-                transfers.Add(new JsonObject { ["Direction"] = direction, ["Streams"] = streams, ["Round"] = round + 1, ["Bytes"] = completedBytes,
+                var tcp = NetworkTuning.SocketEvidence(phasePoints, direction == "Download" ? "ToUser" : "ToNextHop");
+                tcp["PayloadMatched"] = tcp.Flag("ByteCoverageKnown") && tcp.Long("BytesSent") >= amount * streams * .7 && tcp.Long("BytesSent") <= amount * streams * 1.5;
+                transfers.Add(new JsonObject { ["Endpoint"] = endpoint, ["Direction"] = direction, ["Streams"] = streams, ["Round"] = round + 1, ["Bytes"] = completedBytes,
+                    ["TcpEvidence"] = tcp,
                     ["RequestedBytes"] = amount * streams, ["Seconds"] = watch.Elapsed.TotalSeconds, ["Mbps"] = watch.Elapsed.TotalSeconds > 0 ? completedBytes * 8 / watch.Elapsed.TotalSeconds / 1000000 : 0, ["Complete"] = complete });
             }
             progress.Report("采集有限 UDP 样本和 VPS 端状态。");
@@ -106,7 +116,7 @@ public sealed class NetworkMeasurement(IValidationAssets assets, IExternalToolRu
         }
         result["IdleLatencyMs"] = new JsonArray(idle.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray());
         result["LoadedLatencyMs"] = new JsonArray(loaded.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray());
-        result["Observations"] = new JsonArray(observations.Select(x => (JsonNode?)x.DeepClone()).ToArray());
+        result["Observations"] = new JsonArray(observations.Select(x => (JsonNode?)new JsonObject { ["BootId"] = x["BootId"]?.DeepClone(), ["Cpu"] = x["Cpu"]?.DeepClone(), ["MemoryKiB"] = x["MemoryKiB"]?.DeepClone() }).ToArray());
         if (observations.Count > 0)
         {
             var server = observations[^1].DeepClone().AsObject();
@@ -115,20 +125,45 @@ public sealed class NetworkMeasurement(IValidationAssets assets, IExternalToolRu
             server.Put("Tcp.RttMs", new JsonArray(observations.SelectMany(x => (x.At("Tcp.RttMs") as JsonArray ?? []).Select(y => y?.DeepClone())).ToArray()));
             result["ServerAfter"] = server;
         }
-        result["ReservedPayloadBytes"] = transfers.OfType<JsonObject>().Sum(x => x.Long("RequestedBytes"));
+        result["ReservedPayloadBytes"] = reservedPayload;
         cancellationToken.ThrowIfCancellationRequested(); return result;
     }
-    private static async Task<JsonObject> ObserveDuringTransfer(Func<CancellationToken, Task<JsonObject>> observe, CancellationToken token)
+    private static SocketsHttpHandler Handler(int port) => new() { Proxy = new WebProxy("http://127.0.0.1:" + port), UseProxy = true,
+        AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.None, MaxConnectionsPerServer = 8,
+        ConnectTimeout = TimeSpan.FromSeconds(8), PooledConnectionLifetime = TimeSpan.FromSeconds(60), MaxResponseDrainSize = 0 };
+    private static async Task SampleSockets(Func<CancellationToken, Task<JsonObject>> observe, List<JsonObject> points, CancellationToken stop, CancellationToken token)
     {
-        await Task.Delay(150, token); return await observe(token);
+        while (!stop.IsCancellationRequested)
+        {
+            points.Add(await observe(token)); await Task.Delay(100, stop);
+        }
     }
-    private static async Task<long> Transfer(HttpClient http, string direction, long amount, CancellationToken token)
+    private static async Task<JsonObject> Startup(int port, string endpoint, int round, CancellationToken token)
+    {
+        var result = new JsonObject { ["Endpoint"] = endpoint, ["Round"] = round, ["Complete"] = false };
+        using var handler = Handler(port); using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
+        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint == "Cloudflare" ? "https://speed.cloudflare.com/__down?bytes=1024" : "https://fsn1-speed.hetzner.com/100MB.bin");
+        request.Headers.Range = new(0, 1023); request.Headers.ConnectionClose = true;
+        var watch = Stopwatch.StartNew();
+        try
+        {
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token); response.EnsureSuccessStatusCode();
+            if (endpoint == "Hetzner" && response.StatusCode != HttpStatusCode.PartialContent) throw new HttpRequestException("The endpoint did not honor the payload range.");
+            using var body = await response.Content.ReadAsStreamAsync(token); var bytes = new byte[1024]; await body.ReadExactlyAsync(bytes, token);
+            watch.Stop(); result["Complete"] = true; result["Milliseconds"] = watch.Elapsed.TotalMilliseconds;
+        }
+        catch (Exception error) when (error is HttpRequestException or IOException || error is OperationCanceledException && !token.IsCancellationRequested) { result["Failure"] = "EndpointOrPathUnavailable"; }
+        return result;
+    }
+    private static async Task<long> Transfer(HttpClient http, string direction, string endpoint, long amount, CancellationToken token)
     {
         using var request = new HttpRequestMessage(direction == "Download" ? HttpMethod.Get : HttpMethod.Post,
-            direction == "Download" ? "https://speed.cloudflare.com/__down?bytes=" + amount : "https://speed.cloudflare.com/__up");
+            direction == "Download" ? endpoint == "Hetzner" ? "https://fsn1-speed.hetzner.com/100MB.bin" : "https://speed.cloudflare.com/__down?bytes=" + amount : "https://speed.cloudflare.com/__up");
+        if (endpoint == "Hetzner") request.Headers.Range = new(0, amount - 1);
         if (direction == "Upload") { var content = new byte[checked((int)amount)]; RandomNumberGenerator.Fill(content); request.Content = new ByteArrayContent(content); }
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token); response.EnsureSuccessStatusCode();
-        if (direction == "Download" && response.Content.Headers.ContentLength is { } length && length != amount || direction == "Upload" && response.Content.Headers.ContentLength is > 65536) throw new OperationException("测速响应长度不符合预算。");
+        if (endpoint == "Hetzner" && response.StatusCode != HttpStatusCode.PartialContent) throw new OperationException("独立测速目标未遵守流量范围，停止该项。");
+        if (direction == "Download" && response.Content.Headers.ContentLength is { } length && (length < amount || endpoint == "Cloudflare" && length != amount) || direction == "Upload" && response.Content.Headers.ContentLength is > 65536) throw new OperationException("测速响应长度不符合预算。");
         using var stream = await response.Content.ReadAsStreamAsync(token); var buffer = new byte[32768]; long bytes = 0; var cap = direction == "Download" ? amount : 65536;
         while (bytes < cap)
         {

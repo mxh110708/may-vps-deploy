@@ -7,6 +7,7 @@ var repository = Path.GetFullPath(args.Length == 0 ? Path.Combine(AppContext.Bas
 if (args.Contains("--fonts-only")) new BoundaryTests(repository).RunFontTests();
 else if (args.Contains("--deployment-only")) await new BoundaryTests(repository).RunDeploymentTests();
 else if (args.Contains("--background-only")) await new BoundaryTests(repository).RunBackgroundTests();
+else if (args.Contains("--network-only")) await new BoundaryTests(repository).RunNetworkTests();
 else await new BoundaryTests(repository).Run();
 
 internal sealed partial class BoundaryTests(string repository)
@@ -15,6 +16,10 @@ internal sealed partial class BoundaryTests(string repository)
     private void Check(bool value, string message) { if (!value) throw new Exception(message); assertions++; }
     private void Refuses(Action action, string message) { try { action(); } catch (OperationException) { assertions++; return; } throw new Exception(message); }
     private async Task RefusesAsync(Func<Task> action, string message) { try { await action(); } catch (OperationException) { assertions++; return; } throw new Exception(message); }
+    public async Task RunNetworkTests()
+    {
+        using var f = new Fixture(repository); await NetworkExperience(f); Console.WriteLine($"PASS: {assertions} network direction, evidence, recovery and path assertions; no production connections.");
+    }
     public async Task Run()
     {
         using var f = new Fixture(repository); Paths(f); Fonts(f); await Coordinator(f); Publisher(f); SinglePublisher(f); Profiles(f); MultiPurpose(f); Keys(f); await Workflows(f); await DesktopDeployment(f); await Credentials(f); await Workbench(f); await Trust(f); await DeploymentExperience(f); await MaintenanceExperience(f);

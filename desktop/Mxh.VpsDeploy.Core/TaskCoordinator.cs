@@ -29,7 +29,9 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         if (request.Kind == OperationKind.TuneNetwork && request.Options.Text("Profile") == "EntryMeasured")
         {
             var id = NetworkTuning.Id(request.Options.Text("MeasurementId")); files["Measurement"] = ClientSchemes.SourceFingerprint(SafePath.Resolve(directory, "network-measurements/" + id + ".json"));
+            var measurement = NetworkTuning.ReadReport(directory, id); files["NetworkPeer"] = NetworkTuning.PeerArchiveFingerprint(store, measurement["Options"]!.AsObject());
         }
+        if (request.Kind == OperationKind.MeasureNetwork) files["NetworkPeer"] = NetworkTuning.PeerArchiveFingerprint(store, request.Options);
         if (request.Kind == OperationKind.BbrKernel)
         {
             foreach (var name in new[] { "config/kernel-catalog.json", "scripts/kernel-engine.py", "scripts/bbr-runtime.py", "assets/kernel/xanmod.gpg", "assets/kernel/InRelease", "assets/kernel/Packages.gz", "assets/remote/kernel-audit.sh", "assets/remote/kernel-latest.sh", "assets/remote/kernel-prepare.sh", "assets/remote/kernel-status.sh", "assets/remote/kernel-boot.sh", "assets/remote/kernel-confirm.sh", "assets/remote/kernel-rollback.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
@@ -127,7 +129,7 @@ public static class OperationPolicy
         OperationKind.CheckComponentUpdate => ComponentUpdates.Label(request.Options.Text("Component")) + " · 查询官方最新稳定版",
         OperationKind.InstallComponent => "追加安装 · " + ComponentInstallations.SelectionLabel(request.Options),
         OperationKind.TunnelAccess => "Cloudflare Tunnel · 公开访问验证",
-        OperationKind.MeasureNetwork => "入口线路测量",
+        OperationKind.MeasureNetwork => "网络路径诊断 · " + NetworkTuning.DirectionLabel(request.Options),
         OperationKind.BbrKernel => BbrKernels.Label(request.Options.Text("Action")),
         OperationKind.TuneNetwork => request.Options.Text("Profile") == "LandingBasic" ? "落地机 · fq + BBR" : "入口机 · 网络调优",
         OperationKind.Upgrade => request.Options.Text("Protocol") switch { "RealityEntry" => "Xray · Reality 入口", "AnyTlsEntry" => "sing-box · AnyTLS / ECH 入口", "ShadowsocksLanding" => "sing-box · Shadowsocks 落地", _ => "代理核心" },
@@ -152,8 +154,8 @@ public static class OperationPolicy
         }),
         OperationKind.TunnelAccess => "从 VPS 核对 Tunnel 已连接、主控本机接口与公开 HTTPS 接口的响应和版本；保存检查结果，不修改 Cloudflare 路由或重启服务。\n公开网址：" + request.Options.Text("PublicUrl"),
         OperationKind.InstallComponent => (request.Options["InstallationVersions"] is JsonObject selection ? "本轮安装版本：\n" + InstallationVersions.Summary(selection, InstallationVersions.AdditionalComponents(request.Options)) + "\n\n" : "") + "在现有实例上追加安装 " + ComponentInstallations.SelectionLabel(request.Options) + "。统一核对未安装状态和端口、建立本轮恢复快照，再逐项安装并统一验收；本轮失败或取消一并恢复新增组件，保留已有协议、SSH 和网络参数。",
-        OperationKind.MeasureNetwork => "只读采集 VPS 状态，并用隔离代理测试本机→所选入口→Cloudflare 的真实路径。无需填写 RTT；不修改系统代理。\n有效载荷上限：" + NetworkTuning.PayloadBudget(request.Options) / 1048576 + " MiB；路径采集最长 " + NetworkTuning.DurationSeconds(request.Options) + " 秒，另加有限 SSH 状态采集。\n标称下载/上传：" + request.Options.Number("BandwidthMbps") + "/" + request.Options.Number("UploadMbps") + " Mbps（0 表示未知）；套餐类型：" + request.Options.Text("CapacityType") + "。\n使用地时区：" + request.Options.Text("TimeZoneId") + "；晚高峰：" + request.Options.Number("PeakStartHour") + "–" + request.Options.Number("PeakEndHour") + " 时。结果只代表该测试路径与时段。",
-        OperationKind.TuneNetwork => request.Options.Text("Profile") == "EntryMeasured" ? "依据 24 小时内的自动测量建议，只调整受管网络参数及默认接口队列。先保存文件、运行参数与实际队列，再启用 fq 和当前内核可用 BBR，保留自动缓冲。\n随后以同一路径和流量档位复测；未确认明确收益时恢复原值。复测额外消耗与原测量相同的流量预算。不会自动安装内核或重启 VPS。" : "仅启用默认接口 fq 和当前内核可用的 BBR；保留缓冲、TFO 等其他运行参数。先备份文件和实际参数/队列，再核验生效与管理连接。无需公网测速。BBR 版本以已加载模块证据为准，当前内核不支持时明确提示；内核升级需另行维护。",
+        OperationKind.MeasureNetwork => NetworkTuning.MeasurementSummary(request.Options),
+        OperationKind.TuneNetwork => request.Options.Text("Profile") == "EntryMeasured" ? "依据 24 小时内的方向证据，仅试调有本机发送缓冲限制证据的 TCP 发送上限，并启用 fq 与可用 BBR。保留接收缓冲、初始默认内存、初始窗口、TFO 和连接策略，不自动做全局整形。\n先保存原值与队列，再以同一路径、关键方向、多个目标复测；短连接、重传或排队代价不合格时恢复原值。复测使用同等有效载荷预算，不修改对端 VPS，不自动升级内核或重启。" : "仅启用默认接口 fq 和当前内核可用的 BBR；保留缓冲、TFO 等其他运行参数。先备份文件和实际参数/队列，再核验生效与管理连接。无需公网测速。BBR 版本以已加载模块证据为准，当前内核不支持时明确提示；内核升级需另行维护。",
         OperationKind.Recover => "先核对未完成事务的真实状态，再按明确范围恢复。",
         OperationKind.Upgrade => "升级对象：" + TargetLabel(request) + "\n版本来源：" + (request.Options.Text("Source", "Fixed") == "Latest" ? "官方最新稳定版（已查询锁定）" : "应用固定版本") + "\n目标版本：" + request.Options.Text("TargetVersion") + "\n先核对状态并备份，再更新程序、重启所选服务并独立验收；失败按协议范围恢复。协议备份覆盖本机受管代理协议，恢复时须一并审阅。",
         OperationKind.Komari => "操作：" + TargetLabel(request) + (request.Options.Text("Action") == "Upgrade" ? "\n版本来源：" + (request.Options.Text("Source", "Fixed") == "Latest" ? "官方最新稳定版（已查询锁定）" : "应用固定版本") + "\n目标版本：" + request.Options.Text("TargetVersion") : "") + "\n" + (request.Options.Text("Scope") switch { "KomariAgent" => request.Options.Text("Action") == "Remove" ? "卸载当前 VPS 的 Agent，停止向主控上报；不删除主控历史数据。" : "备份并更新当前 VPS 的 Agent，保留连接配置和原启停状态。", "KomariController" => "先备份当前 VPS 的主控程序和数据；一致性备份、升级及恢复需要短暂停止主控，再恢复原启停状态。只处理主控专用备份，不包含 Tunnel。", _ => request.Options.Text("Action") == "Upgrade" ? "只升级 cloudflared 程序，保留连接 Token、服务配置及启停状态。运行中的 Tunnel 会短暂重连并验证就绪状态；失败只恢复 Tunnel 范围。" : "只轮换当前 VPS 的 Tunnel 连接 Token 并重启 Tunnel；新 Token 在执行时输入，不修改 Cloudflare DNS 或主控数据。" }),

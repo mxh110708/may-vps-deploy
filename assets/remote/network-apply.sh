@@ -25,9 +25,7 @@ if [[ "$VPS_PARAM_PROFILE" == EntryMeasured ]]; then
   core_r="$(sysctl -n net.core.rmem_max)"; core_w="$(sysctl -n net.core.wmem_max)"
   if (( r_max <= cap && w_max <= cap && core_r <= cap && core_w <= cap )); then
     adjust=true
-    (( r_max >= target )) || r_max="$target"
     (( w_max >= target )) || w_max="$target"
-    (( core_r >= target )) || core_r="$target"
     (( core_w >= target )) || core_w="$target"
   fi
 fi
@@ -42,7 +40,7 @@ from pathlib import Path
 path = Path('/etc/sysctl.d/99-mxh-vps-deploy.conf')
 changed = {'net.core.default_qdisc', 'net.ipv4.tcp_congestion_control'}
 if os.environ['VPS_NETWORK_ADJUST'] == 'true':
-    changed.update(('net.core.rmem_max', 'net.core.wmem_max', 'net.ipv4.tcp_rmem', 'net.ipv4.tcp_wmem'))
+    changed.update(('net.core.wmem_max', 'net.ipv4.tcp_wmem'))
 if path.exists():
     for line in path.read_text().splitlines():
         match = re.match(r'^\s*([a-zA-Z0-9_.]+)\s*=', line)
@@ -52,8 +50,8 @@ PY
   echo 'net.core.default_qdisc = fq'
   if [[ "$bbr" == true ]]; then echo 'net.ipv4.tcp_congestion_control = bbr'; else printf 'net.ipv4.tcp_congestion_control = %s\n' "$original_cc"; fi
   if [[ "$adjust" == true ]]; then
-    printf 'net.core.rmem_max = %s\nnet.core.wmem_max = %s\n' "$core_r" "$core_w"
-    printf 'net.ipv4.tcp_rmem = %s %s %s\nnet.ipv4.tcp_wmem = %s %s %s\n' "$r_min" "$r_default" "$r_max" "$w_min" "$w_default" "$w_max"
+    printf 'net.core.wmem_max = %s\n' "$core_w"
+    printf 'net.ipv4.tcp_wmem = %s %s %s\n' "$w_min" "$w_default" "$w_max"
   fi
 } > "$temporary"
 chmod 0644 "$temporary"
@@ -65,8 +63,8 @@ apply_key(){ mxh_network expect-sysctl "$snapshot" "$1" "$2"; sysctl -w "$1=$2" 
 apply_key net.core.default_qdisc fq
 if [[ "$bbr" == true ]]; then apply_key net.ipv4.tcp_congestion_control bbr; fi
 if [[ "$adjust" == true ]]; then
-  apply_key net.core.rmem_max "$core_r"; apply_key net.core.wmem_max "$core_w"
-  apply_key net.ipv4.tcp_rmem "$r_min $r_default $r_max"; apply_key net.ipv4.tcp_wmem "$w_min $w_default $w_max"
+  apply_key net.core.wmem_max "$core_w"
+  apply_key net.ipv4.tcp_wmem "$w_min $w_default $w_max"
 fi
 mxh_network apply "$snapshot"
 mxh_network verify "$snapshot"
