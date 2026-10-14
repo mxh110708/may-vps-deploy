@@ -20,7 +20,7 @@ adjust=false
 if [[ "$VPS_PARAM_PROFILE" == EntryMeasured ]]; then
   target="$VPS_PARAM_BUFFER_TARGET_BYTES"; cap="$VPS_PARAM_BUFFER_CAP_BYTES"
   (( target >= 1048576 && target <= cap && cap <= 33554432 ))
-  read -r r_min r_default r_max <<<"$(sysctl -n net.ipv4.tcp_rmem)"
+  read -r _r_min _r_default r_max <<<"$(sysctl -n net.ipv4.tcp_rmem)"
   read -r w_min w_default w_max <<<"$(sysctl -n net.ipv4.tcp_wmem)"
   core_r="$(sysctl -n net.core.rmem_max)"; core_w="$(sysctl -n net.core.wmem_max)"
   if (( r_max <= cap && w_max <= cap && core_r <= cap && core_w <= cap )); then
