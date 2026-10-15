@@ -14,7 +14,7 @@ public sealed partial class MainWindow
         var instances = store.ListInstances().Where(instance => { var status = InstanceLifecycle.Read(store, instance.RelativePath, instance.Plan); return status.Managed; }).ToArray();
         if (instances.Length == 0) { page.Children.Add(Card(Column(SectionHeading("选择已部署的实例", Symbol.Globe, "部署完成或接入已有 VPS 后，可以单独进行网络配置。"), Action("查看实例", () => { SelectPage("instances"); return Task.CompletedTask; })))); return; }
         var selection = new JsonObject { ["Instance"] = instances.Any(i => i.RelativePath == selectedInstance) ? selectedInstance : instances[0].RelativePath };
-        var picker = Choice("目标实例", selection, "Instance", instances.Select(i => (i.RelativePath, i.Plan.Text("Provider") + " / " + i.Plan.Text("Instance"))), preventWheelSelection: true);
+        var picker = Choice("目标实例", selection, "Instance", instances.Select(i => (i.RelativePath, i.Plan.Text("Provider") + " / " + i.Plan.Text("Instance"))));
         page.Children.Add(picker); var panel = new StackPanel { Spacing = 20 }; page.Children.Add(panel);
         void Refresh()
         {

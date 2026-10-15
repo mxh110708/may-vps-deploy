@@ -13,7 +13,7 @@ public sealed partial class MainWindow
         var instances = store.ListInstances().Where(instance => { var status = InstanceLifecycle.Read(store, instance.RelativePath, instance.Plan); return status.Managed && !status.NeedsRecovery; }).ToArray();
         if (instances.Length == 0) { Show("先完成新机部署或接入已有 VPS，然后可在同一实例追加安装。", InfoBarSeverity.Warning); return; }
         var selection = new JsonObject();
-        var dialog = OperationDialog("在已有实例追加安装", Column(Text("选择已完成部署或接入的实例。连接参数沿用归档。", 14, true), Choice("实例", selection, "Instance", instances.Select(instance => (instance.RelativePath, instance.Plan.Text("Provider") + " / " + instance.Plan.Text("Instance"))), preventWheelSelection: true)), "选择组件");
+        var dialog = OperationDialog("在已有实例追加安装", Column(Text("选择已完成部署或接入的实例。连接参数沿用归档。", 14, true), Choice("实例", selection, "Instance", instances.Select(instance => (instance.RelativePath, instance.Plan.Text("Provider") + " / " + instance.Plan.Text("Instance"))))), "选择组件");
         if (await ShowDialog(dialog) != ContentDialogResult.Primary) return;
         selectedInstance = selection.Text("Instance"); await ChooseInstallation(instances.Single(instance => instance.RelativePath == selectedInstance).Plan, false);
     }

@@ -17,8 +17,8 @@ public sealed partial class MainWindow
         var targets = MaintenanceTargets.ProxyCores(plan, ArchiveStore.ReadJson(paths.Resolve("config/versions.json")));
         var options = previous?.DeepClone().AsObject() ?? new JsonObject { ["Scope"] = "Protocol", ["Source"] = "Fixed" };
         var query = new JsonObject();
-        var selector = Choice("升级对象", options, "Protocol", targets.Select(t => (t.Protocol, t.Name)), preventWheelSelection: true);
-        var source = Choice("版本来源", options, "Source", [("Fixed", "应用固定版本（默认）"), ("Latest", "官方最新稳定版（联网查询）")], preventWheelSelection: true);
+        var selector = Choice("升级对象", options, "Protocol", targets.Select(t => (t.Protocol, t.Name)));
+        var source = Choice("版本来源", options, "Source", [("Fixed", "应用固定版本（默认）"), ("Latest", "官方最新稳定版（联网查询）")]);
         var details = new StackPanel { Spacing = 12 };
         var dialog = OperationDialog("代理核心升级", DialogScroll(Column(Text(plan.Text("Provider") + " / " + plan.Text("Instance"), 17),
             Text("升级此 VPS 上运行代理协议的核心程序。请选择具体服务并核对版本。", 14, true), selector, source, details)), "审阅升级");
@@ -78,8 +78,8 @@ public sealed partial class MainWindow
             "KomariAgent" => [("Upgrade", "升级 Agent"), ("Remove", "卸载 Agent")],
             "KomariController" => [("Upgrade", "升级主控"), ("Backup", "创建主控一致性备份"), ("Restore", "恢复主控专用备份")],
             _ => [("Upgrade", "升级 cloudflared 程序"), ("RotateToken", "轮换 Tunnel 连接 Token")]
-        }, preventWheelSelection: true);
-        var source = Choice("版本来源", options, "Source", [("Fixed", "应用固定版本（默认）"), ("Latest", "官方最新稳定版（联网查询）")], preventWheelSelection: true);
+        });
+        var source = Choice("版本来源", options, "Source", [("Fixed", "应用固定版本（默认）"), ("Latest", "官方最新稳定版（联网查询）")]);
         var details = new StackPanel { Spacing = 12 };
         var dialog = OperationDialog(target.Name, DialogScroll(Column(Text(plan.Text("Provider") + " / " + plan.Text("Instance"), 17),
             Text(target.Description, 14, true), actions, source, details)), "审阅操作");
@@ -103,7 +103,7 @@ public sealed partial class MainWindow
                     var root = SafePath.Resolve(paths.Instance(selectedInstance!), "komari-backups");
                     if (Directory.Exists(root)) SafePath.CheckTree(root);
                     var backups = Directory.Exists(root) ? Directory.EnumerateFiles(root, "*.json").Select(ArchiveStore.ReadJson).Where(b => b.At("IncludeTunnel") != null && !b.Flag("IncludeTunnel") && b.Text("RemoteBackup") != "").ToArray() : [];
-                    details.Children.Add(Choice("主控专用恢复点", options, "Backup", backups.Select(b => (b.Text("RemoteBackup"), LocalTime(b.Text("At")))), preventWheelSelection: true));
+                    details.Children.Add(Choice("主控专用恢复点", options, "Backup", backups.Select(b => (b.Text("RemoteBackup"), LocalTime(b.Text("At"))))));
                     dialog.IsPrimaryButtonEnabled = backups.Length > 0;
                     if (backups.Length == 0) details.Children.Add(Text("还没有主控专用恢复点。请先创建一致性备份。", 14, true));
                 }

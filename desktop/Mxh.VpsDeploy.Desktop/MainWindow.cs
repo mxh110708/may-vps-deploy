@@ -158,7 +158,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
     private void Instances()
     {
         var instances = store.ListInstances().ToArray(); if (instances.Length == 0) { page.Children.Add(Card(Column(Text("还没有受管实例", 22), Text("从部署页创建，或接入已有 VPS。", 14, true), Action("开始", () => { SelectPage("deploy"); return Task.CompletedTask; }, true)))); return; }
-        var selection = new JsonObject(); var picker = Choice("选择实例", selection, "Instance", instances.Select(instance => (instance.RelativePath, instance.Plan.Text("Provider") + " / " + instance.Plan.Text("Instance"))), preventWheelSelection: true);
+        var selection = new JsonObject(); var picker = Choice("选择实例", selection, "Instance", instances.Select(instance => (instance.RelativePath, instance.Plan.Text("Provider") + " / " + instance.Plan.Text("Instance"))));
         var details = new StackPanel { Spacing = 20 }; page.Children.Add(picker); page.Children.Add(details);
         picker.SelectionChanged += (_, _) =>
         {

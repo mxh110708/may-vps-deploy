@@ -28,7 +28,7 @@ public sealed partial class MainWindow
         }
         var instance = store.ListInstances().First(); selectedInstance = instance.RelativePath; var plan = instance.Plan; var state = InstanceState(instance.RelativePath);
         SelectPage("instances"); await Task.Delay(120);
-        Require(Find<ComboBox>(shell).Single(b => b.Header as string == "选择实例") is InstanceSelector, "实例选择器未阻止滚轮切换。");
+        Require(Find<ComboBox>(shell).Single(b => b.Header as string == "选择实例") is SelectionComboBox, "实例选择器未阻止滚轮切换。");
         await Shot("instances-scoped-maintenance");
         var stateFile = SafePath.Resolve(paths.Instance(instance.RelativePath), "deployment-state.json"); var oldBytes = File.ReadAllBytes(stateFile);
         try
@@ -106,8 +106,12 @@ public sealed partial class MainWindow
         if (backgroundTest) return new JsonObject { ["message_delivery_available"] = false, ["skipped"] = "后台测试不发送鼠标消息；实体滚轮手势需人工检查。" };
         // Send wheel messages only to this QA window and its own input island;
         // never move the system pointer, focus another app or use global input.
-        page.Children.Clear(); var model = new JsonObject { ["value"] = "5" }; var choices = Enumerable.Range(0, 12).Select(i => (i.ToString(), "实例 " + i)).ToArray();
-        var baseline = Choice("隔离基准", model, "value", choices); var guarded = Choice("隔离实例选择", new JsonObject { ["value"] = "5" }, "value", choices, preventWheelSelection: true);
+        page.Children.Clear(); var choices = Enumerable.Range(0, 12).Select(i => (i.ToString(), "选项 " + i)).ToArray();
+        // Deliberately unguarded only in this isolated input-delivery calibration.
+        var baseline = new ComboBox { Header = "隔离基准", HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var (value, title) in choices) baseline.Items.Add(new ComboBoxItem { Content = title, Tag = value });
+        baseline.SelectedIndex = 5;
+        var guarded = Choice("隔离选项", new JsonObject { ["value"] = "5" }, "value", choices);
         page.Children.Add(baseline); page.Children.Add(guarded); page.Children.Add(new Border { Height = 1500 }); shell.UpdateLayout(); Activate(); await Task.Delay(250);
         var owner = WinRT.Interop.WindowNative.GetWindowHandle(this); var handles = new List<nint> { owner };
         void Children(nint parent, int depth)

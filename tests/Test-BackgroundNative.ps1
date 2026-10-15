@@ -14,7 +14,12 @@ $invoke = Join-Path $ProjectRoot 'scripts/Invoke-VpsBackgroundTest.ps1'
 $started = & (Join-Path $ProjectRoot 'scripts/Start-VpsBackgroundTest.ps1') -ApplicationDirectory $ApplicationDirectory -FixtureRoot $FixtureRoot -PublicAssetRoot $ProjectRoot -SyntheticFixture
 $session = $started.SessionManifest; $cases = [Collections.Generic.List[object]]::new()
 function Send([string]$command,[hashtable]$arguments=@{}) { & $invoke -SessionManifest $session -Command $command -Arguments $arguments }
-function Read-Ui { Send 'ui.read' }
+function Read-Ui {
+    $ui=Send 'ui.read'
+    $unguarded=@($ui.elements | Where-Object { $_.kind -eq 'ComboBox' -and -not $_.wheel_selection_blocked })
+    if($unguarded.Count){throw ('Native selector allows wheel selection: ' + ($unguarded.name -join ', '))}
+    $ui
+}
 function Control([string]$name,[string]$kind='') {
     $matches = @((Read-Ui).elements | Where-Object { $_.name -eq $name -and (-not $kind -or $_.kind -eq $kind) })
     if ($matches.Count -ne 1) { throw "No unique native control: $name ($kind)." }; $matches[0]

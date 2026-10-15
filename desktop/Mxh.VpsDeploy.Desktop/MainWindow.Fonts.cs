@@ -57,7 +57,7 @@ public sealed partial class MainWindow
     }
     private UIElement FontSetting()
     {
-        var choice = new ComboBox { MinWidth = 190, MaxWidth = 240, MinHeight = 38, FontSize = 13, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), BorderBrush = Brush(Paint.InputBorder), Background = Brush(Paint.Input), Foreground = Brush(Paint.Text), FontFamily = InterfaceFont, Tag = "FontId" };
+        var choice = new SelectionComboBox { MinWidth = 190, MaxWidth = 240, MinHeight = 38, FontSize = 13, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), BorderBrush = Brush(Paint.InputBorder), Background = Brush(Paint.Input), Foreground = Brush(Paint.Text), FontFamily = InterfaceFont, Tag = "FontId" };
         DesktopTypography.Mark(choice, TypeRole.Body, 14);
         AutomationProperties.SetName(choice, "界面字体"); var refreshing = false;
         void Refresh()

@@ -12,7 +12,7 @@ public sealed partial class MainWindow
     {
         var file = SafePath.Resolve(paths.Instance(relative), "network-bbr-choice.json");
         if (!bbrChoices.TryGetValue(relative, out var model)) bbrChoices[relative] = model = File.Exists(file) ? ArchiveStore.ReadJson(file) : new() { ["Version"] = "Current" };
-        var choice = Choice("BBR 版本", model, "Version", [("Current", "VPS 原有内核自带版本（默认）"), ("v3", "BBR v3")], preventWheelSelection: true);
+        var choice = Choice("BBR 版本", model, "Version", [("Current", "VPS 原有内核自带版本（默认）"), ("v3", "BBR v3")]);
         var details = new StackPanel { Spacing = 12 };
         var content = Column(SectionHeading("拥塞控制版本", Symbol.Setting, "原有版本沿用 VPS 内核。选择 v3 后单独检查和升级，安装与重启均需审阅。"), choice, details);
         Task Run(string action) => Submit(new(OperationKind.BbrKernel, relative, action == "Check" ? new JsonObject { ["Action"] = action, ["Source"] = model.Text("Source", "Fixed") } : new JsonObject { ["Action"] = action }));
@@ -31,7 +31,7 @@ public sealed partial class MainWindow
                 if (BbrKernels.Pending(state)) details.Children.Add(Text("请先结束本轮内核事务，再测速或应用网络配置。关闭应用不会重复安装；重新打开后可核对恢复。", 14, true));
             }
             if (model.Text("Version") != "v3") return;
-            var source = Choice("BBR v3 内核来源", model, "Source", [("Fixed", "应用固定版本（默认）"), ("Latest", "官方最新兼容 LTS（联网查询）")], preventWheelSelection: true);
+            var source = Choice("BBR v3 内核来源", model, "Source", [("Fixed", "应用固定版本（默认）"), ("Latest", "官方最新兼容 LTS（联网查询）")]);
             source.SelectionChanged += (_, _) => { ArchiveStore.WriteJson(file, model); Refresh(); }; details.Children.Add(source);
             var check = state["LastKernelCheck"] as JsonObject;
             details.Children.Add(Action("检查 BBR v3 与升级兼容性", () => Run("Check")));

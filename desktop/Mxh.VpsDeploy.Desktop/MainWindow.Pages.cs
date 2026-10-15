@@ -7,9 +7,9 @@ namespace Mxh.VpsDeploy.Desktop;
 
 public sealed partial class MainWindow
 {
-    private ComboBox Choice(string label, JsonObject model, string key, IEnumerable<(string Value, string Label)> choices, bool preserveMissing = false, bool preventWheelSelection = false)
+    private SelectionComboBox Choice(string label, JsonObject model, string key, IEnumerable<(string Value, string Label)> choices, bool preserveMissing = false)
     {
-        ComboBox box = preventWheelSelection ? new InstanceSelector() : new ComboBox();
+        var box = new SelectionComboBox();
         box.Header = label; box.HorizontalAlignment = HorizontalAlignment.Stretch; box.MinHeight = 38; box.FontSize = 13;
         box.CornerRadius = new CornerRadius(6); box.BorderThickness = new Thickness(1); box.BorderBrush = Brush(Paint.InputBorder); box.Background = Brush(Paint.Input); box.Foreground = Brush(Paint.Text);
         DesktopTypography.Mark(box, TypeRole.Body, 14);

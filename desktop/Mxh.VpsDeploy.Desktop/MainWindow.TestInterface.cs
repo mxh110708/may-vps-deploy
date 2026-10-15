@@ -211,7 +211,7 @@ public sealed partial class MainWindow
         var live = TestElements().ToArray(); foreach (var old in testIds.Keys.Except(live).ToArray()) testIds.Remove(old);
         foreach (var element in live.Take(1200))
         {
-            var item = new JsonObject { ["id"] = TestId(element), ["kind"] = element.GetType().Name, ["name"] = TestName(element), ["enabled"] = element is not Control control || control.IsEnabled };
+            var item = new JsonObject { ["id"] = TestId(element), ["kind"] = element is ComboBox ? nameof(ComboBox) : element.GetType().Name, ["name"] = TestName(element), ["enabled"] = element is not Control control || control.IsEnabled };
             switch (element)
             {
                 case TextBox text: item["value"] = text.Text; break;
@@ -220,6 +220,7 @@ public sealed partial class MainWindow
                 case ToggleButton toggle: item["checked"] = toggle.IsChecked; break;
                 case ToggleSwitch toggle: item["checked"] = toggle.IsOn; break;
                 case ComboBox choice:
+                    item["wheel_selection_blocked"] = choice is SelectionComboBox;
                     item["value"] = (choice.SelectedItem as ComboBoxItem)?.Tag as string;
                     item["choices"] = new JsonArray(choice.Items.OfType<ComboBoxItem>().Select(i => (JsonNode?)new JsonObject { ["value"] = i.Tag as string, ["label"] = i.Content as string }).ToArray()); break;
                 case ScrollViewer scroll: item["offset"] = scroll.VerticalOffset; item["extent"] = scroll.ScrollableHeight; break;

@@ -15,7 +15,7 @@ public sealed partial class MainWindow
         if (canonical == "Etc/UTC") canonical = "UTC";
         var preset = new JsonObject { ["Selected"] = presets.Any(p => p.Value == canonical) ? canonical : "Custom" };
         if (preset.Text("Selected") != "Custom") options["TimeZoneId"] = canonical;
-        var choice = Choice("主要使用地时区", preset, "Selected", presets, preventWheelSelection: true);
+        var choice = Choice("主要使用地时区", preset, "Selected", presets);
         var custom = Field("自定义时区（IANA 或 Windows ID）", options, "TimeZoneId");
         var start = Field("高峰开始（24 小时制）", options, "PeakStartHour", numeric: true);
         var end = Field("高峰结束（24 小时制）", options, "PeakEndHour", numeric: true);

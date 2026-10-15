@@ -14,13 +14,13 @@ public sealed partial class MainWindow
         else if (NetworkTuning.Topology(options) == "Landing" || NetworkTuning.Topology(options) == "Relay" && peers.Length == 0) options["Topology"] = "Entry";
         var choices = entry ? new List<(string, string)> { ("Entry", "入口代理 · 用户到目标"), ("ForwardOnly", "纯 TCP/IP 转发 · 仅观察") } : [("Landing", "落地代理 · 出站诊断")];
         if (entry && peers.Length > 0) choices.Insert(1, ("Relay", "中转代理 · 经已有落地"));
-        var topology = Choice("TCP 角色与测试路径", options, "Topology", choices, preventWheelSelection: true);
+        var topology = Choice("TCP 角色与测试路径", options, "Topology", choices);
         var description = Text(NetworkTuning.PathDescription(options), 13, true);
         var peerPanel = new StackPanel { Spacing = 12 };
         if (peers.Length > 0)
         {
             if (!peers.Any(p => p.RelativePath == options.Text("PeerInstance"))) options["PeerInstance"] = peers[0].RelativePath;
-            var peer = Choice("中转后的已有落地（仅读取归档）", options, "PeerInstance", peers.Select(i => (i.RelativePath, i.Plan.Text("Provider") + " / " + i.Plan.Text("Instance"))), preventWheelSelection: true);
+            var peer = Choice("中转后的已有落地（仅读取归档）", options, "PeerInstance", peers.Select(i => (i.RelativePath, i.Plan.Text("Provider") + " / " + i.Plan.Text("Instance"))));
             var families = new StackPanel();
             void RefreshPeer()
             {
@@ -50,7 +50,7 @@ public sealed partial class MainWindow
     private FrameworkElement NetworkBudgetFields(JsonObject options, ComboBox family)
     {
         if (options.Text("TestSize") is "Light" or "Full") options["TestSize"] = options.Text("TestSize") == "Light" ? "Quick" : "Standard";
-        var size = Choice("调优总流量预算", options, "TestSize", [("Quick", "快速 · 128 MiB"), ("Standard", "标准 · 1 GiB（默认）"), ("Deep", "深入 · 4 GiB"), ("Extended", "扩展 · 10 GiB"), ("Maximum", "最大 · 20 GiB"), ("Custom", "自定义 · 不超过 20 GiB")], preventWheelSelection: true);
+        var size = Choice("调优总流量预算", options, "TestSize", [("Quick", "快速 · 128 MiB"), ("Standard", "标准 · 1 GiB（默认）"), ("Deep", "深入 · 4 GiB"), ("Extended", "扩展 · 10 GiB"), ("Maximum", "最大 · 20 GiB"), ("Custom", "自定义 · 不超过 20 GiB")]);
         var custom = Field("自定义总预算（MiB，64–20480）", options, "TrafficBudgetMiB", numeric: true);
         var description = Text("", 13, true);
         void Refresh()
