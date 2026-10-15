@@ -1,13 +1,15 @@
 using System.Text.Json.Nodes;
 using Mxh.VpsDeploy.Core;
 
-internal sealed class SelectedFamilyNetwork(bool missingIpv6 = false) : INetworkMeasurement
+internal sealed class SelectedFamilyNetwork(bool missingIpv6 = false, bool missingIpv6Egress = false) : INetworkMeasurement
 {
     public List<string> Families { get; } = [];
+    public List<JsonObject> Paths { get; } = [];
     public async Task<JsonObject> MeasureAsync(NetworkMeasurementPath path, JsonObject options, string directory, Func<CancellationToken, Task<JsonObject>> observe, IProgress<string> progress, CancellationToken token)
     {
         Families.Add(path.Node.Family); var client = NetworkTestData.Client();
-        if (missingIpv6 && path.Node.Family == "IPv6") { client["Status"] = "Incomplete"; client["EgressVerified"] = false; client["Transfers"] = new JsonArray(); }
+        Paths.Add(new JsonObject { ["Options"] = options.DeepClone(), ["Egress"] = path.Node.EgressFamily, ["ExpectedEgress"] = path.ExpectedEgress, ["ViaEntry"] = path.Entry != null, ["PayloadBudget"] = NetworkTuning.PayloadBudget(options) });
+        if (missingIpv6 && path.Node.Family == "IPv6" || missingIpv6Egress && path.Node.EgressFamily == "IPv6") { client["Status"] = "Incomplete"; client["EgressVerified"] = false; client["Transfers"] = new JsonArray(); }
         client["ServerAfter"] = await observe(token); return client;
     }
 }
@@ -68,5 +70,6 @@ internal sealed partial class BoundaryTests
         await engine.ExecuteAsync(new(OperationKind.TuneNetwork, f.Relative(plan), tuning), task, new InlineProgress<TaskProgress>(_ => { }), default);
         var state = ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-state.json"));
         Check(remote.Commands.Count(c => c == "network-apply.sh") == 1 && state.Flag("LastNetworkComparison.RestoredOriginal") && remote.ArmedComponents == "Network", "dual stack applied twice or failed to restore its shared scope");
+        await NetworkEgressSelectionExperience(f);
     }
 }

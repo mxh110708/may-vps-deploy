@@ -34,12 +34,14 @@ public sealed partial class MainWindow
             if (!networkForms.TryGetValue(relative, out var options)) networkForms[relative] = options = NetworkTuning.Defaults(plan);
             var protocols = (entry ? DeploymentPlans.Roles[..2] : ["ShadowsocksLanding"]).Where(role => plan.Flag("ProtocolInventory." + role + ".Enabled", DeploymentPlans.InitiallyEnabled(plan, role))).Select(role => (role, RoleLabel(role))).ToArray();
             if (!protocols.Any(pair => pair.role == options.Text("Protocol"))) options["Protocol"] = protocols.First().role;
-            panel.Children.Add(NetworkPathFields(relative, options, entry));
+            Action? refreshBudget = null;
+            panel.Children.Add(NetworkPathFields(relative, options, entry, () => refreshBudget?.Invoke()));
             var family = Choice("入口连接地址族", options, "Family", plan.Text("Server.IPv6") == "" ? [("IPv4", "IPv4")] : [("Both", "IPv4 + IPv6 · 分别测量和验收"), ("IPv4", "仅 IPv4"), ("IPv6", "仅 IPv6")]);
+            var budget = NetworkBudgetFields(options, family); refreshBudget = budget.Refresh;
             panel.Children.Add(Card(Column(SectionHeading("套餐与测试路径", Symbol.Link, "只填写套餐信息。RTT、吞吐和资源状况由应用采集；标称带宽不会用测速结果替代。"),
                 Fields(Field("标称下载带宽（Mbps，未知留空）", options, "BandwidthMbps", numeric: true), Field("标称上传带宽（Mbps，未知留空）", options, "UploadMbps", numeric: true)),
                 Fields(Choice("带宽类型", options, "CapacityType", [("Unknown", "未知"), ("Shared", "共享"), ("Dedicated", "独享"), ("Burst", "突发")]), Choice("所选入口协议", options, "Protocol", protocols)),
-                Fields(family, NetworkBudgetFields(options, family)))));
+                Fields(family, budget.Content))));
             panel.Children.Add(NetworkTimeFields(options));
             panel.Children.Add(Row(Action("采集并生成建议", () => Submit(new(OperationKind.MeasureNetwork, relative, options)), true), Action("审阅晚高峰补测", () => ScheduleNetwork(relative, options))));
             panel.Children.Add(Text(NetworkTuning.ComparisonPolicyDescription, 14, true));
@@ -80,13 +82,13 @@ public sealed partial class MainWindow
     {
         if (report["Paths"] is JsonArray)
         {
-            var group = Column(Text("双栈测量 · " + NetworkTime(report.Text("At")), 17), Text("IPv4 / IPv6 独立结果；共享参数只应用一次，所有选中路径复测通过后才保留。", 13, true));
+            var group = Column(Text("多路径测量 · " + NetworkTime(report.Text("At")), 17), Text("连接 VPS 与落地访问网站使用的 IP 组合独立展示；共享参数只应用一次，所有选中路径复测通过后才保留。", 13, true));
             foreach (var path in NetworkTuning.PathReports(report)) group.Children.Add(NetworkReportCard(path));
             foreach (var note in report.Strings("Analysis.Notes")) group.Children.Add(Text(note, 13, true));
             return Card(group);
         }
         var capacity = report.Text("Options.CapacityType") switch { "Shared" => "共享", "Dedicated" => "独享", "Burst" => "突发", _ => "未知" };
-        var content = Column(Text("最近一次测量 · " + NetworkTime(report.Text("At")), 17), NetworkMetrics(report), Text("协议：" + RoleLabel(report.Text("Options.Protocol")) + " · " + report.Text("Options.Family") + " · 套餐类型：" + capacity, 13, true), Text("关键方向：" + NetworkTuning.DirectionLabel(report["Options"]!.AsObject()), 13, true), Text(NetworkTuning.PathDescription(report["Options"]!.AsObject()), 13, true));
+        var content = Column(Text("最近一次测量 · " + NetworkTime(report.Text("At")), 17), NetworkMetrics(report), Text("协议：" + RoleLabel(report.Text("Options.Protocol")) + " · " + NetworkTuning.PathLabel(report["Options"]!.AsObject()) + " · 套餐类型：" + capacity, 13, true), Text("关键方向：" + NetworkTuning.DirectionLabel(report["Options"]!.AsObject()), 13, true), Text(NetworkTuning.PathDescription(report["Options"]!.AsObject()), 13, true));
         content.Children.Add(Text("CPU：" + NetworkTuning.Value(report, "ServerAfter.Cpu.BusyPercent").ToString("0.0") + "% · steal：" + NetworkTuning.Value(report, "ServerAfter.Cpu.StealPercent").ToString("0.0") + "% · 内存：" + report.Long("ServerAfter.MemoryKiB") / 1024 + " MiB"));
         foreach (var direction in new[] { "Download", "Upload" })
         {
@@ -112,8 +114,8 @@ public sealed partial class MainWindow
             var paths = new StackPanel { Spacing = 12 };
             foreach (var path in NetworkTuning.PathReports(before))
             {
-                var matched = after == null ? null : NetworkTuning.PathReports(after).SingleOrDefault(p => p.Text("Options.Family") == path.Text("Options.Family"));
-                paths.Children.Add(Text(path.Text("Options.Family"), 15)); paths.Children.Add(NetworkMetrics(path, matched));
+                var matched = after == null ? null : NetworkTuning.PathReports(after).SingleOrDefault(p => NetworkTuning.PathKey(p["Options"]!.AsObject()) == NetworkTuning.PathKey(path["Options"]!.AsObject()));
+                paths.Children.Add(Text(NetworkTuning.PathLabel(path["Options"]!.AsObject()), 15)); paths.Children.Add(NetworkMetrics(path, matched));
             }
             return paths;
         }

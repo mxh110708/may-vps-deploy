@@ -23,10 +23,10 @@ public sealed partial class WorkflowEngine
         if (NetworkTuning.Families(options).Contains("IPv6") && c.Plan.Text("Server.IPv6") == "") throw new OperationException("实例没有 IPv6 地址，不能把双栈采集降为 IPv4 通过。");
         var started = DateTimeOffset.UtcNow; var records = new List<JsonObject>();
         var fingerprint = NetworkTuning.SelectionFingerprint(store, c.Plan, c.Secrets, options, c.Request.InstanceRelativePath);
-        foreach (var family in NetworkTuning.Families(options))
+        foreach (var selected in NetworkTuning.SelectedPaths(options))
         {
-            c.Report("网络路径测量", family + " · 双向采集，共用本次总预算。");
-            records.Add(await CaptureNetworkPath(c, NetworkTuning.FamilyOptions(options, family), id));
+            c.Report("网络路径测量", NetworkTuning.PathLabel(selected) + " · 双向采集，共用本次总预算。");
+            records.Add(await CaptureNetworkPath(c, selected, id));
         }
         if (fingerprint != NetworkTuning.SelectionFingerprint(store, c.Plan, c.Secrets, options, c.Request.InstanceRelativePath)) throw new OperationException("采集期间所选路径变化，请重新测量。");
         var report = records[0];

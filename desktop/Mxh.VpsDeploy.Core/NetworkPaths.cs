@@ -24,7 +24,7 @@ public static partial class NetworkTuning
     };
     public static string MeasurementSummary(JsonObject options) => "只读采集 VPS 状态。" + PathDescription(options) + "\n关键方向：" + DirectionLabel(options)
         + (Topology(options) == "Relay" ? "\n落地归档：" + options.Text("PeerInstance") : "")
-        + (Topology(options) == "ForwardOnly" ? "\n本次只观察转发和本机状态，不发起公网吞吐测试，不推导 TCP 缓冲参数。" : "\n通过隔离代理测试 Cloudflare 与 Hetzner 的有限下载和重复短连接启动；独立目标不足的方向不宣称全局优化通过。不修改系统代理或对端 VPS。\n" + BudgetDescription(options) + "\n地址族：" + string.Join("、", Families(options)) + "；每条路径最长 " + DurationSeconds(options) + " 秒，另加有限 SSH 状态采集。")
+        + (Topology(options) == "ForwardOnly" ? "\n本次只观察转发和本机状态，不发起公网吞吐测试，不推导 TCP 缓冲参数。" : "\n通过隔离代理测试 Cloudflare 与 Hetzner 的有限下载和重复短连接启动；独立目标不足的方向不宣称全局优化通过。不修改系统代理或对端 VPS。\n" + BudgetDescription(options) + "\n测试组合：\n" + string.Join("\n", SelectedPaths(options).Select(PathLabel)) + "\n每条路径最长 " + DurationSeconds(options) + " 秒，另加有限 SSH 状态采集。")
         + "\n标称下载/上传：" + options.Number("BandwidthMbps") + "/" + options.Number("UploadMbps") + " Mbps（0 表示未知）；套餐类型：" + options.Text("CapacityType")
         + "。\n使用地时区：" + options.Text("TimeZoneId") + "；高峰：" + options.Number("PeakStartHour") + "–" + options.Number("PeakEndHour") + " 时。结果只代表所选路径与时段。";
     public static string PeerArchiveFingerprint(ArchiveStore store, JsonObject options)
@@ -37,6 +37,8 @@ public static partial class NetworkTuning
     public static NetworkMeasurementPath ResolvePath(ArchiveStore store, JsonObject plan, JsonObject secrets, JsonObject options, string currentInstance)
     {
         ValidateMeasurement(options);
+        if (options.Text("Family") == "Both" || EgressFamilies(options).Length > 1) throw new OperationException("请先展开所有所选连接方式与落地出站 IP，再解析单条测试路径。");
+        if (Topology(options) == "Landing" && options.Text("PeerEgress", "IPv4") == "IPv6" && !HasIpv6LandingEgress(plan)) throw new OperationException("落地未配置 IPv6 出站，不能把所选 IPv6 测试替换成 IPv4。");
         var node = ClientProfiles.Nodes(plan, secrets, true).SingleOrDefault(n => n.Role == options.Text("Protocol") && n.Family == options.Text("Family") && !n.IsBackup && n.EgressFamily == (Topology(options) == "Landing" ? options.Text("PeerEgress", "IPv4") : "IPv4"))
             ?? throw new OperationException("所选协议或地址族未启用，请重新读取实例。");
         var source = SourceFingerprint(plan, secrets);
@@ -51,6 +53,7 @@ public static partial class NetworkTuning
         var peerSecrets = File.Exists(secretFile) ? store.ReadSecret(secretFile) : ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-secrets.private.json"));
         try
         {
+            if (options.Text("PeerEgress", "IPv4") == "IPv6" && !HasIpv6LandingEgress(peer)) throw new OperationException("所选落地未配置 IPv6 出站，不能把所选 IPv6 测试替换成 IPv4。");
             var exit = ClientProfiles.Nodes(peer, peerSecrets, true).SingleOrDefault(n => n.Role == "ShadowsocksLanding" && n.Family == options.Text("PeerFamily", "IPv4") && n.EgressFamily == options.Text("PeerEgress", "IPv4"))
                 ?? throw new OperationException("所选落地协议、连接地址族或出口地址族未启用。");
             var fingerprint = ArchiveStore.Fingerprint(new JsonObject { ["Entry"] = source, ["Landing"] = SourceFingerprint(peer, peerSecrets), ["Peer"] = relative });

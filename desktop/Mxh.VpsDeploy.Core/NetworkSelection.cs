@@ -7,6 +7,13 @@ public static partial class NetworkTuning
     public const int MaximumFlowBudgetMiB = 20 * 1024;
     public const double MinimumTransferSeconds = 1;
     public static string[] Families(JsonObject options) => options.Text("Family") == "Both" ? ["IPv4", "IPv6"] : [options.Text("Family", "IPv4")];
+    public static bool HasIpv6LandingEgress(JsonObject plan) => plan.Flag("Shadowsocks.SecondaryIpv6Enabled") && plan.Text("Shadowsocks.SecondaryIpv6Address") != "";
+    public static string[] EgressFamilies(JsonObject options) => Topology(options) is "Landing" or "Relay"
+        ? options.Text("PeerEgress", "IPv4") == "Both" ? ["IPv4", "IPv6"] : [options.Text("PeerEgress", "IPv4")]
+        : ["IPv4"];
+    public static int SelectedPathCount(JsonObject options) => Families(options).Length * EgressFamilies(options).Length;
+    // Keep the persisted field for old reports; it now partitions every selected path.
+    private static int BudgetPartitions(JsonObject options) => Math.Max(SelectedPathCount(options), options.Number("BudgetFamilyCount", 1));
     public static int FlowBudgetMiB(JsonObject options) => options.Text("TestSize") switch
     {
         "Light" => 80, "Full" => 640, "Quick" => 128, "Standard" => 1024,
@@ -14,19 +21,41 @@ public static partial class NetworkTuning
         "Custom" => options.Number("TrafficBudgetMiB"), _ => throw new OperationException("测试流量档位无效。")
     };
     public static string BudgetDescription(JsonObject options) => "本次调优总预算 " + FlowBudgetMiB(options) + " MiB（最多 20 GiB），所有选中地址族、双向及应用前后复测共用。"
-        + "约 20% 预留给探测和协议开销，其余前后各半；本轮每条路径有效载荷最多 " + PayloadBudget(options) / 1048576 + " MiB。"
+        + "共 " + SelectedPathCount(options) + " 条路径；约 20% 预留给探测和协议开销，其余前后各半；本轮每条路径有效载荷最多 " + PayloadBudget(options) / 1048576 + " MiB。"
         + "不自动加量或重试；达到时间或流量上限即停止。实际计费还受重传、协议及服务商统计口径影响，预留不是计费硬限额。";
     public static JsonObject FamilyOptions(JsonObject options, string family)
     {
         if (!Families(options).Contains(family)) throw new OperationException("地址族不在本轮选择范围内。");
-        var result = options.DeepClone().AsObject(); result["Family"] = family; result["BudgetFamilyCount"] = Families(options).Length;
+        var result = options.DeepClone().AsObject(); result["Family"] = family; result["BudgetFamilyCount"] = SelectedPathCount(options);
         return result;
     }
+    public static JsonObject[] SelectedPaths(JsonObject options) => Families(options).SelectMany(family => EgressFamilies(options).Select(egress =>
+    {
+        var result = FamilyOptions(options, family);
+        if (Topology(options) is "Landing" or "Relay") result["PeerEgress"] = egress;
+        return result;
+    })).ToArray();
+    public static string PathKey(JsonObject options) => Topology(options) + ":" + options.Text("Protocol") + ":" + options.Text("Family")
+        + (Topology(options) == "Relay" ? ":" + options.Text("PeerFamily", "IPv4") : "")
+        + (Topology(options) is "Landing" or "Relay" ? ":" + options.Text("PeerEgress", "IPv4") : "");
+    public static string PathLabel(JsonObject options) => "连接 VPS：" + options.Text("Family", "IPv4").Replace("Both", "IPv4 和 IPv6")
+        + (Topology(options) == "Relay" ? " · 入口→落地：" + options.Text("PeerFamily", "IPv4") : "")
+        + (Topology(options) is "Landing" or "Relay" ? " · 落地→网站：" + options.Text("PeerEgress", "IPv4").Replace("Both", "IPv4 和 IPv6") : "");
     public static JsonObject[] PathReports(JsonObject report) => report["Paths"] is JsonArray paths ? paths.OfType<JsonObject>().ToArray() : [report];
+    private static bool CompleteSelection(JsonObject report)
+    {
+        var expected = SelectedPaths(report["Options"]!.AsObject()); var actual = PathReports(report);
+        if (actual.Length != expected.Length || actual.Select(p => PathKey(p["Options"]!.AsObject())).Distinct().Count() != expected.Length) return false;
+        return expected.All(options => actual.Any(path => ArchiveStore.Fingerprint(path["Options"]!.AsObject()) == ArchiveStore.Fingerprint(options)));
+    }
     public static string SelectionFingerprint(ArchiveStore store, JsonObject plan, JsonObject secrets, JsonObject options, string instance)
     {
         var parts = new JsonObject();
-        foreach (var family in Families(options)) { using var path = ResolvePath(store, plan, secrets, FamilyOptions(options, family), instance); parts[family] = path.Fingerprint; }
+        foreach (var selected in SelectedPaths(options))
+        {
+            using var path = ResolvePath(store, plan, secrets, selected, instance);
+            parts[EgressFamilies(options).Length == 1 ? selected.Text("Family") : PathKey(selected)] = path.Fingerprint;
+        }
         return parts.Count == 1 ? parts.First().Value!.ToString() : ArchiveStore.Fingerprint(parts);
     }
     private static JsonObject DirectionReport(JsonObject report, string direction)
@@ -49,9 +78,9 @@ public static partial class NetworkTuning
     {
         if (report["Paths"] is JsonArray)
         {
-            var paths = PathReports(report); var expected = Families(report["Options"]!.AsObject());
+            var paths = PathReports(report);
             var analyses = paths.Select(r => Analyze(r, (history ?? []).SelectMany(PathReports))).ToArray();
-            var valid = paths.Length == expected.Length && paths.Select(p => p.Text("Options.Family")).Order().SequenceEqual(expected.Order()) && paths.All(GuardReady)
+            var valid = CompleteSelection(report) && paths.All(GuardReady)
                 && paths.All(p => p.Text("ServerAfter.BootId") == report.Text("ServerAfter.BootId") && p.Text("ServerAfter.Kernel") == report.Text("ServerAfter.Kernel") && p.Long("ServerAfter.MemoryKiB") == report.Long("ServerAfter.MemoryKiB") && ArchiveStore.Fingerprint(p.At("ServerAfter.Sysctl")!) == ArchiveStore.Fingerprint(report.At("ServerAfter.Sysctl")!) && QueueFingerprint(p["ServerAfter"]!.AsObject()) == QueueFingerprint(report["ServerAfter"]!.AsObject()))
                 && DateTimeOffset.TryParse(report.Text("StartedAt"), out var start) && DateTimeOffset.TryParse(report.Text("At"), out var end) && InPeak(start, report["Options"]!.AsObject()) == InPeak(end, report["Options"]!.AsObject());
             var candidates = analyses.Where(a => a.Text("Profile") == "EntryMeasured").ToArray();
@@ -59,7 +88,7 @@ public static partial class NetworkTuning
                 ["BufferTargetBytes"] = valid && candidates.Length > 0 ? candidates.Max(a => a.Long("BufferTargetBytes")) : 0,
                 ["BufferCapBytes"] = candidates.Length > 0 ? candidates.Min(a => a.Long("BufferCapBytes")) : 0,
                 ["Paths"] = new JsonArray(analyses.Select(a => a.DeepClone()).ToArray()),
-                ["Notes"] = new JsonArray("IPv4 与 IPv6 分别测量、分别验收，不合并重传率或速率。共用 TCP 参数只应用一次，所有选中路径复测通过后才保留。",
+                ["Notes"] = new JsonArray("连接 VPS 的 IP 与落地访问网站的 IP 分别展开测量，不合并重传率或速率。共用 TCP 参数只应用一次，所有选中路径复测通过后才保留。",
                     valid ? "各路径均具备双向保护证据；收益仍需前后复测确认。" : "至少一条路径未完成或双向证据不足；未取得的数据不按通过处理，仅保留基础建议。") };
         }
         var options = report["Options"]!.AsObject();
@@ -115,14 +144,14 @@ public static partial class NetworkTuning
         if (before["Paths"] is JsonArray || after["Paths"] is JsonArray)
         {
             var old = PathReports(before); var current = PathReports(after);
-            var expected = Families(before["Options"]!.AsObject());
-            if (before["Paths"] is not JsonArray || after["Paths"] is not JsonArray || old.Length != expected.Length || current.Length != old.Length
-                || before.Text("PathFingerprint") != after.Text("PathFingerprint") || !old.Select(p => p.Text("Options.Family")).Order().SequenceEqual(expected.Order()) || !current.Select(p => p.Text("Options.Family")).Order().SequenceEqual(expected.Order()))
-                return SelectionDecision([], "Inconclusive", "AddressFamiliesChanged", "地址族或测试路径不一致，不能验收共享参数。");
+            if (before["Paths"] is not JsonArray || after["Paths"] is not JsonArray || current.Length != old.Length
+                || before.Text("PathFingerprint") != after.Text("PathFingerprint") || !CompleteSelection(before) || !CompleteSelection(after)
+                || ArchiveStore.Fingerprint(before["Options"]!.AsObject()) != ArchiveStore.Fingerprint(after["Options"]!.AsObject()))
+                return SelectionDecision([], "Inconclusive", "AddressFamiliesChanged", "连接方式、落地出站 IP 或测试路径不一致，不能验收共享参数。");
             if (new[] { before, after }.Any(r => !DateTimeOffset.TryParse(r.Text("StartedAt"), out var start) || !DateTimeOffset.TryParse(r.Text("At"), out var end) || start > end || InPeak(start, r["Options"]!.AsObject()) != InPeak(end, r["Options"]!.AsObject())))
-                return SelectionDecision([], "Inconclusive", "MixedTimeWindow", "整轮双栈采集跨越高峰边界，不能把不同时间窗口合并验收。");
-            var comparisons = old.Select(p => ComparePath(p, current.Single(n => n.Text("Options.Family") == p.Text("Options.Family")), true)).ToArray();
-            return CombineDecisions(comparisons, "双栈分别验收；任一路径退化或未测完整均恢复共享参数。", "Paths");
+                return SelectionDecision([], "Inconclusive", "MixedTimeWindow", "整轮多路径采集跨越高峰边界，不能把不同时间窗口合并验收。");
+            var comparisons = old.Select(p => ComparePath(p, current.Single(n => PathKey(n["Options"]!.AsObject()) == PathKey(p["Options"]!.AsObject())), true)).ToArray();
+            return CombineDecisions(comparisons, "所有连接与落地出站 IP 组合分别验收；任一路径退化或未测完整均恢复共享参数。", "Paths");
         }
         return ComparePath(before, after, false);
     }

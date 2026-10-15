@@ -152,9 +152,11 @@ try {
     Set-Text '自定义总预算（MiB，64–20480）' '20480'; Choose '调优总流量预算' 'Maximum'
     Choose 'TCP 角色与测试路径' 'Relay'; Choose '优化偏好' 'Upload'
     Check ((Control '中转后的已有落地（仅读取归档）').value -eq 'Example/Native-Landing/MXH-VPS-Deploy') 'relay selector discovers managed landing and preserves source instance'
-    Choose '入口 → 落地连接地址族' 'IPv6'; Choose '落地访问目标的出口' 'IPv6'
+    Choose '入口 → 落地连接地址族' 'IPv6'; Choose '落地访问网站使用的 IP' 'IPv6'
+    Choose '落地访问网站使用的 IP' 'Both'
+    Check (((Read-Ui).elements.name -join ' ') -match '共 4 条路径') 'both exit families refresh the shared budget without rebuilding the page'
     Click '采集并生成建议'; $ui=Wait-Ui {param($ui) [bool]$ui.dialog}
-    Check (($ui.elements.name -join ' ') -match '上传优先' -and ($ui.elements.name -join ' ') -match 'Native-Landing' -and ($ui.elements.name -join ' ') -match '20 GiB' -and ($ui.elements.name -join ' ') -match 'IPv4、IPv6') 'normal network review includes priority relay dual stack and shared flow budget'
+    Check (($ui.elements.name -join ' ') -match '上传优先' -and ($ui.elements.name -join ' ') -match 'Native-Landing' -and ($ui.elements.name -join ' ') -match '20 GiB' -and ($ui.elements.name -join ' ') -match '连接 VPS：IPv4' -and ($ui.elements.name -join ' ') -match '连接 VPS：IPv6' -and ($ui.elements.name -join ' ') -match '落地→网站：IPv4' -and ($ui.elements.name -join ' ') -match '落地→网站：IPv6') 'normal network review includes entry connection and both exit families with a shared flow budget'
     Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}
     Choose 'TCP 角色与测试路径' 'Entry'
     Check (@((Read-Ui).elements|Where-Object name -eq '中转后的已有落地（仅读取归档）').Count -eq 0) 'single-hop path hides unused relay fields'
@@ -163,7 +165,13 @@ try {
     Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}
     Choose '目标实例' 'Example/Native-Landing/MXH-VPS-Deploy'
     Check ((Control 'TCP 角色与测试路径').value -eq 'Landing' -and @((Read-Ui).elements|Where-Object name -eq '审阅并应用建议').Count -eq 0) 'landing offers diagnostics and only basic fq BBR tuning'
-    Choose '落地访问目标的出口' 'IPv6'; Send 'ui.capture' @{name='native-network-path.png'} | Out-Null
+    Check ((Control '落地访问网站使用的 IP').value -eq 'Both') 'dual-exit landing defaults to testing both exits'
+    Choose '入口连接地址族' 'Both'; Choose '落地访问网站使用的 IP' 'IPv6'; Choose '落地访问网站使用的 IP' 'Both'
+    Check (((Read-Ui).elements.name -join ' ') -match '共 4 条路径') 'landing distinguishes connection and exit families and divides the budget across four paths'
+    Click '采集并生成建议'; $ui=Wait-Ui {param($ui) [bool]$ui.dialog}
+    Check (($ui.elements.name -join ' ') -match '落地→网站：IPv4' -and ($ui.elements.name -join ' ') -match '落地→网站：IPv6') 'landing review includes both deployed exits'
+    Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}
+    Send 'ui.capture' @{name='native-network-path.png'} | Out-Null
     Send 'suite.run' | Out-Null
     $until=[DateTimeOffset]::UtcNow.AddSeconds(75)
     do { $suite=Send 'suite.status'; if($suite.state -ne 'running'){break};Start-Sleep -Milliseconds 200 } while([DateTimeOffset]::UtcNow -lt $until)

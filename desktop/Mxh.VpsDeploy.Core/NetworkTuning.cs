@@ -32,15 +32,15 @@ public static partial class NetworkTuning
         ["Protocol"] = !IsEntry(plan) ? "ShadowsocksLanding" : plan.Text("ActiveEntry", plan.Text("Role")) is "AnyTlsEntry" ? "AnyTlsEntry" : "RealityEntry",
         ["Topology"] = plan.Text("NetworkPreferences.Topology", IsEntry(plan) ? "Entry" : "Landing"),
         ["PriorityDirection"] = plan.Text("NetworkPreferences.EvidencePolicy") == EvidencePolicy ? plan.Text("NetworkPreferences.PriorityDirection", "Balanced") : "Balanced",
-        ["PeerInstance"] = plan.Text("NetworkPreferences.PeerInstance"), ["PeerFamily"] = plan.Text("NetworkPreferences.PeerFamily", "IPv4"), ["PeerEgress"] = plan.Text("NetworkPreferences.PeerEgress", "IPv4"),
+        ["PeerInstance"] = plan.Text("NetworkPreferences.PeerInstance"), ["PeerFamily"] = plan.Text("NetworkPreferences.PeerFamily", "IPv4"), ["PeerEgress"] = plan.Text("NetworkPreferences.PeerEgress", !IsEntry(plan) && HasIpv6LandingEgress(plan) ? "Both" : "IPv4"),
         ["Family"] = plan.Text("NetworkPreferences.Family", "IPv4"), ["TestSize"] = plan.Text("NetworkPreferences.TestSize", "Standard"), ["TrafficBudgetMiB"] = plan.Number("NetworkPreferences.TrafficBudgetMiB", 1024),
         ["TimeZoneId"] = plan.Text("NetworkPreferences.TimeZoneId", TimeZoneInfo.Local.Id),
         ["PeakStartHour"] = plan.Number("NetworkPreferences.PeakStartHour", 20),
         ["PeakEndHour"] = plan.Number("NetworkPreferences.PeakEndHour", 23)
     };
     // Reserve 20% for small probes/protocol overhead and half of the remaining payload for the retest.
-    public static long PayloadBudget(JsonObject options) => FlowBudgetMiB(options) * 1048576L * 4 / 10 / (options.Text("Family") == "Both" ? 2 : options.Number("BudgetFamilyCount", 1));
-    public static int DurationSeconds(JsonObject options) => (options.Text("TestSize") == "Light" ? 100 : options.Text("TestSize") == "Full" ? 240 : FlowBudgetMiB(options) <= 128 ? 120 : FlowBudgetMiB(options) <= 1024 ? 360 : FlowBudgetMiB(options) <= 4096 ? 900 : 1800) / (options.Text("Family") == "Both" ? 2 : options.Number("BudgetFamilyCount", 1));
+    public static long PayloadBudget(JsonObject options) => FlowBudgetMiB(options) * 1048576L * 4 / 10 / BudgetPartitions(options);
+    public static int DurationSeconds(JsonObject options) => (options.Text("TestSize") == "Light" ? 100 : options.Text("TestSize") == "Full" ? 240 : FlowBudgetMiB(options) <= 128 ? 120 : FlowBudgetMiB(options) <= 1024 ? 360 : FlowBudgetMiB(options) <= 4096 ? 900 : 1800) / BudgetPartitions(options);
     public static void ValidateMeasurement(JsonObject options)
     {
         var allowed = new[] { "BandwidthMbps", "UploadMbps", "CapacityType", "Protocol", "Family", "TestSize", "TrafficBudgetMiB", "BudgetFamilyCount", "TimeZoneId", "PeakStartHour", "PeakEndHour", "Scheduled", "Topology", "PriorityDirection", "PeerInstance", "PeerFamily", "PeerEgress" };
@@ -50,13 +50,14 @@ public static partial class NetworkTuning
         if (options.Number("BandwidthMbps") is < 0 or > 100000 || options.Number("UploadMbps") is < 0 or > 100000) throw new OperationException("标称带宽应为 1–100000 Mbps；未知可留空。");
         if (options.Text("CapacityType") is not ("Unknown" or "Shared" or "Dedicated" or "Burst") || options.Text("Protocol") is not ("RealityEntry" or "AnyTlsEntry" or "ShadowsocksLanding") || options.Text("Family") is not ("IPv4" or "IPv6" or "Both") || options.Text("TestSize") is not ("Light" or "Full" or "Quick" or "Standard" or "Deep" or "Extended" or "Maximum" or "Custom")) throw new OperationException("请选择有效的测速用途、协议和测试档位。");
         if (options.Text("TestSize") == "Custom" && (!int.TryParse(options.Text("TrafficBudgetMiB"), out var total) || total is < 64 or > MaximumFlowBudgetMiB)) throw new OperationException("自定义总预算应为 64–20480 MiB（最多 20 GiB，覆盖双栈、双向和前后复测）。");
-        if (options.ContainsKey("BudgetFamilyCount") && options.Text("BudgetFamilyCount") is not ("1" or "2")) throw new OperationException("路径预算分配无效。");
+        if (options.ContainsKey("BudgetFamilyCount") && options.Text("BudgetFamilyCount") is not ("1" or "2" or "4")) throw new OperationException("路径预算分配无效。");
         if (Topology(options) is not ("Entry" or "Relay" or "Landing" or "ForwardOnly") || Priority(options) is not ("Download" or "Upload" or "Balanced")) throw new OperationException("请选择有效的 TCP 角色和优化偏好。");
         if (Topology(options) == "Landing" && options.Text("Protocol") != "ShadowsocksLanding" || Topology(options) is "Entry" or "Relay" && options.Text("Protocol") == "ShadowsocksLanding") throw new OperationException("测试路径与协议用途不一致。");
+        if (Topology(options) is "Landing" or "Relay" && options.Text("PeerEgress", "IPv4") is not ("IPv4" or "IPv6" or "Both")) throw new OperationException("请选择落地访问网站使用的 IP：IPv4、IPv6 或两者都测。");
         if (Topology(options) == "Relay")
         {
             var names = options.Text("PeerInstance").Split('/');
-            if (names.Length != 3 || names[2] != "MXH-VPS-Deploy" || AppPaths.Segment(names[0]) != names[0] || AppPaths.Segment(names[1]) != names[1] || options.Text("PeerFamily", "IPv4") is not ("IPv4" or "IPv6") || options.Text("PeerEgress", "IPv4") is not ("IPv4" or "IPv6")) throw new OperationException("请选择已纳管的落地及有效地址族。");
+            if (names.Length != 3 || names[2] != "MXH-VPS-Deploy" || AppPaths.Segment(names[0]) != names[0] || AppPaths.Segment(names[1]) != names[1] || options.Text("PeerFamily", "IPv4") is not ("IPv4" or "IPv6")) throw new OperationException("请选择已纳管的落地及有效连接地址族。");
         }
         if (options.Text("PeakStartHour").Trim() == "" || options.Text("PeakEndHour").Trim() == "" || options.Number("PeakStartHour") is < 0 or > 23 || options.Number("PeakEndHour") is < 0 or > 24 || options.Number("PeakStartHour") == options.Number("PeakEndHour")) throw new OperationException("高峰开始应在 0–23 时，结束应在 0–24 时，且不能相同；24 表示次日零点。");
         _ = Zone(options.Text("TimeZoneId"));
