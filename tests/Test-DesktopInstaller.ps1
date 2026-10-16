@@ -29,6 +29,17 @@ try{
  $installArgs=@('/SP-','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NOICONS',('/DIR='+$app))
  Assert-Desktop ((Invoke-DesktopFixtureProcess $first.Installer $installArgs) -eq 0) 'real installer installs to isolated directory with spaces and Chinese'
  Assert-Desktop (Test-Path -LiteralPath (Join-Path $app 'MXH-VPS-Deploy.exe')) 'native desktop EXE installed'
+ $kernelCatalog=Get-Content -Raw -LiteralPath (Join-Path $app 'config/kernel-catalog.json')|ConvertFrom-Json -AsHashtable
+ $kernelFile=Join-Path $app 'assets/kernel/kernel.deb'
+ Assert-Desktop ((Get-Item -LiteralPath $kernelFile).Length -eq $kernelCatalog.Prebuilt.Bytes -and (Get-FileHash -LiteralPath $kernelFile).Hash.ToLowerInvariant() -eq $kernelCatalog.Prebuilt.Sha256) 'installer preserves the exact fixed precompiled kernel'
+ Assert-Desktop (-not(Test-Path -LiteralPath (Join-Path $app 'assets/remote/kernel-latest.sh'))) 'obsolete floating kernel query is absent from the installed application'
+ if($first.KernelSourceArchive){
+  $kernelManifest=Get-Content -Raw -LiteralPath (Join-Path $app 'assets/kernel/build-manifest.json')|ConvertFrom-Json -AsHashtable
+  $sourceDigest=(Get-FileHash -LiteralPath $first.KernelSourceArchive).Hash.ToLowerInvariant()
+  $sourceChecksum=$sourceDigest+'  '+[IO.Path]::GetFileName($first.KernelSourceArchive)
+  Assert-Desktop ($sourceDigest -eq $kernelManifest.SourceArchiveSha256 -and @(Get-Content -LiteralPath $first.Checksums).Contains($sourceChecksum)) 'matching kernel source is an independently checksummed release attachment'
+  Assert-Desktop (-not(Test-Path -LiteralPath (Join-Path $app ([IO.Path]::GetFileName($first.KernelSourceArchive))))) 'full kernel source is not installed into every client application'
+ }
  Assert-Desktop ((Get-VpsApplicationDistribution $app) -eq 'Installed') 'installer mode recognized'
  $exeBytes=[IO.File]::ReadAllBytes((Join-Path $app 'MXH-VPS-Deploy.exe'));$pe=[BitConverter]::ToInt32($exeBytes,0x3c)
  Assert-Desktop ([BitConverter]::ToUInt16($exeBytes,$pe+4) -eq 0x8664 -and [BitConverter]::ToUInt16($exeBytes,$pe+24+68) -eq 2) 'x64 Windows GUI EXE, no console subsystem'

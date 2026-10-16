@@ -20,13 +20,16 @@ public sealed class RemoteAssets(AppPaths paths)
             var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
             text.Append("export VPS_PARAM_").Append(name).Append("=\"$(printf '%s' '").Append(encoded).Append("' | base64 -d)\"\n");
         }
-        void Program(string variable, string source)
+        void Program(string variable, params string[] sources)
         {
-            var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(File.ReadAllText(paths.Resolve(source)).Replace("\r\n", "\n")));
+            var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(string.Join("\n", sources.Select(source => File.ReadAllText(paths.Resolve(source)).Replace("\r\n", "\n")))));
             text.Append("export ").Append(variable).Append("=\"$(printf '%s' '").Append(encoded).Append("' | base64 -d)\"\n");
         }
         if (asset == "network-audit.sh" || asset.StartsWith("kernel-", StringComparison.Ordinal)) Program("VPS_BBR_PROGRAM", "scripts/bbr-runtime.py");
-        if (asset.StartsWith("kernel-", StringComparison.Ordinal)) Program("VPS_KERNEL_PROGRAM", "scripts/kernel-engine.py");
+        if (asset.StartsWith("kernel-", StringComparison.Ordinal))
+        {
+            Program("VPS_KERNEL_PROGRAM", "scripts/kernel-runtime.py", "scripts/kernel-engine.py");
+        }
         if (asset == "component-release-latest.sh") Program("VPS_COMPONENT_RELEASE_PROGRAM", "scripts/component-releases.py");
         if (asset is "network-preflight.sh" or "network-apply.sh" || asset == "protocol-migration-arm-rollback.sh" && parameters.TryGetValue("NETWORK_SNAPSHOT", out var network) && network == "true") text.Append(Read("network-tools.sh")).Append('\n');
         if (asset is "nftables-apply.sh" or "component-firewall-add.sh" or "firewall-preflight.sh" or "protocol-migration-arm-rollback.sh") text.Append(Read("firewall-tools.sh")).Append('\n');

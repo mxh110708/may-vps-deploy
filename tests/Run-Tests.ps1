@@ -1749,6 +1749,8 @@ if($pythonCommandForClient){
     if($bash){ & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_review_repairs.py') --bash $bash }else{ & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_review_repairs.py') }
     if($LASTEXITCODE -ne 0){throw 'Cross-feature review repair regressions failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_bbr_kernel.py')
+    if ($LASTEXITCODE -ne 0) { throw 'BBR fixed package contract failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_kernel_prebuild.py')
     if ($LASTEXITCODE -ne 0) { throw 'BBR kernel contracts failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_component_releases.py')
     if($LASTEXITCODE -ne 0){throw 'Official component release contracts failed.'}

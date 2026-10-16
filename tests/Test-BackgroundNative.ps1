@@ -172,6 +172,21 @@ try {
     Check (($ui.elements.name -join ' ') -match '落地→网站：IPv4' -and ($ui.elements.name -join ' ') -match '落地→网站：IPv6') 'landing review includes both deployed exits'
     Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}
     Send 'ui.capture' @{name='native-network-path.png'} | Out-Null
+    $kernelStateFile=Join-Path $canonical 'deployment-state.json'
+    $kernelState=Get-Content -Raw -LiteralPath $kernelStateFile | ConvertFrom-Json -AsHashtable
+    $kernelState.LastKernelCheck=@{Compatible=$true;Kernel='6.12.1-amd64';BbrVersion='VersionUnverified';Reasons=@();At=[DateTimeOffset]::UtcNow.ToString('O')}
+    $kernelState | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $kernelStateFile -Encoding utf8
+    Click 'instances'; Click 'network'; Choose '目标实例' 'Example/Managed-Demo/MXH-VPS-Deploy'
+    Check ((Control 'BBR 版本').value -eq 'Current') 'kernel replacement remains opt-in'
+    Choose 'BBR 版本' 'v3'; $ui=Read-Ui
+    Check (@($ui.elements | Where-Object name -eq 'BBR v3 内核来源').Count -eq 0 -and ($ui.elements.name -join ' ') -match '固定预编译' -and ($ui.elements.name -join ' ') -notmatch '最新提交|VPS 源码构建') 'BBR v3 exposes only the embedded precompiled package'
+    Click '审阅安装 BBR v3 内核'
+    $ui=Wait-Ui {param($ui) [bool]$ui.dialog}; $kernelCatalogText=Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'config/kernel-catalog.json'); $kernelCatalog=$kernelCatalogText | ConvertFrom-Json
+    $kernelSourceDate=([System.Text.Json.JsonDocument]::Parse($kernelCatalogText)).RootElement.GetProperty('SourceDate').GetString()
+    Check (($ui.elements.name -join ' ').Contains($kernelCatalog.Commit) -and ($ui.elements.name -join ' ').Contains($kernelCatalog.Sha256) -and ($ui.elements.name -join ' ').Contains($kernelSourceDate) -and ($ui.elements.name -join ' ').Contains($kernelCatalog.BaseKernel) -and ($ui.elements.name -join ' ') -match '非 root|不等于 LTS') 'kernel review binds full official commit, date, base version and source digest with build boundaries'
+    Check (($ui.elements.name -join ' ').Contains($kernelCatalog.Prebuilt.Sha256) -and ($ui.elements.name -join ' ') -match '应用内置预编译包' -and ($ui.elements.name -join ' ') -match '不安装编译依赖') 'native review shows embedded package digest and no VPS compilation'
+    Send 'ui.capture' @{name='native-google-kernel-review.png'} | Out-Null
+    Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}; Choose 'BBR 版本' 'Current'
     Send 'suite.run' | Out-Null
     $until=[DateTimeOffset]::UtcNow.AddSeconds(75)
     do { $suite=Send 'suite.status'; if($suite.state -ne 'running'){break};Start-Sleep -Milliseconds 200 } while([DateTimeOffset]::UtcNow -lt $until)

@@ -4,6 +4,20 @@ namespace Mxh.VpsDeploy.Core;
 
 public static class SafeFailures
 {
+    public static OperationException? Kernel(string code, bool needsRecovery = false)
+    {
+        var detail = code switch
+        {
+            "KernelPrebuiltRejected" => "内置内核包来源、大小或 SHA256 校验失败，已停止安装。",
+            "KernelSourceRejected" => "内核来源不是 Google 官方 BBR v3 源码仓库，已停止操作。",
+            "KernelSourcePrerelease" => "内置包的源码基础版本不符合稳定版本要求。",
+            "KernelSourceNotV3" => "官方源码材料未确认 BBR v3，已停止操作。",
+            "KernelMetadataRejected" => "Google v3 提交、源码树或材料摘要不符合受管要求，已停止操作。",
+            "KernelOperationRefused" => "内核步骤未通过安全检查；请核对内核兼容性与事务状态。",
+            _ => ""
+        };
+        return detail == "" ? null : new(detail, needsRecovery, code, "查看内核与网络配置中的检查结果；保留归档，核对固定包、源码身份与事务状态。");
+    }
     // Unknown exception text and remote output can contain credentials.
     public static OperationException Describe(Exception error, bool needsRecovery = false)
     {
@@ -53,24 +67,8 @@ public static class SafeFailures
         catch (FormatException) { }
         try
         {
-            var code = RemoteAssets.Marker(result.Output, "KERNEL_FAILURE_CODE", false);
-            var detail = code switch
-            {
-                "KernelVerifierMissing" => "远端缺少可用的内核签名验证工具，需要 gpgv 或支持明文签名的 sqv。",
-                "KernelSignatureRejected" => "官方内核元数据的签名未通过验证，已停止操作。",
-                "KernelSigningKeyMismatch" => "内核元数据签名与应用固定的官方公钥指纹不一致，已停止操作。",
-                "KernelIndexHashMismatch" => "内核包索引与已验证签名中的摘要不一致，已停止操作。",
-                "KernelRepositoryForbidden" => "官方内核仓库拒绝了请求（HTTP 403）。",
-                "KernelRepositoryRateLimited" => "官方内核仓库限制了请求频率（HTTP 429）。",
-                "KernelRepositoryHttpFailed" => "官方内核仓库返回 HTTP 错误，未取得有效元数据。",
-                "KernelRepositoryDnsFailed" => "VPS 无法解析官方内核仓库域名。",
-                "KernelRepositoryTimeout" => "VPS 查询官方内核仓库超时。",
-                "KernelRepositoryUnavailable" => "VPS 无法连接官方内核仓库。",
-                "KernelMetadataRejected" => "官方内核元数据不符合受信任的兼容 LTS 要求，已停止操作。",
-                "KernelOperationRefused" => "内核步骤未通过安全检查；请核对内核兼容性与事务状态。",
-                _ => ""
-            };
-            if (detail != "") return new(detail, code: code, nextAction: code.StartsWith("KernelRepository", StringComparison.Ordinal) ? "核对 VPS 的 DNS 和仓库连接后重新检查版本；安装时仍需重新审阅。" : "查看内核与网络配置中的检查结果；保留归档，核对所列依赖、签名或事务状态。");
+            var error = Kernel(RemoteAssets.Marker(result.Output, "KERNEL_FAILURE_CODE", false));
+            if (error != null) return error;
         }
         catch (FormatException) { }
         try

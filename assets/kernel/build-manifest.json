@@ -1,0 +1,23 @@
+{
+  "Architecture": "amd64",
+  "BuildFiles": {
+    "scripts/build-kernel-prebuilt.py": "9363ef8e1aa6b9a00be404aad632f3d041c6cf1d0916225a801dd33ce30b92bc",
+    "scripts/kernel-build.py": "1944a49cec4fca2e6e1cec5c7ae01dc2d24c23d822f6bbec54ccae731fbec925",
+    "scripts/kernel-source.py": "7c1cd755d856cddc17f95c546bb0cd44a21878af25e5aa3dd3a150dda6853848"
+  },
+  "BuildProfile": "debian-generic-amd64-v1",
+  "ConfigSha256": "7be41639e9173fca20b6eae3cf352cdf49e91fe36a403e13fe3d914a9d23bf30",
+  "GitFsckPassed": true,
+  "InputConfigSha256": "7264f6c17e856bf18ec53085a01be10d8e466f32a8dcb13c08c4e705d3b2c35b",
+  "Kernel": "6.13.7-mxh-bbr3-90210de4b779",
+  "Package": "linux-image-6.13.7-mxh-bbr3-90210de4b779",
+  "PackageBytes": 84997472,
+  "PackageSha256": "6fe5a30b436fb95535ab5b5340624fe09ce4f9065c0f2700b3f1024db2837338",
+  "PackageVersion": "6.13.7-1.mxh90210de4b779",
+  "SchemaVersion": 1,
+  "SourceArchiveBytes": 177740704,
+  "SourceArchiveSha256": "d4bef66811160b3524a9bebc742f8f32de3d1e1c836449434e012dfb87410373",
+  "SourceCommit": "90210de4b779d40496dee0b89081780eeddf2a60",
+  "SourceMaterialsSha256": "72dc1e9fff872483d44480a92c948b7effbc203f07b073d2356b609d0d57ea7f",
+  "SourceTree": "47661ea1052a924c1bce449eadff7e4eb7e44b02"
+}

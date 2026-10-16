@@ -64,6 +64,13 @@ internal sealed partial class BoundaryTests
                 using var canceled = new CancellationTokenSource(); canceled.Cancel();
                 try { await session.RunScriptAsync(payload, TimeSpan.FromSeconds(10), false, canceled.Token); throw new Exception("Canceled script executed."); }
                 catch (OperationCanceledException) { Check(ArchiveStore.ReadJson(statsFile).Number("exec") == stats.Number("exec"), "pre-canceled transport sent remote commands"); }
+                var artifact = Path.Combine(root, "kernel-upload.bin"); var binary = Enumerable.Range(0, 131072).Select(n => (byte)n).ToArray(); File.WriteAllBytes(artifact, binary);
+                var uploaded = await session.UploadTemporaryFileAsync(artifact, default);
+                Check(uploaded.EndsWith("/kernel.deb", StringComparison.Ordinal) && (await session.ReadFileAsync(uploaded, default)).SequenceEqual(binary), "binary SFTP upload corrupted bytes or used a command argument");
+                stats = ArchiveStore.ReadJson(statsFile); Check(stats.Number("last_mode") == 384, "binary kernel upload is not private 0600");
+                await session.RunAsync("rm -f -- '" + uploaded + "'; rmdir -- '" + uploaded[..uploaded.LastIndexOf('/')] + "'", TimeSpan.FromSeconds(10), default);
+                try { await session.UploadTemporaryFileAsync(artifact, canceled.Token); throw new Exception("Canceled binary upload started."); }
+                catch (OperationCanceledException) { Check(ArchiveStore.ReadJson(statsFile).Number("uploads") == stats.Number("uploads"), "pre-canceled binary upload sent data"); }
             }
             try { await using var invalid = await factory.OpenAsync(endpoint with { Password = "wrong-fixture-only" }, known, default); throw new Exception("Wrong password accepted."); }
             catch (OperationException error) { Check(error.Code == "SshAuthenticationFailed", "authentication failure lost typed cause"); }

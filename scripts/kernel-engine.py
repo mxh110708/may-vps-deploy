@@ -1,49 +1,29 @@
 """Root-owned fixed kernel lifecycle. Mutation acknowledgements are never replayed."""
 import base64
 import datetime
-import email.utils
 import fcntl
-import gzip
 import hashlib
 import json
 import os
 import platform
 import re
 import shutil
-import socket
 import stat
 import subprocess
 import sys
 import time
-import tempfile
-import urllib.request
-import urllib.error
 from pathlib import Path
 
-BASE = Path('/var/lib/mxh-vps-deploy/kernel')
+BASE = Path('/var/lib/mxh-vps-deploy/kernel-google-v3')
 DEFAULT = Path('/etc/default/grub.d/99-mxh-bbr-kernel.cfg')
 UNIT = Path('/etc/systemd/system/mxh-kernel-boot-guard.service')
 TERMINAL = ('Committed', 'RolledBack', 'Aborted')
 
 
-class KernelFailure(RuntimeError):
-    def __init__(self, code):
-        self.code = code
-        super().__init__(code)
-
-
-def signature_verifier():
-    if shutil.which('gpgv'): return 'gpgv'
-    if shutil.which('sqv'):
-        try:
-            help_text = run(['sqv', '--help'], timeout=10)
-            if '--cleartext' in help_text and '--output' in help_text: return 'sqv'
-        except (OSError, RuntimeError, subprocess.TimeoutExpired): pass
-    raise KernelFailure('KernelVerifierMissing')
 
 
 def run(args, timeout=30, allow=False):
-    p = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+    p = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False, env=dict(os.environ, LC_ALL='C', DEBIAN_FRONTEND='noninteractive'))
     if p.returncode and not allow:
         raise RuntimeError('Command failed: '+args[0])
     return p.stdout.strip()
@@ -93,10 +73,11 @@ def load(identity):
     if st.st_uid != 0 or st.st_mode & 0o077:
         raise RuntimeError('Kernel state ownership refused')
     s = json.loads(p.read_text())
-    if s.get('SchemaVersion') != 1 or s.get('Id') != identity or s.get('Owner') != 'mxh-dotnet-kernel-v1':
+    if s.get('SchemaVersion') != 2 or s.get('Id') != identity or s.get('Owner') != 'mxh-google-bbr-v3':
         raise RuntimeError('Unknown kernel transaction refused')
     if s.get('Phase') not in ('Preparing', 'Installing', 'InstallFailed', 'Prepared', 'BootRequested', 'Booted', 'Committed', 'RollbackRequested', 'RolledBack', 'AutoRolledBack', 'Aborted'):
         raise RuntimeError('Unknown kernel phase refused')
+    catalog_validate(s['Catalog'], fresh=False)
     return s
 
 
@@ -137,8 +118,6 @@ def audit():
     if virt not in ('kvm', 'qemu', 'vmware', 'microsoft', 'none', ''):
         reasons.append('不支持此虚拟化或容器启动环境')
     if Path('/sys/firmware/efi').exists(): reasons.append('EFI / Secure Boot 启动布局尚未适配')
-    try: result['SignatureVerifier'] = signature_verifier()
-    except KernelFailure: reasons.append('缺少可用的签名验证工具（gpgv / 支持明文签名的 sqv）')
     for tool in ('grub-reboot', 'grub-set-default', 'grub-editenv', 'update-grub', 'dpkg-deb', 'apt-get', 'systemd-run', 'systemctl'):
         if not shutil.which(tool): reasons.append('缺少 '+tool)
     try:
@@ -154,25 +133,25 @@ def audit():
         reasons.append('当前内核或 GRUB 布局无法明确识别')
     if Path('/var/lib/dkms').exists() and any(Path('/var/lib/dkms').iterdir()): reasons.append('存在 DKMS 驱动')
     result['FreeRootBytes'] = shutil.disk_usage('/').free; result['FreeBootBytes'] = shutil.disk_usage('/boot').free
-    if result['FreeRootBytes'] < 1600000000 or result['FreeBootBytes'] < 350000000:
-        reasons.append('根目录需至少 1.6 GB，启动目录需至少 350 MB 可用空间')
-    result.update({'Compatible': not reasons, 'Reasons': reasons, 'Distribution': distro, 'Virtualization': virt})
+    root_required = 2*1024**3
+    if result['FreeRootBytes'] < root_required or result['FreeBootBytes'] < 512*1024**2:
+        reasons.append('根目录至少 2 GiB、启动目录至少 512 MiB 可用空间')
+    memory = dict((k, int(v.split()[0])) for k, v in (line.split(':', 1) for line in Path('/proc/meminfo').read_text().splitlines()))
+    result['MemoryAvailableKiB'] = memory.get('MemAvailable', 0)
+    result['MemoryTotalKiB'] = memory.get('MemTotal', 0)
+    # A nominal 512 MiB guest reports less MemTotal after kernel reservations.
+    if result['MemoryTotalKiB'] < 384*1024 or result['MemoryAvailableKiB'] < 256*1024:
+        reasons.append('预编译包安装建议至少 512 MiB 内存；系统识别总量需 384 MiB、当前可用需 256 MiB')
+    try:
+        config = Path('/boot/config-'+platform.release()); regular(config)
+        result['BuildConfigSha256'] = digest(config)
+        if config.stat().st_size > 1048576: reasons.append('当前内核配置过大')
+    except (OSError, RuntimeError): reasons.append('缺少可读取的当前内核配置，拒绝猜测启动驱动')
+    result.update({'Compatible': not reasons, 'Reasons': reasons, 'Distribution': distro, 'Virtualization': virt,
+                   'Delivery': 'Prebuilt'})
     return result
 
 
-def catalog_validate(cat, fresh=True):
-    if cat.get('SchemaVersion') != 1 or cat.get('Architecture') != 'amd64' or cat.get('BbrVersion') != 3:
-        raise RuntimeError('Unsupported kernel catalog')
-    pattern = r'[0-9]+\.[0-9]+\.[0-9]+-x64v1-xanmod[0-9]+' if cat.get('Selection') == 'Latest' else r'6\.18\.[0-9]+-x64v1-xanmod1'
-    if cat.get('Repository') != 'https://deb.xanmod.org/' or not re.fullmatch(pattern, cat.get('Kernel', '')):
-        raise RuntimeError('Unsupported kernel source')
-    if cat.get('Package') != 'linux-image-'+cat['Kernel'] or not re.fullmatch('[a-f0-9]{64}', cat.get('Sha256', '')):
-        raise RuntimeError('Invalid package identity')
-    if not re.fullmatch(r'pool/main/l/linux-upstream/[a-zA-Z0-9_.~+-]+\.deb', cat.get('Filename', '')):
-        raise RuntimeError('Invalid package source path')
-    age = datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(cat['SignedAt'].replace('Z', '+00:00'))
-    if fresh and (age.total_seconds() < -86400 or age.days > 120):
-        raise RuntimeError('Pinned catalog expired; update the application')
 
 
 def owned_boot(s):
@@ -192,93 +171,45 @@ def set_default(s, value):
         raise RuntimeError('One-shot GRUB configuration verification failed')
 
 
-def signed_index(root, fingerprint):
-    verifier = signature_verifier()
-    with tempfile.TemporaryDirectory(prefix='mxh-kernel-signature-') as directory:
-        authenticated = Path(directory)/'Release'
-        if verifier == 'sqv':
-            args = ['sqv', '--keyring', str(root/'xanmod.gpg'), '--cleartext', '--output', str(authenticated), str(root/'InRelease')]
-        else:
-            args = ['gpgv', '--status-fd', '1', '--keyring', str(root/'xanmod.gpg'), '--output', str(authenticated), str(root/'InRelease')]
-        try: out = run(args)
-        except FileNotFoundError: raise KernelFailure('KernelVerifierMissing') from None
-        except (OSError, RuntimeError, subprocess.TimeoutExpired): raise KernelFailure('KernelSignatureRejected') from None
-        valid = fingerprint in out.splitlines() if verifier == 'sqv' else '[GNUPG:] VALIDSIG '+fingerprint+' ' in out
-        if not valid: raise KernelFailure('KernelSigningKeyMismatch')
-        if not authenticated.is_file(): raise KernelFailure('KernelSignatureRejected')
-        release = authenticated.read_text()
-    pbytes = (root/'Packages.gz').read_bytes()
-    pat = r'^ '+hashlib.sha256(pbytes).hexdigest()+r'\s+'+str(len(pbytes))+r'\s+main/binary-amd64/Packages.gz$'
-    if not re.search(pat, release, re.M): raise KernelFailure('KernelIndexHashMismatch')
-    date = re.findall(r'^Date: (.+)$', release, re.M)
-    code = re.findall(r'^Codename: (.+)$', release, re.M)
-    if len(date) != 1 or len(code) != 1: raise RuntimeError('Ambiguous signed release metadata')
-    signed_at = email.utils.parsedate_to_datetime(date[0]).astimezone(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
-    with gzip.GzipFile(fileobj=__import__('io').BytesIO(pbytes)) as zipped:
-        decoded = zipped.read(20971521)
-    if len(decoded) > 20971520: raise RuntimeError('Oversized package index')
-    entries = [dict(l.split(': ', 1) for l in p.splitlines() if ': ' in l and not l.startswith(' ')) for p in decoded.decode().split('\n\n')]
-    return entries, signed_at, code[0]
-
-
 def sources_verify(s):
-    root = BASE / s['Id']; cat = s['Catalog']; catalog_validate(cat)
-    entries, signed_at, code = signed_index(root, cat['SigningFingerprint'])
-    if signed_at != cat['SignedAt'] or cat.get('Distribution', code) != code:
-        raise RuntimeError('Signed date or distribution mismatch')
-    entries = [p for p in entries if p.get('Package') == cat['Package'] and p.get('Version') == cat['PackageVersion']]
-    if len(entries) != 1: raise RuntimeError('Pinned package absent from signed index')
-    p = entries[0]
-    if p.get('SHA256') != cat['Sha256'] or p.get('Filename') != cat['Filename'] or int(p.get('Size', 0)) != cat['Bytes']:
-        raise RuntimeError('Pinned package differs from signed index')
+    root = BASE/s['Id']
+    verify_materials(s['Catalog'], {name: (root/name).read_bytes() for name in SOURCE_NAMES})
 
 
-def latest_candidate():
-    # Read-only repository query. Never adds an APT source or installs a metapackage.
-    anchor = json.loads(os.environ['VPS_PARAM_CATALOG']); catalog_validate(anchor, fresh=False)
-    key = base64.b64decode(os.environ['VPS_PARAM_KEY'], validate=True)
-    if hashlib.sha256(key).hexdigest() != anchor['SourceFiles']['xanmod.gpg']:
-        raise RuntimeError('Signing trust anchor mismatch')
-    signature_verifier()  # Refuse before network access when no verifier is available.
-    info = dict(line.split('=', 1) for line in Path('/etc/os-release').read_text().splitlines() if '=' in line)
-    distribution = {'12': 'bookworm', '13': 'trixie'}.get(info.get('VERSION_ID', '').strip('"'))
-    if info.get('ID', '').strip('"') != 'debian' or not distribution: raise RuntimeError('Latest kernel distribution unsupported')
-    with tempfile.TemporaryDirectory(prefix='mxh-kernel-query-') as directory:
-        root = Path(directory); (root/'xanmod.gpg').write_bytes(key)
-        for name, suffix in [('InRelease', 'InRelease'), ('Packages.gz', 'main/binary-amd64/Packages.gz')]:
-            url = 'https://deb.xanmod.org/dists/'+distribution+'/'+suffix
-            request = urllib.request.Request(url, headers={'User-Agent': 'Debian APT-HTTP/1.3 (2.6.1)'})
-            try:
-                with urllib.request.urlopen(request, timeout=25) as response:
-                    if not response.geturl().startswith('https://deb.xanmod.org/'): raise KernelFailure('KernelMetadataRejected')
-                    data = response.read(2097153)
-            except urllib.error.HTTPError as error:
-                raise KernelFailure('KernelRepositoryForbidden' if error.code == 403 else 'KernelRepositoryRateLimited' if error.code == 429 else 'KernelRepositoryHttpFailed') from None
-            except urllib.error.URLError as error:
-                code = 'KernelRepositoryDnsFailed' if isinstance(error.reason, socket.gaierror) else 'KernelRepositoryTimeout' if isinstance(error.reason, TimeoutError) else 'KernelRepositoryUnavailable'
-                raise KernelFailure(code) from None
-            except TimeoutError: raise KernelFailure('KernelRepositoryTimeout') from None
-            if len(data) > 2097152: raise RuntimeError('Oversized signed metadata')
-            (root/name).write_bytes(data)
-        entries, signed_at, code = signed_index(root, anchor['SigningFingerprint'])
-        if code != distribution: raise RuntimeError('Repository distribution mismatch')
-        metas = [p for p in entries if p.get('Package') == 'linux-xanmod-lts-x64v1' and p.get('Architecture') == 'amd64']
-        if len(metas) != 1: raise RuntimeError('Ambiguous compatible LTS release')
-        images = re.findall(r'(?:^|,\s*)(linux-image-([0-9]+\.[0-9]+\.[0-9]+-x64v1-xanmod[0-9]+))(?=,|$|\s)', metas[0].get('Depends', ''))
-        if len(images) != 1: raise RuntimeError('Compatible LTS image dependency unavailable')
-        package, kernel = images[0]
-        images = [p for p in entries if p.get('Package') == package and p.get('Architecture') == 'amd64']
-        if len(images) != 1: raise RuntimeError('Ambiguous latest LTS image')
-        image = images[0]
-        sources = {name: base64.b64encode((root/name).read_bytes()).decode() for name in ('xanmod.gpg', 'InRelease', 'Packages.gz')}
-        cat = {'SchemaVersion': 1, 'Id': 'xanmod-lts-'+kernel, 'Vendor': 'XanMod LTS', 'Kernel': kernel,
-               'Package': package, 'PackageVersion': image['Version'], 'Architecture': 'amd64', 'BbrVersion': 3,
-               'Repository': anchor['Repository'], 'Filename': image['Filename'], 'Bytes': int(image['Size']), 'Sha256': image['SHA256'],
-               'SignedAt': signed_at, 'SigningFingerprint': anchor['SigningFingerprint'], 'Selection': 'Latest', 'Distribution': distribution,
-               'SourceFiles': {name: hashlib.sha256(base64.b64decode(data)).hexdigest() for name, data in sources.items()}}
-        catalog_validate(cat)
-        return {'Catalog': cat, 'Sources': sources, 'FetchedAt': datetime.datetime.now(datetime.timezone.utc).isoformat()}
+def retained_package(s):
+    cat = s['Catalog']
+    installed = run(['dpkg-query', '-W', '-f=${db:Status-Status} ${Version}', cat['Package']], allow=True)
+    if not installed: return None
+    if installed != 'installed '+cat['PackageVersion']: raise RuntimeError('Unmanaged installed package collision')
+    identity = s.get('PreviousTransaction', ''); visited = set()
+    while identity and identity not in visited and len(visited) < 16:
+        visited.add(identity); previous = load(identity)
+        if previous['Phase'] in TERMINAL and previous['Catalog'].get('Sha256') == cat['Sha256'] and previous['Catalog'].get('Kernel') == cat['Kernel'] and previous['Catalog'].get('Prebuilt') == cat.get('Prebuilt') and previous.get('NewImageSha256') and previous.get('NewInitrdSha256'):
+            if digest(Path('/boot/vmlinuz-'+cat['Kernel'])) != previous['NewImageSha256'] or digest(Path('/boot/initrd.img-'+cat['Kernel'])) != previous['NewInitrdSha256']: raise RuntimeError('Retained image drift')
+            return previous
+        identity = previous.get('PreviousTransaction', '')
+    raise RuntimeError('Installed target has no matching managed artifact history')
 
+
+def take_prebuilt(cat, target):
+    item = prebuilt_validate(cat)
+    uploaded = Path(os.environ.get('VPS_PARAM_PACKAGE_PATH', ''))
+    if not re.fullmatch(r'/tmp/mxh-vps\.[a-zA-Z0-9]{10}/kernel\.deb', str(uploaded)):
+        raise KernelFailure('KernelPrebuiltRejected')
+    regular(uploaded)
+    parent = uploaded.parent.stat(); st = uploaded.stat()
+    if parent.st_uid != 0 or parent.st_mode & 0o077 or st.st_uid != 0 or st.st_mode & 0o077:
+        raise KernelFailure('KernelPrebuiltRejected')
+    if st.st_size != item['Bytes'] or digest(uploaded) != item['Sha256']:
+        raise KernelFailure('KernelPrebuiltRejected')
+    destination = target/'kernel.deb'; regular(destination, True)
+    # Copy rather than rename: /tmp may be mounted on a different filesystem.
+    with uploaded.open('rb') as source, destination.open('xb') as output:
+        shutil.copyfileobj(source, output, 1048576); output.flush(); os.fsync(output.fileno())
+    destination.chmod(0o600)
+    if digest(destination) != item['Sha256']: raise KernelFailure('KernelPrebuiltRejected')
+    uploaded.unlink(); uploaded.parent.rmdir()
+    return destination
 
 def committed_running_kernel(previous, kernel):
     visited = set()
@@ -292,8 +223,10 @@ def committed_running_kernel(previous, kernel):
 
 
 def prepare(identity):
-    cat = json.loads(os.environ['VPS_PARAM_CATALOG']); catalog_validate(cat); a = audit()
+    cat = json.loads(os.environ['VPS_PARAM_CATALOG']); catalog_validate(cat); prebuilt_validate(cat)
+    a = audit()
     if not a['Compatible']: raise RuntimeError('Kernel preflight refused')
+    if kernel_version(cat['Kernel']) < kernel_version(a['Kernel']): raise RuntimeError('Kernel downgrade refused; use an explicit rollback first')
     current = BASE/'current.json'; previous = None
     if current.exists():
         regular(current); previous = load(json.loads(current.read_text())['Id'])
@@ -311,8 +244,10 @@ def prepare(identity):
         accepted = committed_running_kernel(previous, a['Kernel'])
         if digest(Path('/boot/vmlinuz-'+a['Kernel'])) != accepted.get('NewImageSha256') or digest(Path('/boot/initrd.img-'+a['Kernel'])) != accepted.get('NewInitrdSha256'):
             raise RuntimeError('Previous committed kernel image drift')
-        version = lambda kernel: tuple(int(p) for p in kernel.split('-')[0].split('.'))
-        if version(cat['Kernel']) <= version(a['Kernel']): raise RuntimeError('Kernel downgrade refused; use explicit rollback')
+        old_catalog = accepted['Catalog']
+        if kernel_version(cat['Kernel']) == kernel_version(a['Kernel']):
+            if datetime.datetime.fromisoformat(cat['SourceDate'].replace('Z', '+00:00')) <= datetime.datetime.fromisoformat(old_catalog['SourceDate'].replace('Z', '+00:00')):
+                raise RuntimeError('Fixed artifact is not newer; use explicit rollback')
     target = BASE/identity
     if target.exists(): raise RuntimeError('Kernel transaction already exists; reconcile only')
     expected_default = previous.get('OwnedDefaultSha256') if previous else None
@@ -322,7 +257,7 @@ def prepare(identity):
         raise RuntimeError('Unmanaged boot default collision')
     if UNIT.exists(): raise RuntimeError('Existing kernel boot guard refused')
     target.mkdir(mode=0o700); env = boot_environment()
-    s = {'SchemaVersion': 1, 'Owner': 'mxh-dotnet-kernel-v1', 'Id': identity, 'Phase': 'Preparing', 'Catalog': cat,
+    s = {'SchemaVersion': 2, 'Owner': 'mxh-google-bbr-v3', 'Id': identity, 'Phase': 'Preparing', 'Catalog': cat,
          'OldKernel': a['Kernel'], 'OldBootId': a['BootId'], 'OldEntry': a['CurrentEntry'], 'OriginalGrubEnvironment': env,
          'OriginalDefault': base64.b64encode(DEFAULT.read_bytes()).decode() if DEFAULT.exists() else None,
          'BootConfigFingerprint': config_fingerprint(), 'SavedEntry': env.get('saved_entry', ''), 'InstallInvocations': 0,
@@ -333,11 +268,15 @@ def prepare(identity):
         s['Original'+field] = previous.get('Original'+field, previous['Old'+field]) if previous else s['Old'+field]
     save(s); put(current, json.dumps({'Id': identity}).encode())
     put(target/'engine.py', (os.environ['VPS_BBR_PROGRAM']+'\n'+os.environ['VPS_KERNEL_PROGRAM']).encode())
-    for name in ('xanmod.gpg', 'InRelease', 'Packages.gz'):
+    for name in SOURCE_NAMES:
         data = base64.b64decode(os.environ['VPS_PARAM_SOURCE_'+name.replace('.', '_').upper()], validate=True)
         if hashlib.sha256(data).hexdigest() != cat['SourceFiles'][name]: raise RuntimeError('Public source file mismatch')
         put(target/name, data)
-    sources_verify(s); set_default(s, s['OldEntry']); s['Phase'] = 'Installing'; save(s)
+    sources_verify(s)
+    s['Delivery'] = 'Prebuilt'
+    take_prebuilt(cat, target)
+    s['BuiltPackageSha256'] = cat['Prebuilt']['Sha256']
+    save(s); set_default(s, s['OldEntry']); s['Phase'] = 'Installing'; save(s)
     # Client waiting is bounded separately. Never kill dpkg halfway through a package write.
     run(['systemd-run', '--unit=mxh-kernel-install-'+identity, '--property=Type=exec',
          '--', '/usr/bin/python3', str(target/'engine.py'), 'InstallWorker', identity])
@@ -349,52 +288,34 @@ def install_worker(s):
     s['InstallInvocations'] = 1; save(s)
     stage = 'SourceVerification'
     try:
-        owned_boot(s); sources_verify(s); cat = s['Catalog']; package = BASE/s['Id']/'kernel.deb'
-        stage = 'PackageDownload'
-        request = urllib.request.Request(cat['Repository']+cat['Filename'], headers={'User-Agent': 'Debian APT-HTTP/1.3 (2.6.1)'})
-        with urllib.request.urlopen(request, timeout=30) as r:
-            if not r.geturl().startswith('https://deb.xanmod.org/'): raise RuntimeError('Untrusted package redirect')
-            count = 0; h = hashlib.sha256(); regular(package, True)
-            with package.open('xb') as f:
-                for part in iter(lambda: r.read(1048576), b''):
-                    count += len(part)
-                    if count > cat['Bytes']: raise RuntimeError('Oversized package')
-                    h.update(part); f.write(part)
-                f.flush(); os.fsync(f.fileno())
-        if count != cat['Bytes'] or h.hexdigest() != cat['Sha256']: raise RuntimeError('Package digest mismatch')
-        stage = 'PackageIdentity'
-        fields = dict(line.split(': ', 1) for line in run(['dpkg-deb', '-f', str(package), 'Package', 'Version', 'Architecture']).splitlines())
-        if fields != {'Package': cat['Package'], 'Version': cat['PackageVersion'], 'Architecture': 'amd64'}:
-            raise RuntimeError('Debian package identity mismatch')
-        stage = 'DependencyPlan'
-        preview = run(['apt-get', '-s', '--no-remove', 'install', str(package)], 90)
-        changes = [line for line in preview.splitlines() if line.startswith(('Inst ', 'Remv '))]
-        retained = None
-        if not changes and run(['dpkg-query', '-W', '-f=${db:Status-Status} ${Version}', cat['Package']], allow=True) == 'installed '+cat['PackageVersion']:
-            identity = s.get('PreviousTransaction', ''); visited = set()
-            while identity and identity not in visited and len(visited) < 16:
-                visited.add(identity); previous = load(identity)
-                if previous['Phase'] in TERMINAL and all(previous['Catalog'].get(k) == cat[k] for k in ('Kernel', 'Package', 'PackageVersion', 'Sha256')) and previous.get('NewImageSha256') and previous.get('NewInitrdSha256'):
-                    retained = previous; break
-                identity = previous.get('PreviousTransaction', '')
-            if not retained or digest(Path('/boot/vmlinuz-'+cat['Kernel'])) != retained['NewImageSha256'] or digest(Path('/boot/initrd.img-'+cat['Kernel'])) != retained['NewInitrdSha256']:
-                raise RuntimeError('Installed target has no matching managed artifact history')
+        owned_boot(s); sources_verify(s); cat = s['Catalog']
+        retained = retained_package(s)
+        if retained:
             s['ReusedRetainedPackage'] = True; save(s)
-        elif len(changes) != 1 or not changes[0].startswith('Inst '+cat['Package']+' '):
-            raise RuntimeError('Unexpected package dependency mutation refused')
-        stage = 'PackageInstall'
-        if not retained: run(['apt-get', '-y', '--no-remove', '-o', 'DPkg::Lock::Timeout=30', 'install', str(package)], None)
+        else:
+            if Path('/boot/vmlinuz-'+cat['Kernel']).exists() or Path('/boot/initrd.img-'+cat['Kernel']).exists(): raise RuntimeError('Unmanaged target image collision')
+            stage = 'PrebuiltVerification'; s['BuildStage'] = stage; save(s)
+            package = BASE/s['Id']/'kernel.deb'; item = prebuilt_validate(cat)
+            if s.get('Delivery') != 'Prebuilt' or package.stat().st_size != item['Bytes'] or digest(package) != item['Sha256'] or s.get('BuiltPackageSha256') != item['Sha256']:
+                raise KernelFailure('KernelPrebuiltRejected')
+            stage = 'PackageIdentity'; s['BuildStage'] = stage; save(s)
+            fields = dict(line.split(': ', 1) for line in run(['dpkg-deb', '-f', str(package), 'Package', 'Version', 'Architecture']).splitlines())
+            if fields != {'Package': cat['Package'], 'Version': cat['PackageVersion'], 'Architecture': 'amd64'}: raise RuntimeError('Local package identity mismatch')
+            preview = run(['apt-get', '-s', '--no-remove', 'install', str(package)], 90)
+            changes = [line for line in preview.splitlines() if line.startswith(('Inst ', 'Remv '))]
+            if len(changes) != 1 or not changes[0].startswith('Inst '+cat['Package']+' '): raise RuntimeError('Unexpected package dependency mutation refused')
+            stage = 'PackageInstall'; s['BuildStage'] = stage; save(s)
+            if digest(package) != s['BuiltPackageSha256']: raise RuntimeError('Package changed before installation')
+            run(['apt-get', '-y', '--no-remove', '-o', 'DPkg::Lock::Timeout=30', 'install', str(package)], None)
         stage = 'InstalledArtifacts'
-        if run(['dpkg-query', '-W', '-f=${db:Status-Status} ${Version}', cat['Package']]) != 'installed '+cat['PackageVersion']:
-            raise RuntimeError('Kernel installation unconfirmed')
-        s['NewEntry'] = entry(cat['Kernel']); s['NewImageSha256'] = digest(Path('/boot/vmlinuz-'+cat['Kernel']))
-        s['NewInitrdSha256'] = digest(Path('/boot/initrd.img-'+cat['Kernel']))
+        if run(['dpkg-query', '-W', '-f=${db:Status-Status} ${Version}', cat['Package']]) != 'installed '+cat['PackageVersion']: raise RuntimeError('Kernel installation unconfirmed')
+        s['NewEntry'] = entry(cat['Kernel']); s['NewImageSha256'] = digest(Path('/boot/vmlinuz-'+cat['Kernel'])); s['NewInitrdSha256'] = digest(Path('/boot/initrd.img-'+cat['Kernel']))
         if digest(Path('/boot/vmlinuz-'+s['OldKernel'])) != s['OldImageSha256']: raise RuntimeError('Old kernel changed')
-        owned_boot(s); s['Phase'] = 'Prepared'; save(s)
-    except Exception:
-        s['Phase'] = 'InstallFailed'; s['FailureStage'] = stage; save(s)
+        owned_boot(s); s['Phase'] = 'Prepared'; s['BuildStage'] = 'Complete'; save(s)
+    except Exception as error:
+        s['Phase'] = 'InstallFailed'; s['FailureStage'] = stage
+        s['FailureCode'] = error.code if isinstance(error, KernelFailure) else 'KernelOperationRefused'; save(s)
         raise
-
 
 def status(s):
     s['Runtime'] = runtime()
@@ -488,7 +409,6 @@ def main():
     action = sys.argv[1]; identity = sys.argv[2] if len(sys.argv) > 2 else os.environ.get('VPS_PARAM_TRANSACTION', '')
     if os.geteuid() != 0: raise RuntimeError('Root kernel operation required')
     if action == 'Audit': result = audit()
-    elif action == 'Latest': result = latest_candidate()
     elif action == 'Watchdog': watchdog(identity); return
     else:
         if not re.fullmatch('[a-f0-9]{32}', identity): raise RuntimeError('Invalid kernel transaction identity')
@@ -517,7 +437,7 @@ def main():
                         regular(current); prior = load(json.loads(current.read_text())['Id'])
                         if prior['Phase'] not in TERMINAL: raise RuntimeError('Unfinished other kernel transaction refused')
                     cat = json.loads(os.environ['VPS_PARAM_CATALOG']); catalog_validate(cat, fresh=False)
-                    result = {'SchemaVersion': 1, 'Owner': 'mxh-dotnet-kernel-v1', 'Id': identity, 'Catalog': cat,
+                    result = {'SchemaVersion': 2, 'Owner': 'mxh-google-bbr-v3', 'Id': identity, 'Catalog': cat,
                               'Phase': 'Aborted', 'NoMutationConfirmed': True, 'OldKernel': platform.release(), 'Runtime': runtime(), 'ServicesHealthy': True}
                     print('VPSDEPLOY_KERNEL_RESULT_B64='+base64.b64encode(json.dumps(result, sort_keys=True).encode()).decode()); return
                 s = load(identity)
@@ -534,7 +454,7 @@ def main():
 
 def failure_code(error, action):
     if isinstance(error, KernelFailure): return error.code
-    return 'KernelMetadataRejected' if action == 'Latest' else 'KernelOperationRefused'
+    return 'KernelOperationRefused'
 
 
 if __name__ == '__main__':

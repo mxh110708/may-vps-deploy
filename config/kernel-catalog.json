@@ -1,22 +1,29 @@
 {
-  "SchemaVersion": 1,
-  "Id": "xanmod-lts-6.18.55-x64v1",
-  "Vendor": "XanMod LTS",
-  "Kernel": "6.18.55-x64v1-xanmod1",
-  "Package": "linux-image-6.18.55-x64v1-xanmod1",
-  "PackageVersion": "6.18.55-x64v1-xanmod1-0~20261003.g9c4e23d",
+  "SchemaVersion": 2,
+  "Id": "google-bbr-v3-90210de4b779",
+  "Vendor": "Google BBR v3 source / MXH local build",
+  "Repository": "https://github.com/google/bbr",
+  "Branch": "v3",
+  "Commit": "90210de4b779d40496dee0b89081780eeddf2a60",
+  "Tree": "47661ea1052a924c1bce449eadff7e4eb7e44b02",
+  "SourceDate": "2025-03-18T12:52:13Z",
+  "BaseKernel": "6.13.7",
+  "Kernel": "6.13.7-mxh-bbr3-90210de4b779",
+  "Package": "linux-image-6.13.7-mxh-bbr3-90210de4b779",
+  "PackageVersion": "6.13.7-1.mxh90210de4b779",
   "Architecture": "amd64",
   "BbrVersion": 3,
-  "Repository": "https://deb.xanmod.org/",
-  "Filename": "pool/main/l/linux-upstream/linux-image-6.18.55-x64v1-xanmod1_6.18.55-x64v1-xanmod1-0~20261003.g9c4e23d_amd64.deb",
-  "Bytes": 100956868,
-  "Sha256": "0531ef8baa655b8fa6f50e3872e173c430b22ca3a8d7c2053a361b4a4af4a8a6",
-  "SignedAt": "2026-10-07T23:59:26Z",
-  "SigningFingerprint": "D38D7D1DA1349567ADED882D86F7D09EE734E623",
-  "Source": "https://gitlab.com/xanmod/linux/-/tree/6.18.55-xanmod1",
+  "BuildRecipe": 1,
   "SourceFiles": {
-    "xanmod.gpg": "58d4d6d3ce3a53b12037250a24b7ade62bbf9828c2346ff7ddc8ea1bc84388d6",
-    "InRelease": "69bee73014a570958195e4f8c95bd2cc1e0da11c472bfb175a190a9e731f591e",
-    "Packages.gz": "2dc022f6ed5da1d9f0633490ce42164c1db259ea890ef73e377af55fae8beb45"
+    "commit.json": "8bf748a3321b057724e143c69636a9e054edda2937d46ea822142e021ca3e5b6",
+    "Makefile": "ee8515d99f735fff11819fe28ce780280bad0808d18895db8fa947cc40e3c09d",
+    "tcp_bbr.c": "04ba1e8b436b88eb0716f3d2a64a9be5a5d946ba3169a590d7bb533c320bdc51"
+  },
+  "Sha256": "72dc1e9fff872483d44480a92c948b7effbc203f07b073d2356b609d0d57ea7f",
+  "Prebuilt": {
+    "File": "kernel.deb",
+    "Bytes": 84997472,
+    "Sha256": "6fe5a30b436fb95535ab5b5340624fe09ce4f9065c0f2700b3f1024db2837338",
+    "ManifestSha256": "0ce88e5289f694c62145e68fe753b18d926284c3261b221d2e969d9721bed1ba"
   }
 }

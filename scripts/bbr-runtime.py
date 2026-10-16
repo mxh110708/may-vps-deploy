@@ -19,7 +19,7 @@ def bbr_runtime():
             with listener.accept()[0] as receiver:
                 receiver.settimeout(2); sender.sendall(b'MXH-BBR-runtime'); receiver.recv(64)
                 info = sender.getsockopt(socket.IPPROTO_TCP, 26, 128)  # TCP_CC_INFO
-                # Google/XanMod: nine u32s, mode, phase, pad, version, three u32s.
+                # Google BBR v3: nine u32s, mode, phase, pad, version, three u32s.
                 if len(info) >= 52 and info[39] in (2, 3):
                     observed = str(info[39])
                     if version in ('1', '2', '3') and version != observed:

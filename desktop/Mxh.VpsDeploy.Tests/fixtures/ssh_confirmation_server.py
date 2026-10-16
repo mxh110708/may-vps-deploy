@@ -92,7 +92,7 @@ class MemorySftp(paramiko.SFTPServerInterface):
 
     def open(self, path, flags, attr):
         if flags & (os.O_WRONLY | os.O_RDWR):
-            if path != temporary_script or path in files:
+            if path not in (temporary_script, temporary_directory+'/kernel.deb') or path in files:
                 return paramiko.SFTP_PERMISSION_DENIED
             files[path] = (b"", 0o100644)
             count("uploads")
@@ -102,7 +102,7 @@ class MemorySftp(paramiko.SFTPServerInterface):
         return MemoryHandle(path, flags)
 
     def chattr(self, path, attr):
-        if path != temporary_script or path not in files:
+        if path not in (temporary_script, temporary_directory+'/kernel.deb') or path not in files:
             return paramiko.SFTP_PERMISSION_DENIED
         if files[path][0] == denied_payload.encode():
             return paramiko.SFTP_PERMISSION_DENIED
@@ -127,8 +127,8 @@ def execute(channel, command):
             count("script_exec")
             result = subprocess.run([bash, "-s"], input=payload, capture_output=True, timeout=10, cwd=Path(args.ready).parent)
             output, error, status = result.stdout, result.stderr, result.returncode
-    elif command == "rm -f -- '" + temporary_script + "'; rmdir -- '" + temporary_directory + "'":
-        files.pop(temporary_script, None)
+    elif command in ("rm -f -- '" + temporary_script + "'; rmdir -- '" + temporary_directory + "'", "rm -f -- '" + temporary_directory + "/kernel.deb'; rmdir -- '" + temporary_directory + "'"):
+        files.pop(temporary_script if temporary_script in command else temporary_directory+'/kernel.deb', None)
         count("cleanup")
         record()
     else:

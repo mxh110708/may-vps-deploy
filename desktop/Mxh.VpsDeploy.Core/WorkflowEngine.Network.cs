@@ -108,7 +108,7 @@ public sealed partial class WorkflowEngine
                 before["Analysis"] = analysis;
             }
             current = await NetworkObservation(c, before?["Options"] as JsonObject);
-            if (c.Request.Options.Text("BbrVersion", "Current") == "v3" && current.Text("BbrVersion") != "v3") throw new OperationException("已选择 BBR v3，但当前内核尚未确认支持。请先检查并完成 BBR v3 内核升级与验收。");
+            if (c.Request.Options.Text("BbrVersion", "Current") == "v3" && !BbrKernels.AcceptedRuntime(c.State, current)) throw new OperationException("所选 Google 源码 BBR v3 尚未完成受管安装和验收，不能仅凭运行版本认定来源。", code: "NetworkBbrSourceUnverified", nextAction: "先完成 Google 官方源码内核的构建、重启与验收；如需沿用 VPS 已有内核，请选择原有内核版本。");
             if (c.Request.Options.Text("BbrVersion", "Current") == "Current" && c.State["KernelUpgrade"] is JsonObject kernel && current.Text("Kernel") != kernel.Text("OriginalKernel", kernel.Text("OldKernel"))) throw new OperationException("已选择 VPS 原有内核版本，请先审阅回到 VPS 原有内核；当前运行的是升级后的内核。");
             if (before != null && (current.Text("Kernel") != before.Text("ServerAfter.Kernel") || current.Text("BootId") != before.Text("ServerAfter.BootId") || current.Long("MemoryKiB") != before.Long("ServerAfter.MemoryKiB") || ArchiveStore.Fingerprint(current["Sysctl"]!) != ArchiveStore.Fingerprint(before.At("ServerAfter.Sysctl")!) || NetworkTuning.QueueFingerprint(current) != NetworkTuning.QueueFingerprint(before["ServerAfter"]!.AsObject()))) throw new OperationException("远端内核、启动身份、参数或队列在测速后发生变化，或记录来自旧版采集，请重新采集。");
             await c.Run("network-preflight.sh", timeout: 60, marker: "NETWORK_PREFLIGHT_OK");
@@ -119,7 +119,7 @@ public sealed partial class WorkflowEngine
             await c.Run("network-apply.sh", new() { ["PROFILE"] = profile,
                 ["BUFFER_TARGET_BYTES"] = before?.Text("Analysis.BufferTargetBytes", "0") ?? "0", ["BUFFER_CAP_BYTES"] = before?.Text("Analysis.BufferCapBytes", "0") ?? "0" }, true, 120, "NETWORK_APPLIED");
             current = await NetworkObservation(c, before?["Options"] as JsonObject);
-            if (c.Request.Options.Text("BbrVersion", "Current") == "v3" && current.Text("BbrVersion") != "v3") throw new OperationException("应用后未确认 BBR v3 运行版本，请核对内核事务。");
+            if (c.Request.Options.Text("BbrVersion", "Current") == "v3" && !BbrKernels.AcceptedRuntime(c.State, current)) throw new OperationException("应用后未确认受管 Google 源码内核及 BBR v3 运行版本，请核对内核事务。");
             if (NetworkTuning.Sysctl(current, "net.core.default_qdisc") != "fq") throw new OperationException("默认队列未确认生效。");
             if (NetworkTuning.Sysctl(current, "net.ipv4.tcp_available_congestion_control").Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("bbr") && NetworkTuning.Sysctl(current, "net.ipv4.tcp_congestion_control") != "bbr") throw new OperationException("可用 BBR 未确认生效。");
             await VerifyManagement(c);

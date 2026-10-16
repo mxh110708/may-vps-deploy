@@ -7,7 +7,8 @@ param(
  [Parameter(DontShow)][switch]$TestBuild,
  [Parameter(DontShow)][string]$PackageVersion,
  [Parameter(DontShow)][switch]$KeepBundle,
- [string]$CacheDirectory,[string]$SourceDirectory,[string]$Proxy
+ [string]$CacheDirectory,[string]$SourceDirectory,[string]$Proxy,
+ [string]$KernelSourceArchive
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -21,6 +22,13 @@ if($TestBuild -and -not $Development){throw '隔离测试包不能正式发行�
 if(-not $Development){if($application.channel -ne 'stable'){throw '正式包需要 stable 应用版本。'};Assert-VpsGitApplicationClean $ProjectRoot}
 & (Join-Path $ProjectRoot 'scripts/Test-NoSecrets.ps1') -ProjectRoot $ProjectRoot
 $dependencies=& (Join-Path $ProjectRoot 'scripts/Initialize-DesktopBuild.ps1') -ProjectRoot $ProjectRoot -CacheDirectory $CacheDirectory -SourceDirectory $SourceDirectory -Proxy $Proxy -Names @('python','yaml','inno_setup')
+$kernelCatalog=Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'config/kernel-catalog.json')|ConvertFrom-Json -AsHashtable
+$kernelManifest=Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'assets/kernel/build-manifest.json')|ConvertFrom-Json -AsHashtable
+if(-not $Development -and -not $KernelSourceArchive){throw '正式发布需提供 -KernelSourceArchive（构建导出的完整对应源码包），随二进制一并发布。'}
+if($KernelSourceArchive){
+ $KernelSourceArchive=[IO.Path]::GetFullPath($KernelSourceArchive)
+ if(-not(Test-Path -LiteralPath $KernelSourceArchive -PathType Leaf) -or (Get-Item -LiteralPath $KernelSourceArchive).Length -ne $kernelManifest.SourceArchiveBytes -or (Get-FileHash -LiteralPath $KernelSourceArchive).Hash.ToLowerInvariant() -ne $kernelManifest.SourceArchiveSha256){throw '对应内核源码包的大小或 SHA256 不匹配。'}
+}
 $paths=@(& git -c "safe.directory=$ProjectRoot" -c core.quotepath=false -C $ProjectRoot ls-files --cached --others --exclude-standard|Sort-Object -Unique)
 if($LASTEXITCODE -ne 0 -or -not $paths.Count){throw '无法取得公开文件清单。'}
 $buildRoot=Join-Path $ProjectRoot ('.tmp/desktop-package-'+[guid]::NewGuid().ToString('N'))
@@ -38,6 +46,8 @@ try{
  $runtime=Join-Path $bundle 'runtime';[IO.Directory]::CreateDirectory($runtime)|Out-Null
  foreach($name in @('python')){[IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $dependencies.CacheDirectory $dependencies.Assets[$name].file),(Join-Path $runtime $name))}
  $python=Join-Path $runtime 'python'
+ $kernelProof=@(& (Join-Path $python 'python.exe') (Join-Path $bundle 'scripts/check-kernel-prebuilt.py') --project $bundle)
+ if($LASTEXITCODE -ne 0){$kernelProof|Write-Host;throw '内置内核包及构建来源校验失败。'}
  $site=Join-Path $python 'Lib/site-packages';[IO.Directory]::CreateDirectory($site)|Out-Null
  [IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $dependencies.CacheDirectory $dependencies.Assets.yaml.file),$site)
  "python313.zip`n.`nLib/site-packages`n../../scripts`nimport site`n"|Set-Content -LiteralPath (Join-Path $python 'python313._pth') -Encoding ascii
@@ -98,8 +108,15 @@ try{
  [IO.Compression.ZipFile]::CreateFromDirectory($bundle,$archive,[IO.Compression.CompressionLevel]::Optimal,$false)
  Copy-Item -LiteralPath (Join-Path $bundle 'application-files.json') -Destination $publicManifest
  $checksumName=if($Development){'SHA256SUMS-ui-preview.txt'}else{'SHA256SUMS.txt'}
- @($archive,$setup,$publicManifest)|ForEach-Object{(Get-FileHash -LiteralPath $_).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($_)}|Set-Content -LiteralPath (Join-Path $Destination $checksumName) -Encoding ascii
- [pscustomobject]@{Archive=$archive;Installer=$setup;FileManifest=$publicManifest;Checksums=(Join-Path $Destination $checksumName);Version=$version;ManagedFiles=$files.Count;RuntimeVerification=$verification;Bundle=$(if($KeepBundle){$bundle}else{''});TestBuild=[bool]$TestBuild;Development=[bool]$Development}
+ $sourceAttachment=''
+ if($KernelSourceArchive){
+  $sourceAttachment=Join-Path $Destination ('google-bbr-v3-'+$kernelCatalog.Commit.Substring(0,12)+'-source.tar.xz')
+  if(Test-Path -LiteralPath $sourceAttachment){throw '对应源码发布附件已存在，未覆盖。'}
+  Copy-Item -LiteralPath $KernelSourceArchive -Destination $sourceAttachment
+  if((Get-FileHash -LiteralPath $sourceAttachment).Hash.ToLowerInvariant() -ne $kernelManifest.SourceArchiveSha256){throw '复制后的对应源码附件校验失败。'}
+ }
+ @($archive,$setup,$publicManifest,$sourceAttachment)|Where-Object{$_}|ForEach-Object{(Get-FileHash -LiteralPath $_).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($_)}|Set-Content -LiteralPath (Join-Path $Destination $checksumName) -Encoding ascii
+ [pscustomobject]@{Archive=$archive;Installer=$setup;FileManifest=$publicManifest;KernelSourceArchive=$sourceAttachment;Checksums=(Join-Path $Destination $checksumName);Version=$version;ManagedFiles=$files.Count;RuntimeVerification=$verification;Bundle=$(if($KeepBundle){$bundle}else{''});TestBuild=[bool]$TestBuild;Development=[bool]$Development}
 }finally{
  $prefix=[IO.Path]::GetFullPath((Join-Path $ProjectRoot '.tmp')).TrimEnd('\')+'\'
  if(-not [IO.Path]::GetFullPath($buildRoot).StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw '构建暂存清理范围异常。'}

@@ -39,6 +39,7 @@ public interface IRemoteSession : IAsyncDisposable
     Task<CommandResult> RunScriptAsync(string payload, TimeSpan timeout, bool mutating, CancellationToken cancellationToken);
     Task<byte[]> ReadFileAsync(string absolutePath, CancellationToken cancellationToken);
     Task DownloadAsync(string absolutePath, string destination, CancellationToken cancellationToken);
+    Task<string> UploadTemporaryFileAsync(string source, CancellationToken cancellationToken) => throw new OperationException("当前连接不支持上传内置内核包。");
 }
 public interface IRemoteSessionFactory
 {

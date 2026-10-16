@@ -127,6 +127,32 @@ internal sealed class SshRemoteSession(SshClient ssh, SftpClient sftp, PrivateKe
         catch (Exception error) { throw TransportFailures.Describe(error, "SFTP 下载"); }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
+    public async Task<string> UploadTemporaryFileAsync(string source, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested(); SafePath.CheckLinks(source);
+        using var stream = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Length is <= 0 or > 1073741824) throw new OperationException("内置内核包大小无效。");
+        var created = await RunAsync("umask 077; mktemp -d /tmp/mxh-vps.XXXXXXXXXX", TimeSpan.FromSeconds(30), cancellationToken);
+        created.RequireSuccess("无法建立内核上传临时目录。");
+        var directory = created.Output.Trim();
+        if (!Regex.IsMatch(directory, @"^/tmp/mxh-vps\.[A-Za-z0-9]{10}$")) throw new OperationException("内核上传目录返回异常。");
+        var target = directory + "/kernel.deb";
+        var priorTimeout = sftp.OperationTimeout; sftp.OperationTimeout = TimeSpan.FromSeconds(60);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); deadline.CancelAfter(TimeSpan.FromMinutes(15));
+        try
+        {
+            await Task.Run(() => sftp.UploadFile(stream, target, false, _ => deadline.Token.ThrowIfCancellationRequested()), deadline.Token);
+            sftp.ChangePermissions(target, 600); deadline.Token.ThrowIfCancellationRequested(); return target;
+        }
+        catch (Exception error)
+        {
+            try { await RunAsync("rm -f -- " + ShellQuote(target) + "; rmdir -- " + ShellQuote(directory), TimeSpan.FromSeconds(30), CancellationToken.None); } catch { }
+            if (error is OperationCanceledException && !cancellationToken.IsCancellationRequested) throw new OperationException("内核包上传超过 15 分钟，尚未开始安装。", code: "KernelUploadTimeout");
+            if (error is OperationCanceledException) throw;
+            throw TransportFailures.Describe(error, "SFTP 内核包上传");
+        }
+        finally { sftp.OperationTimeout = priorTimeout; }
+    }
     public static string ShellQuote(string value) => "'" + value.Replace("'", "'\"'\"'") + "'";
     private static void ValidateRemotePath(string path)
     {

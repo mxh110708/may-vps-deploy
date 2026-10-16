@@ -15,7 +15,13 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
     {
         var snapshot = request.Snapshot(); OperationPolicy.Validate(snapshot);
         var planHash = ArchiveFingerprint(snapshot);
-        return new(snapshot, Fingerprint(snapshot), planHash, OperationPolicy.Summary(snapshot));
+        JsonObject? kernelCatalog = null;
+        if (snapshot.Kind == OperationKind.BbrKernel && snapshot.Options.Text("Action") == "Install")
+        {
+            kernelCatalog = BbrKernels.Catalog(store.Paths);
+            if (kernelCatalog.Text("Id") != snapshot.Options.Text("CatalogId") || kernelCatalog.Text("Sha256") != snapshot.Options.Text("CatalogSha256") || kernelCatalog.Text("Commit") != snapshot.Options.Text("SourceCommit")) throw new OperationException("源码候选与待审阅目标不一致，请重新选择版本。");
+        }
+        return new(snapshot, Fingerprint(snapshot), planHash, OperationPolicy.Summary(snapshot, kernelCatalog));
     }
     public static string Fingerprint(OperationRequest request) => ArchiveStore.Fingerprint(new JsonObject
     {
@@ -34,8 +40,8 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         if (request.Kind == OperationKind.MeasureNetwork) files["NetworkPeer"] = NetworkTuning.PeerArchiveFingerprint(store, request.Options);
         if (request.Kind == OperationKind.BbrKernel)
         {
-            foreach (var name in new[] { "config/kernel-catalog.json", "scripts/kernel-engine.py", "scripts/bbr-runtime.py", "assets/kernel/xanmod.gpg", "assets/kernel/InRelease", "assets/kernel/Packages.gz", "assets/remote/kernel-audit.sh", "assets/remote/kernel-latest.sh", "assets/remote/kernel-prepare.sh", "assets/remote/kernel-status.sh", "assets/remote/kernel-boot.sh", "assets/remote/kernel-confirm.sh", "assets/remote/kernel-rollback.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
-            if (request.Options.Text("Source") == "Latest") files["LatestKernelCandidate"] = ClientSchemes.SourceFingerprint(SafePath.Resolve(directory, "kernel-latest-candidate.json"));
+            foreach (var name in new[] { "config/kernel-catalog.json", "scripts/kernel-runtime.py", "scripts/kernel-engine.py", "scripts/bbr-runtime.py", "assets/kernel/commit.json", "assets/kernel/Makefile", "assets/kernel/tcp_bbr.c", "assets/remote/kernel-audit.sh", "assets/remote/kernel-prepare.sh", "assets/remote/kernel-status.sh", "assets/remote/kernel-boot.sh", "assets/remote/kernel-confirm.sh", "assets/remote/kernel-rollback.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
+            foreach (var name in new[] { "kernel.deb", "build-manifest.json", "kernel.config", "input.config" }) files["Prebuilt:" + name] = BbrKernels.FileDigest(store.Paths.Resolve("assets/kernel/" + name));
         }
         if (request.Kind == OperationKind.Upgrade || request.Kind == OperationKind.Komari && request.Options.Text("Action") == "Upgrade")
         {
@@ -136,17 +142,17 @@ public static class OperationPolicy
         OperationKind.Komari => (request.Options.Text("Scope") switch { "KomariAgent" => "Komari Agent", "KomariController" => "Komari 主控", _ => "Cloudflare Tunnel" }) + " · " + (request.Options.Text("Action") switch { "Upgrade" => "升级", "Remove" => "卸载", "Backup" => "一致性备份", "Restore" => "恢复备份", _ => "Token 轮换" }),
         _ => ""
     };
-    public static string Summary(OperationRequest request) => request.Kind switch
+    public static string Summary(OperationRequest request, JsonObject? kernelCatalog = null) => request.Kind switch
     {
         OperationKind.CheckComponentUpdate => "经所选 VPS 查询 " + TargetLabel(request) + "。只读取官方稳定发行元数据，保存具体版本、资产身份和 SHA256；不会安装程序、重启服务或修改系统仓库。",
         OperationKind.ConnectExisting => "接入已有实例：只读识别现有配置，保留 SSH 认证、端口与防火墙。",
         OperationKind.ResumeImport => "继续接入草稿：重新只读识别现有配置，完成应用内归档。",
         OperationKind.Deploy => "新机部署：先审计系统与已有服务，建立备份后配置双 SSH 入口和所选用途；最后独立验收。网络调优由部署后另行手动发起。",
         OperationKind.HealthAudit => "只读健康与漂移检查；不重启或修改服务。",
-        OperationKind.BbrKernel => "操作：" + TargetLabel(request) + "\n" + (request.Options.Text("Action") switch
+        OperationKind.BbrKernel => "操作：" + TargetLabel(request) + "\n" + BbrKernels.SourceNotice + "\n" + (request.Options.Text("Action") switch
         {
-            "Check" => "只读检查运行中的 BBR 版本、系统、虚拟化、磁盘、GRUB 和驱动兼容性；不会安装或重启。" + (request.Options.Text("Source") == "Latest" ? "联网查询官方最新兼容 LTS，并核验签名后保存具体版本。" : "使用应用随附的固定版本。"),
-            "Install" => "来源：" + (request.Options.Text("Source") == "Latest" ? "官方最新兼容 LTS（本次查询已锁定）" : "应用固定版本") + "\n安装版本：" + request.Options.Text("CatalogId") + "\n包 SHA256：" + request.Options.Text("CatalogSha256", "随附目录中已固定") + "\n核验官方仓库签名和包 SHA256，只安装单个内核包，不添加长期仓库、不删除旧内核。安装后继续运行旧内核，需要另行审阅重启。",
+            "Check" => "只读检查实际 BBR、系统、内存、磁盘、GRUB、驱动和随应用提供的固定内核；不会安装或重启，也不查询浮动版本。",
+            "Install" => "来源：" + BbrKernels.PackageLabel + (kernelCatalog is null ? "" : "\n基础内核：" + kernelCatalog.Text("BaseKernel") + "\n本应用构建目标：" + kernelCatalog.Text("Kernel") + "\n官方提交日期：" + kernelCatalog.Text("SourceDate")) + "\n源码提交：" + request.Options.Text("SourceCommit") + "\n源码材料 SHA256：" + request.Options.Text("CatalogSha256") + BbrKernels.InstallDescription(kernelCatalog),
             "Activate" => "VPS 将重启，连接会暂时中断。单次启动新内核，重新核验 BBR v3、原服务及主/救援 SSH 后设为默认。新系统进入用户空间但 5 分钟未提交会回到旧内核；若无法启动用户空间，需要服务商控制台重启，下一次默认仍是旧内核。",
             "Rollback" => "只处理本轮受管内核启动设置，保留内核包。必要时重启到本轮升级前的上一内核，并重新核验管理连接；网络参数和应用服务配置保留。",
             "RollbackOriginal" => "核对最初记录的 VPS 原有内核及启动镜像，只恢复受管启动设置，必要时重启并验收管理连接。各轮 v3 内核包和事务历史保留；网络参数与应用服务配置保留。",
@@ -155,7 +161,7 @@ public static class OperationPolicy
         OperationKind.TunnelAccess => "从 VPS 核对 Tunnel 已连接、主控本机接口与公开 HTTPS 接口的响应和版本；保存检查结果，不修改 Cloudflare 路由或重启服务。\n公开网址：" + request.Options.Text("PublicUrl"),
         OperationKind.InstallComponent => (request.Options["InstallationVersions"] is JsonObject selection ? "本轮安装版本：\n" + InstallationVersions.Summary(selection, InstallationVersions.AdditionalComponents(request.Options)) + "\n\n" : "") + "在现有实例上追加安装 " + ComponentInstallations.SelectionLabel(request.Options) + "。统一核对未安装状态和端口、建立本轮恢复快照，再逐项安装并统一验收；本轮失败或取消一并恢复新增组件，保留已有协议、SSH 和网络参数。",
         OperationKind.MeasureNetwork => NetworkTuning.MeasurementSummary(request.Options),
-        OperationKind.TuneNetwork => request.Options.Text("Profile") == "EntryMeasured" ? "依据 24 小时内的方向证据，仅试调有本机发送缓冲限制证据的 TCP 发送上限，并启用 fq 与可用 BBR。保留接收缓冲、初始默认内存、初始窗口、TFO 和连接策略，不自动做全局整形。\n先保存原值与队列，再以同一路径、关键方向、多个目标复测；短连接、重传或排队代价不合格时恢复原值。复测使用同等有效载荷预算，不修改对端 VPS，不自动升级内核或重启。" : "仅启用默认接口 fq 和当前内核可用的 BBR；保留缓冲、TFO 等其他运行参数。先备份文件和实际参数/队列，再核验生效与管理连接。无需公网测速。BBR 版本以已加载模块证据为准，当前内核不支持时明确提示；内核升级需另行维护。",
+        OperationKind.TuneNetwork => (request.Options.Text("BbrVersion", "Current") == "v3" ? "BBR 版本：Google 官方源码构建 v3，必须已有受管验收记录及对应运行证据。\n" : "BBR 版本：沿用 VPS 原有内核的可用版本。\n") + (request.Options.Text("Profile") == "EntryMeasured" ? "依据 24 小时内的方向证据，仅试调有本机发送缓冲限制证据的 TCP 发送上限，并启用 fq 与可用 BBR。保留接收缓冲、初始默认内存、初始窗口、TFO 和连接策略，不自动做全局整形。\n先保存原值与队列，再以同一路径、关键方向、多个目标复测；短连接、重传或排队代价不合格时恢复原值。复测使用同等有效载荷预算，不修改对端 VPS，不自动升级内核或重启。" : "仅启用默认接口 fq 和当前内核可用的 BBR；保留缓冲、TFO 等其他运行参数。先备份文件和实际参数/队列，再核验生效与管理连接。无需公网测速。BBR 版本同时核对模块或真实 TCP 证据，当前内核不支持时明确提示；内核升级需另行维护。"),
         OperationKind.Recover => "先核对未完成事务的真实状态，再按明确范围恢复。",
         OperationKind.Upgrade => "升级对象：" + TargetLabel(request) + "\n版本来源：" + (request.Options.Text("Source", "Fixed") == "Latest" ? "官方最新稳定版（已查询锁定）" : "应用固定版本") + "\n目标版本：" + request.Options.Text("TargetVersion") + "\n先核对状态并备份，再更新程序、重启所选服务并独立验收；失败按协议范围恢复。协议备份覆盖本机受管代理协议，恢复时须一并审阅。",
         OperationKind.Komari => "操作：" + TargetLabel(request) + (request.Options.Text("Action") == "Upgrade" ? "\n版本来源：" + (request.Options.Text("Source", "Fixed") == "Latest" ? "官方最新稳定版（已查询锁定）" : "应用固定版本") + "\n目标版本：" + request.Options.Text("TargetVersion") : "") + "\n" + (request.Options.Text("Scope") switch { "KomariAgent" => request.Options.Text("Action") == "Remove" ? "卸载当前 VPS 的 Agent，停止向主控上报；不删除主控历史数据。" : "备份并更新当前 VPS 的 Agent，保留连接配置和原启停状态。", "KomariController" => "先备份当前 VPS 的主控程序和数据；一致性备份、升级及恢复需要短暂停止主控，再恢复原启停状态。只处理主控专用备份，不包含 Tunnel。", _ => request.Options.Text("Action") == "Upgrade" ? "只升级 cloudflared 程序，保留连接 Token、服务配置及启停状态。运行中的 Tunnel 会短暂重连并验证就绪状态；失败只恢复 Tunnel 范围。" : "只轮换当前 VPS 的 Tunnel 连接 Token 并重启 Tunnel；新 Token 在执行时输入，不修改 Cloudflare DNS 或主控数据。" }),
