@@ -71,6 +71,24 @@ internal sealed partial class BoundaryTests
                 await session.RunAsync("rm -f -- '" + uploaded + "'; rmdir -- '" + uploaded[..uploaded.LastIndexOf('/')] + "'", TimeSpan.FromSeconds(10), default);
                 try { await session.UploadTemporaryFileAsync(artifact, canceled.Token); throw new Exception("Canceled binary upload started."); }
                 catch (OperationCanceledException) { Check(ArchiveStore.ReadJson(statsFile).Number("uploads") == stats.Number("uploads"), "pre-canceled binary upload sent data"); }
+                using (var duringUpload = new CancellationTokenSource())
+                {
+                    var partial = new byte[1048576]; Encoding.UTF8.GetBytes("MXH_CANCEL_UPLOAD_FIXTURE\n").CopyTo(partial, 0); File.WriteAllBytes(artifact, partial);
+                    var uploading = session.UploadTemporaryFileAsync(artifact, duringUpload.Token);
+                    var marker = Path.ChangeExtension(readyFile, ".upload-started"); var started = Stopwatch.StartNew();
+                    while (!File.Exists(marker) && !uploading.IsCompleted && started.Elapsed < TimeSpan.FromSeconds(10)) await Task.Delay(10);
+                    Check(File.Exists(marker), "cancel test did not reach a real in-flight SFTP write");
+                    duringUpload.Cancel();
+                    try { await uploading; throw new Exception("Canceled in-flight upload completed."); }
+                    catch (OperationCanceledException) { Check(duringUpload.IsCancellationRequested, "upload cancellation lost its caller token"); }
+                    stats = ArchiveStore.ReadJson(statsFile);
+                    Check(stats.Number("temporary_files") == 0, "canceled upload left a partial remote kernel");
+                }
+                // Reuse the same session after cancellation and the deadline source's disposal.
+                File.WriteAllBytes(artifact, binary);
+                uploaded = await session.UploadTemporaryFileAsync(artifact, default);
+                Check((await session.ReadFileAsync(uploaded, default)).SequenceEqual(binary), "upload cancellation damaged the next SFTP transfer");
+                await session.RunAsync("rm -f -- '" + uploaded + "'; rmdir -- '" + uploaded[..uploaded.LastIndexOf('/')] + "'", TimeSpan.FromSeconds(10), default);
             }
             try { await using var invalid = await factory.OpenAsync(endpoint with { Password = "wrong-fixture-only" }, known, default); throw new Exception("Wrong password accepted."); }
             catch (OperationException error) { Check(error.Code == "SshAuthenticationFailed", "authentication failure lost typed cause"); }

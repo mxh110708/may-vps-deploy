@@ -141,7 +141,9 @@ internal sealed class SshRemoteSession(SshClient ssh, SftpClient sftp, PrivateKe
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); deadline.CancelAfter(TimeSpan.FromMinutes(15));
         try
         {
-            await Task.Run(() => sftp.UploadFile(stream, target, false, _ => deadline.Token.ThrowIfCancellationRequested()), deadline.Token);
+            // Progress callbacks run independently on SSH.NET's thread pool and can outlive
+            // the transfer. Observe cancellation inside the awaited operation instead.
+            await sftp.UploadFileAsync(stream, target, canOverride: false, cancellationToken: deadline.Token);
             sftp.ChangePermissions(target, 600); deadline.Token.ThrowIfCancellationRequested(); return target;
         }
         catch (Exception error)

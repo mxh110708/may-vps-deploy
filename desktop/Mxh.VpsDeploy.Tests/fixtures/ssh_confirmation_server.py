@@ -45,7 +45,7 @@ def count(name):
 def record(**values):
     with lock:
         stats.update(values)
-        stats["temporary_files"] = int(temporary_script in files)
+        stats["temporary_files"] = sum(path in files for path in (temporary_script, temporary_directory + "/kernel.deb"))
         Path(args.stats).write_text(json.dumps(stats), encoding="utf-8")
 
 
@@ -75,6 +75,10 @@ class MemoryHandle(paramiko.SFTPHandle):
             return paramiko.SFTP_FAILURE
         files[self.path] = (previous[:offset] + data + previous[offset + len(data):], mode)
         record(upload_bytes=len(files[self.path][0]), upload_has_cr=b"\r" in files[self.path][0])
+        if data.startswith(b"MXH_CANCEL_UPLOAD_FIXTURE\n") and offset == 0:
+            # Let the caller cancel an actual in-flight transfer after its first write.
+            Path(args.ready).with_suffix(".upload-started").write_text("ready", encoding="utf-8")
+            time.sleep(0.5)
         return paramiko.SFTP_OK
 
     def stat(self):

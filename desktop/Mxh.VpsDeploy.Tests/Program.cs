@@ -8,6 +8,7 @@ if (args.Contains("--fonts-only")) new BoundaryTests(repository).RunFontTests();
 else if (args.Contains("--deployment-only")) await new BoundaryTests(repository).RunDeploymentTests();
 else if (args.Contains("--background-only")) await new BoundaryTests(repository).RunBackgroundTests();
 else if (args.Contains("--network-only")) await new BoundaryTests(repository).RunNetworkTests();
+else if (args.Contains("--ssh-only")) await new BoundaryTests(repository).RunSshTests();
 else await new BoundaryTests(repository).Run();
 
 internal sealed partial class BoundaryTests(string repository)
@@ -19,6 +20,12 @@ internal sealed partial class BoundaryTests(string repository)
     public async Task RunNetworkTests()
     {
         using var f = new Fixture(repository); await NetworkExperience(f); Console.WriteLine($"PASS: {assertions} network direction, evidence, recovery and path assertions; no production connections.");
+    }
+    public async Task RunSshTests()
+    {
+        using var f = new Fixture(repository);
+        var python = Environment.GetEnvironmentVariable("MXH_TEST_SSH_PYTHON") ?? throw new Exception("MXH_TEST_SSH_PYTHON is required for transport tests.");
+        await LocalSshConfirmation(f, python); Console.WriteLine($"PASS: {assertions} loopback SSH/SFTP transport assertions; no production connections.");
     }
     public async Task Run()
     {
