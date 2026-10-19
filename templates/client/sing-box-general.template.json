@@ -1028,7 +1028,15 @@
     },
     {
       "type": "selector",
-      "tag": "US-West Entry",
+      "tag": "US-West-LA Entry",
+      "outbounds": [
+        "DIRECT"
+      ],
+      "default": "DIRECT"
+    },
+    {
+      "type": "selector",
+      "tag": "US-West-SF Entry",
       "outbounds": [
         "DIRECT"
       ],

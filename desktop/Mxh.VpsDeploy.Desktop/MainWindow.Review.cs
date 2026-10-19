@@ -59,8 +59,8 @@ public sealed partial class MainWindow
 
         scheme = ClientSchemes.New(paths); scheme["Name"] = "示例连接方案";
         scheme["Nodes"] = new JsonArray(
-            new JsonObject { ["name"] = "示例入口", ["kind"] = "entry", ["region_group"] = "US-West Entry", ["transit_group"] = "US-West Entry", ["clash"] = new JsonObject { ["type"] = "vless", ["server"] = "192.0.2.10", ["port"] = 443, ["servername"] = "example.com" }, ["sing_box"] = new JsonObject() },
-            new JsonObject { ["name"] = "示例落地", ["kind"] = "landing", ["transit_group"] = "US-West Entry", ["clash"] = new JsonObject { ["type"] = "ss", ["server"] = "192.0.2.20", ["port"] = 45001, ["cipher"] = "2022-blake3-aes-128-gcm" }, ["sing_box"] = new JsonObject() });
+            new JsonObject { ["name"] = "示例入口", ["kind"] = "entry", ["region_group"] = "US-West-LA Entry", ["transit_group"] = "US-West-LA Entry", ["clash"] = new JsonObject { ["type"] = "vless", ["server"] = "192.0.2.10", ["port"] = 443, ["servername"] = "example.com" }, ["sing_box"] = new JsonObject() },
+            new JsonObject { ["name"] = "示例落地", ["kind"] = "landing", ["transit_group"] = "US-West-LA Entry", ["clash"] = new JsonObject { ["type"] = "ss", ["server"] = "192.0.2.20", ["port"] = 45001, ["cipher"] = "2022-blake3-aes-128-gcm" }, ["sing_box"] = new JsonObject() });
         designerStep = 0; await Shot("clients-targets", "clients");
         designerStep = 1; await Shot("clients-nodes", "clients");
         designerStep = 2; await Shot("clients-connections", "clients", true);

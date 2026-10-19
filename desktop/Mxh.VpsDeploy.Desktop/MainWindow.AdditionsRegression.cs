@@ -118,7 +118,7 @@ public sealed partial class MainWindow
                 publicField.Text = "https://another.example.com"; await WaitForState(() => publicCheck.IsEnabled && Find<TextBlock>(guide).Any(t => t.Text == "主机名：another.example.com"), "修正公开网址后仍显示旧输入状态。");
                 page.Children.Remove(guide);
                 SelectPage("clients"); scheme = ClientSchemes.New(paths); designerStep = 1;
-                foreach (var name in new[] { "入口 A", "入口 B", "入口 C" }) scheme["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = name, ["kind"] = "entry", ["region_group"] = "US-West Entry" });
+                foreach (var name in new[] { "入口 A", "入口 B", "入口 C" }) scheme["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = name, ["kind"] = "entry", ["region_group"] = "US-West-LA Entry" });
                 await NodeReorderRegression(output, theme, Require);
                 scheme["Candidate"] = null;
                 designerStep = 3; Navigate("clients");

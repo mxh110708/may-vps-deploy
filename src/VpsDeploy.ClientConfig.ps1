@@ -168,7 +168,7 @@ function Read-MxhRegionGroups {
         return Read-MxhOrderedNames '本次启用哪些默认地区入口组（逗号分隔并按显示顺序排列）' -Allowed $Defaults -Default $Defaults
     }
     while ($true) {
-        $raw = Read-VpsText '地区入口组名称（逗号分隔，例如 US-West Entry, Hong Kong Entry）' -Default ($Defaults -join ', ') -AllowBack
+        $raw = Read-VpsText '地区入口组名称（逗号分隔，例如 US-West-LA Entry, Hong Kong Entry）' -Default ($Defaults -join ', ') -AllowBack
         $items = @($raw -split '[,;，]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
         if ($items.Count -lt 1 -or $items.Count -gt 12) { Write-VpsUi '地区入口组数量必须在 1–12 之间。' Warning; continue }
         if (@($items | Group-Object | Where-Object Count -gt 1)) { Write-VpsUi '地区入口组不能重名。' Warning; continue }

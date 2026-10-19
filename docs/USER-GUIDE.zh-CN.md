@@ -735,7 +735,7 @@ Controller 操作会验证服务、回环监听、HTTP 和 Tunnel 状态。浏�
 
 ### 12.4 地区入口与落地
 
-入口节点必须分配到一个地区入口组，例如 `US-West Entry`、`Hong Kong Entry`、`Europe Entry`。
+入口节点必须分配到一个地区入口组，例如 `US-West-LA Entry`、`US-West-SF Entry`、`Hong Kong Entry`、`Europe Entry`。SF 是本项目对旧金山湾区的统一简称，包含 San Jose；实例原始名称不需要改写。落地的 IPv4 与租用 IPv6 出口可能位于不同城市，可以分别填写出口节点名；入口组描述连接经过的入口，不能据此推断最终出口位置。已保存的自定义组名保留，不按 IP 或服务商标签自动改城。
 
 每个 Shadowsocks 落地节点必须选择一个地区入口组作为 transit/detour。它仍然是“落地节点”，只是拨号动作经所选入口组完成。
 

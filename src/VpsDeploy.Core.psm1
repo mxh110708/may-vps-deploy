@@ -942,6 +942,18 @@ function Get-MxhAddressFamilyNodeName {
     return "$BaseName-$AddressFamily"
 }
 
+function Get-MxhLandingClientNodeName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Plan, [Parameter(Mandatory)][ValidateSet('IPv4', 'IPv6')][string]$AddressFamily)
+    $field = if ($AddressFamily -eq 'IPv6') { 'ClientSecondaryName' } else { 'ClientPrimaryName' }
+    if ($Plan.Shadowsocks.Contains($field) -and [string]$Plan.Shadowsocks[$field] -ne '') {
+        $name = [string]$Plan.Shadowsocks[$field]
+        if ($name.Length -gt 110 -or $name.Trim() -ne $name -or @($name.ToCharArray() | Where-Object { [char]::IsControl($_) }).Count) { throw '落地节点名称无效。' }
+        return $name
+    }
+    return Get-MxhAddressFamilyNodeName -BaseName ([string]$Plan.NodeName) -AddressFamily $AddressFamily -DualStack ([bool]$Plan.Shadowsocks.SecondaryIpv6Enabled)
+}
+
 function Test-VpsHostName {
     param([string]$Value)
     return -not [string]::IsNullOrWhiteSpace($Value) -and
@@ -3108,12 +3120,13 @@ function New-MxhLandingMihomoProfileText {
     }
 
     $dualStack = [bool]$Context.Plan.Shadowsocks.SecondaryIpv6Enabled
-    $primaryName = Get-MxhAddressFamilyNodeName -BaseName ([string]$Context.Plan.NodeName) -AddressFamily IPv4 -DualStack $dualStack
+    $primaryName = Get-MxhLandingClientNodeName -Plan $Context.Plan -AddressFamily IPv4
     Add-MxhLandingNode $primaryName ([string]$credentials.PrimaryUserKey)
     $nodes = [Collections.Generic.List[string]]::new()
     $nodes.Add($primaryName)
     if ([bool]$Context.Plan.Shadowsocks.SecondaryIpv6Enabled) {
-        $secondaryName = Get-MxhAddressFamilyNodeName -BaseName ([string]$Context.Plan.NodeName) -AddressFamily IPv6 -DualStack $dualStack
+        $secondaryName = Get-MxhLandingClientNodeName -Plan $Context.Plan -AddressFamily IPv6
+        if ($secondaryName -eq $primaryName) { throw 'IPv4 与 IPv6 出口节点不能使用相同名称。' }
         Add-MxhLandingNode $secondaryName ([string]$credentials.SecondaryUserKey)
         $nodes.Add($secondaryName)
     }

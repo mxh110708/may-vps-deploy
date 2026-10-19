@@ -20,7 +20,7 @@
         $outbounds = [Collections.Generic.List[object]]::new()
         $outbounds.Add([ordered]@{
                 type = 'shadowsocks'
-                tag = (Get-MxhAddressFamilyNodeName -BaseName ([string]$Context.Plan.NodeName) -AddressFamily IPv4 -DualStack $dualStack)
+                tag = (Get-MxhLandingClientNodeName -Plan $Context.Plan -AddressFamily IPv4)
                 server = [string]$Context.Plan.Server.IPv4
                 server_port = [int]$Context.Plan.Ports.LandingShadowsocks
                 method = [string]$Context.Plan.Shadowsocks.Method
@@ -30,7 +30,7 @@
         if ([bool]$Context.Plan.Shadowsocks.SecondaryIpv6Enabled) {
             $outbounds.Add([ordered]@{
                     type = 'shadowsocks'
-                    tag = (Get-MxhAddressFamilyNodeName -BaseName ([string]$Context.Plan.NodeName) -AddressFamily IPv6 -DualStack $dualStack)
+                    tag = (Get-MxhLandingClientNodeName -Plan $Context.Plan -AddressFamily IPv6)
                     server = [string]$Context.Plan.Server.IPv4
                     server_port = [int]$Context.Plan.Ports.LandingShadowsocks
                     method = [string]$Context.Plan.Shadowsocks.Method

@@ -2,7 +2,8 @@
   "schema_version": 2,
   "business_policy": "GoogleServices.v1",
   "region_groups": [
-    "US-West Entry",
+    "US-West-LA Entry",
+    "US-West-SF Entry",
     "Hong Kong Entry",
     "Europe Entry"
   ],
@@ -11,25 +12,26 @@
   "region_member_defaults": {},
   "landing_transit_defaults": {},
   "default_exit_members": [
-    "US-West Entry",
+    "US-West-LA Entry",
+    "US-West-SF Entry",
     "Hong Kong Entry",
     "Europe Entry",
     "DIRECT"
   ],
   "business_groups": [
-    { "name": "AI Services", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
-    { "name": "Developer Tools", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
-    { "name": "Academic Research", "default": "Default Exit", "order": ["Default Exit", "Hong Kong Entry", "Europe Entry", "US-West Entry", "Direct Route"] },
-    { "name": "Google Services", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
-    { "name": "Microsoft Services", "default": "Direct Route", "order": ["Direct Route", "Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry"] },
-    { "name": "Microsoft Global", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
-    { "name": "Apple Services", "default": "Direct Route", "order": ["Direct Route", "Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry"] },
-    { "name": "Game Platforms", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
-    { "name": "Game Downloads", "default": "Direct Route", "order": ["Direct Route", "Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry"] },
-    { "name": "Social & Messaging", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
-    { "name": "Streaming Media", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
-    { "name": "UDP Guard", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"], "include_block": true },
-    { "name": "Catch-All", "default": "Default Exit", "order": ["Default Exit", "US-West Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] }
+    { "name": "AI Services", "default": "Default Exit", "order": ["Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
+    { "name": "Developer Tools", "default": "Default Exit", "order": ["Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
+    { "name": "Academic Research", "default": "Default Exit", "order": ["Default Exit", "Hong Kong Entry", "Europe Entry", "US-West-LA Entry", "US-West-SF Entry", "Direct Route"] },
+    { "name": "Google Services", "default": "Default Exit", "order": ["Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
+    { "name": "Microsoft Services", "default": "Direct Route", "order": ["Direct Route", "Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry"] },
+    { "name": "Microsoft Global", "default": "Default Exit", "order": ["Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
+    { "name": "Apple Services", "default": "Direct Route", "order": ["Direct Route", "Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry"] },
+    { "name": "Game Platforms", "default": "Default Exit", "order": ["Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
+    { "name": "Game Downloads", "default": "Direct Route", "order": ["Direct Route", "Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry"] },
+    { "name": "Social & Messaging", "default": "Default Exit", "order": ["Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
+    { "name": "Streaming Media", "default": "Default Exit", "order": ["Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] },
+    { "name": "UDP Guard", "default": "Default Exit", "order": ["Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"], "include_block": true },
+    { "name": "Catch-All", "default": "Default Exit", "order": ["Default Exit", "US-West-LA Entry", "US-West-SF Entry", "Hong Kong Entry", "Europe Entry", "Direct Route"] }
   ],
   "guard_groups": [
     { "name": "WebRTC Guard", "members": ["BLOCK", "Default Exit", "DIRECT"] },

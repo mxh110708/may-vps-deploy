@@ -39,7 +39,7 @@ public static class ComponentInstallations
             {
                 "RealityEntry" => new[] { "RealityTarget", "RealityPort", "RealityBackupPort" },
                 "AnyTlsEntry" => ["AnyTlsName", "EchPublicName", "AnyTlsPort", "ZoneName", "CertbotEmail", "CloudflareTokenFile"],
-                "ShadowsocksLanding" => ["LandingPort", "TrustedEntries", "TransitGroup", "SecondaryIpv6Enabled", "SecondaryIpv6Address", "SecondaryBindInterface"],
+                "ShadowsocksLanding" => ["LandingPort", "TrustedEntries", "TransitGroup", "LandingPrimaryName", "LandingSecondaryName", "SecondaryIpv6Enabled", "SecondaryIpv6Address", "SecondaryBindInterface"],
                 "KomariAgent" => ["KomariEndpoint"], "KomariController" => ["ControllerPort"], _ => ["PublicUrl"]
             };
             if (Settings(options, component).Any(item => !allowed.Contains(item.Key))) throw new OperationException("追加安装参数包含其他组件或连接设置，请重新审阅。");
@@ -94,7 +94,8 @@ public static class ComponentInstallations
                 var trusted = Regex.Split(settings.Text("TrustedEntries"), @"[,;\s]+").Where(s => s != "").Distinct().Select(value => IPAddress.TryParse(value, out var address) ? address : throw new OperationException("可信入口地址无效。")).ToArray();
                 if (trusted.Length == 0) throw new OperationException("落地至少需要一个可信入口地址。");
                 if (settings.Flag("SecondaryIpv6Enabled") && (!IPAddress.TryParse(settings.Text("SecondaryIpv6Address"), out var source) || source.AddressFamily != AddressFamily.InterNetworkV6)) throw new OperationException("IPv6 专用用户需要明确的 IPv6 源地址。");
-                plan["Shadowsocks"] = new JsonObject { ["Method"] = "2022-blake3-aes-128-gcm", ["TrustedEntryIPv4s"] = new JsonArray(trusted.Where(ip => ip.AddressFamily == AddressFamily.InterNetwork).Select(ip => (JsonNode?)JsonValue.Create(ip.ToString())).ToArray()), ["TrustedEntryIPv6s"] = new JsonArray(trusted.Where(ip => ip.AddressFamily == AddressFamily.InterNetworkV6).Select(ip => (JsonNode?)JsonValue.Create(ip.ToString())).ToArray()), ["ClientTransitTag"] = settings.Text("TransitGroup", "US-West Entry"), ["SecondaryIpv6Enabled"] = settings.Flag("SecondaryIpv6Enabled"), ["SecondaryIpv6Address"] = settings.Text("SecondaryIpv6Address"), ["SecondaryBindInterface"] = settings.Text("SecondaryBindInterface"), ["SingBoxVersion"] = versions.Text("sing_box.version") };
+                plan["Shadowsocks"] = new JsonObject { ["Method"] = "2022-blake3-aes-128-gcm", ["TrustedEntryIPv4s"] = new JsonArray(trusted.Where(ip => ip.AddressFamily == AddressFamily.InterNetwork).Select(ip => (JsonNode?)JsonValue.Create(ip.ToString())).ToArray()), ["TrustedEntryIPv6s"] = new JsonArray(trusted.Where(ip => ip.AddressFamily == AddressFamily.InterNetworkV6).Select(ip => (JsonNode?)JsonValue.Create(ip.ToString())).ToArray()), ["ClientTransitTag"] = settings.Text("TransitGroup", "US-West-LA Entry"), ["ClientPrimaryName"] = settings.Text("LandingPrimaryName").Trim(), ["ClientSecondaryName"] = settings.Text("LandingSecondaryName").Trim(), ["SecondaryIpv6Enabled"] = settings.Flag("SecondaryIpv6Enabled"), ["SecondaryIpv6Address"] = settings.Text("SecondaryIpv6Address"), ["SecondaryBindInterface"] = settings.Text("SecondaryBindInterface"), ["SingBoxVersion"] = versions.Text("sing_box.version") };
+                DeploymentNaming.ValidateLandingNames(plan);
                 if (plan.Text("Shadowsocks.SecondaryBindInterface") != "" && !Regex.IsMatch(plan.Text("Shadowsocks.SecondaryBindInterface"), "^[a-zA-Z0-9_.:-]{1,15}$")) throw new OperationException("网卡名称无效。");
                 plan.Put("Ports.LandingShadowsocks", JsonValue.Create(settings.Number("LandingPort", 45001))); break;
             case "KomariAgent":

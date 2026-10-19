@@ -114,7 +114,10 @@ dns:
     - 119.29.29.29
 proxies: []
 proxy-groups:
-- name: US-West Entry
+- name: US-West-LA Entry
+  type: select
+  proxies: [DIRECT]
+- name: US-West-SF Entry
   type: select
   proxies: [DIRECT]
 - name: Hong Kong Entry

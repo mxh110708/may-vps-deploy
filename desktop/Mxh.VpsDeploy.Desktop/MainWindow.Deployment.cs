@@ -49,7 +49,9 @@ public sealed partial class MainWindow
             }
             if (roles.Contains("AnyTlsEntry")) page.Children.Add(Card(Column(SectionHeading("AnyTLS / ECH 入口", Symbol.Link), Fields(Field("服务器名称", deploymentForm, "AnyTlsName"), Field("ECH public name", deploymentForm, "EchPublicName")), Field("入口端口", deploymentForm, "AnyTlsPort", "443", true))));
             if (roles.Contains("ShadowsocksLanding")) page.Children.Add(Card(Column(SectionHeading("Shadowsocks 落地", Symbol.Link), Field("可信入口地址（逗号分隔）", deploymentForm, "TrustedEntries"),
-                Fields(Field("落地 TCP / UDP 端口", deploymentForm, "LandingPort", "45001", true), Field("入口组", deploymentForm, "TransitGroup", "US-West Entry")),
+                Fields(Field("落地 TCP / UDP 端口", deploymentForm, "LandingPort", "45001", true), Field("入口组", deploymentForm, "TransitGroup", "US-West-LA Entry")),
+                Fields(Field("IPv4 出口节点名（可选）", deploymentForm, "LandingPrimaryName"), Field("IPv6 出口节点名（可选）", deploymentForm, "LandingSecondaryName")),
+                Text("美国西部入口使用 US-West-LA / US-West-SF；SF 统一表示旧金山湾区（含 San Jose）。出口按实际位置命名，可分别填写 LA IPv4 与 SF ATT IPv6；留空沿用实例名。", 14, true),
                 Details("IPv6 专用出口用户", Column(Flag("启用第二用户", deploymentForm, "SecondaryIpv6Enabled"), Fields(Field("IPv6 源地址", deploymentForm, "SecondaryIpv6Address"), Field("绑定网卡（可选）", deploymentForm, "SecondaryBindInterface")))))));
             if (roles.Contains("AnyTlsEntry") || roles.Contains("RealityEntry") && deploymentForm.Flag("LocalTarget")) page.Children.Add(Card(Column(SectionHeading("可信证书", Symbol.Permissions), Fields(Field("Cloudflare 区域", deploymentForm, "ZoneName"), Field("证书联系邮件", deploymentForm, "CertbotEmail")), FileField("证书 Token 私人文件", deploymentForm, "CloudflareTokenFile"))));
             if (deploymentForm.Flag("KomariEnabled")) page.Children.Add(Card(Column(SectionHeading("监控连接", Symbol.World), Field("Komari 主控地址", deploymentForm, "KomariEndpoint"), Text("填写完整的 HTTP/HTTPS 主控地址；Agent Token 在执行时单独输入。", 14, true))));

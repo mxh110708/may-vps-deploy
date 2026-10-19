@@ -32,6 +32,7 @@ internal sealed partial class BoundaryTests(string repository)
         using var f = new Fixture(repository); Paths(f); Fonts(f); await Coordinator(f); Publisher(f); SinglePublisher(f); Profiles(f); MultiPurpose(f); Keys(f); await Workflows(f); await DesktopDeployment(f); await Credentials(f); await Workbench(f); await Trust(f); await DeploymentExperience(f); await MaintenanceExperience(f);
         CloudflareCredentialExperience(f);
         ClientLayoutUpgradeExperience(f);
+        CityNamingExperience(f);
         await MonitoringArchiveExperience(f);
         await ComponentUpdateExperience(f);
         await RecoveryExperience(f);
@@ -209,7 +210,7 @@ internal sealed partial class BoundaryTests(string repository)
     }
     private async Task Workbench(Fixture f)
     {
-        var scheme = ClientSchemes.New(f.Paths); var node = ClientProfiles.Nodes(f.Plan("Client"), Fixture.RealitySecrets()).First(); scheme["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = node.Name, ["kind"] = "entry", ["region_group"] = "US-West Entry", ["transit_group"] = "US-West Entry", ["clash"] = node.Clash.DeepClone(), ["sing_box"] = node.SingBox.DeepClone() });
+        var scheme = ClientSchemes.New(f.Paths); var node = ClientProfiles.Nodes(f.Plan("Client"), Fixture.RealitySecrets()).First(); scheme["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = node.Name, ["kind"] = "entry", ["region_group"] = "US-West-LA Entry", ["transit_group"] = "US-West-LA Entry", ["clash"] = node.Clash.DeepClone(), ["sing_box"] = node.SingBox.DeepClone() });
         var clash = f.Paths.Resolve("private/fake.candidate.yaml"); var sing = f.Paths.Resolve("private/fake.candidate.json"); File.WriteAllText(clash, "fixture"); File.WriteAllText(sing, "fixture"); scheme["Candidate"] = new JsonObject { ["Clash"] = clash, ["SingBox"] = sing, ["ClashHash"] = ClientSchemes.SourceFingerprint(clash), ["SingBoxHash"] = ClientSchemes.SourceFingerprint(sing), ["ValidationStatus"] = "Passed", ["SpecFingerprint"] = ArchiveStore.Fingerprint(ClientSchemes.Specification(scheme)) };
         var workbench = new ClientWorkbench(f.Store, new FakeTools(), new FakeAssets(), "unused"); await RefusesAsync(() => workbench.ValidateAsync(scheme, default), "failed core accepted"); Check(scheme.Text("Candidate.ValidationStatus") == "Failed" && scheme.Text("Candidate.ValidationError") != "" && !scheme.Text("Candidate.ValidationError").Contains("synthetic-credential"), "failure retained Passed or leaked validator output");
     }
@@ -236,7 +237,7 @@ internal sealed partial class BoundaryTests(string repository)
         foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories)) { var target = f.Paths.Resolve("vendor/test-cores/windows-amd64/" + Path.GetRelativePath(source, file).Replace('\\', '/')); Directory.CreateDirectory(Path.GetDirectoryName(target)!); File.Copy(file, target); }
         var assets = new ValidationAssets(f.Paths, "windows-amd64"); var workbench = new ClientWorkbench(f.Store, new ExternalToolRunner(), assets, python);
         var scheme = ClientSchemes.New(f.Paths); var secrets = Fixture.RealitySecrets(); secrets.Put("Xray.RealityClientKey", JsonValue.Create(ServerConfigurations.RandomKey(32).Replace('+', '-').Replace('/', '_').TrimEnd('=')));
-        var node = ClientProfiles.Nodes(f.Plan("RealCore"), secrets).First(); scheme["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = node.Name, ["kind"] = "entry", ["region_group"] = "US-West Entry", ["transit_group"] = "US-West Entry", ["clash"] = node.Clash.DeepClone(), ["sing_box"] = node.SingBox.DeepClone() });
+        var node = ClientProfiles.Nodes(f.Plan("RealCore"), secrets).First(); scheme["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = node.Name, ["kind"] = "entry", ["region_group"] = "US-West-LA Entry", ["transit_group"] = "US-West-LA Entry", ["clash"] = node.Clash.DeepClone(), ["sing_box"] = node.SingBox.DeepClone() });
         var candidate = await workbench.BuildAsync(scheme, default); await workbench.ValidateAsync(scheme, default); Check(candidate.Text("ValidationStatus") == "Passed", "real fixed cores rejected candidate");
         var clash = f.Paths.Resolve("real-authority/clash.yaml"); var sing = f.Paths.Resolve("real-authority/sing.json"); workbench.PreparePublish(scheme, clash, sing); workbench.Publish(scheme, clash, sing); Check(File.Exists(clash) && File.Exists(sing), "real candidate not published to fixture");
         foreach (var mode in new[] { "SingBox", "Clash" })
@@ -249,16 +250,16 @@ internal sealed partial class BoundaryTests(string repository)
             var target = f.Paths.Resolve("real-authority/" + mode + "/config" + (mode == "Clash" ? ".yaml" : ".json")); singleWorkbench.PreparePublish(single, mode == "Clash" ? target : "", mode == "SingBox" ? target : ""); singleWorkbench.Publish(single, mode == "Clash" ? target : "", mode == "SingBox" ? target : ""); Check(File.Exists(target), "single core-validated export failed");
             if (mode == "SingBox")
             {
-                var existing = ArchiveStore.ReadJson(target); var group = existing["outbounds"]!.AsArray().Single(item => item!.Text("tag") == "US-West Entry")!.AsObject();
+                var existing = ArchiveStore.ReadJson(target); var group = existing["outbounds"]!.AsArray().Single(item => item!.Text("tag") == "US-West-LA Entry")!.AsObject();
                 group["type"] = "urltest"; group.Remove("default"); group["url"] = "https://example.com/"; group["interval"] = "10m";
                 ArchiveStore.WriteJson(target, existing);
             }
             var fingerprint = ClientSchemes.SourceFingerprint(target); var imported = await singleWorkbench.ReadSourcesAsync(mode == "Clash" ? target : "", mode == "SingBox" ? target : "", default);
             Check(imported.Count == 1 && imported[0]![other == "Clash" ? "clash" : "sing_box"] == null && fingerprint == ClientSchemes.SourceFingerprint(target), "single source import changed source or required pair");
             single["Nodes"] = imported; single[format] = target; single["SourceMode"] = "ExistingAuthority"; single["SourceFingerprints"] = new JsonObject { [format] = fingerprint };
-            foreach (var item in imported) { item!["region_group"] = "US-West Entry"; item["transit_group"] = "US-West Entry"; }
+            foreach (var item in imported) { item!["region_group"] = "US-West-LA Entry"; item["transit_group"] = "US-West-LA Entry"; }
             await singleWorkbench.BuildAsync(single, default); await singleWorkbench.ValidateAsync(single, default); Check(single.Text("Candidate.ValidationStatus") == "Passed", "single imported config did not rebuild");
-            if (mode == "SingBox") Check(ArchiveStore.ReadJson(single.Text("Candidate.SingBox"))["outbounds"]!.AsArray().Count(item => item!.Text("tag") == "US-West Entry") == 1, "actual urltest source rebuild duplicated the generated group");
+            if (mode == "SingBox") Check(ArchiveStore.ReadJson(single.Text("Candidate.SingBox"))["outbounds"]!.AsArray().Count(item => item!.Text("tag") == "US-West-LA Entry") == 1, "actual urltest source rebuild duplicated the generated group");
             File.AppendAllText(target, "\n "); await RefusesAsync(() => singleWorkbench.BuildAsync(single, default), "changed imported source accepted");
             singleWorkbench.Delete(single); Check(!singleWorkbench.List().Any(s => s.Text("Id") == single.Text("Id")) && File.Exists(target), "deleting scheme removed exported authority");
         }

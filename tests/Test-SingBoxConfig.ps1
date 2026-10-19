@@ -26,7 +26,7 @@ try {
                 SecondaryIpv6Enabled = $true
                 SecondaryIpv6Address = '2001:db8::20'
                 SecondaryBindInterface = 'eth0'
-                ClientTransitTag = 'US-West Entry'
+                ClientTransitTag = 'US-West-LA Entry'
             }
         }
         Secrets = [ordered]@{
@@ -57,7 +57,7 @@ try {
                 override_port = 53
             })
         outbounds = @(
-            [ordered]@{ type = 'direct'; tag = 'US-West Entry' },
+            [ordered]@{ type = 'direct'; tag = 'US-West-LA Entry' },
             [ordered]@{
                 type = 'shadowsocks'
                 tag = 'landing'
@@ -65,7 +65,7 @@ try {
                 server_port = 33456
                 method = '2022-blake3-aes-128-gcm'
                 password = $serverKey + ':' + $primaryUserKey
-                detour = 'US-West Entry'
+                detour = 'US-West-LA Entry'
             }
         )
         route = [ordered]@{ final = 'landing' }

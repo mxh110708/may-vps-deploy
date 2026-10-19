@@ -578,7 +578,7 @@ $landingContext = [pscustomobject]@{
         Ports = [ordered]@{ LandingShadowsocks = 33456 }
         Shadowsocks = [ordered]@{
             Method = '2022-blake3-aes-128-gcm'
-            ClientTransitTag = 'US-West Entry'
+            ClientTransitTag = 'US-West-LA Entry'
             SecondaryIpv6Enabled = $true
             SecondaryIpv6Address = '2001:db8::20'
             SecondaryBindInterface = 'eth0'
@@ -609,7 +609,17 @@ $landingOutbounds = Get-Content -Raw -LiteralPath (Join-Path $landingFixtureRoot
 Assert-True (@($landingOutbounds.outbounds).Count -eq 2) 'two landing client outbounds generated'
 Assert-True (@($landingOutbounds.outbounds.tag) -contains 'Example-US.Landing-IPv4' -and @($landingOutbounds.outbounds.tag) -contains 'Example-US.Landing-IPv6') 'dual-egress Shadowsocks nodes expose both address-family suffixes'
 Assert-True (($landingOutbounds.outbounds[0].password -split ':').Count -eq 2) 'client password combines server and user keys'
-Assert-True ($landingOutbounds.outbounds[0].detour -eq 'US-West Entry') 'sing-box detour points to transit tag'
+Assert-True ($landingOutbounds.outbounds[0].detour -eq 'US-West-LA Entry') 'sing-box detour points to transit tag'
+$landingContext.Plan.Shadowsocks.ClientPrimaryName = 'US-West-LA Exit A IPv4'
+$landingContext.Plan.Shadowsocks.ClientSecondaryName = 'US-West-SF Exit A ATT IPv6'
+$beforeLandingPassword = $landingOutbounds.outbounds[0].password
+& $landingExportModule.Invoke $landingContext
+$cityOutbounds = Get-Content -Raw -LiteralPath (Join-Path $landingFixtureRoot 'client-exports\sing-box-shadowsocks-outbounds.private.json') | ConvertFrom-Json
+$cityMihomo = Get-Content -Raw -LiteralPath (Join-Path $landingFixtureRoot 'client-exports\mihomo-shadowsocks-test.yaml')
+Assert-True ($cityOutbounds.outbounds[0].tag -eq 'US-West-LA Exit A IPv4' -and $cityOutbounds.outbounds[1].tag -eq 'US-West-SF Exit A ATT IPv6') 'CLI export preserves independent city labels for each egress'
+Assert-True ($cityOutbounds.outbounds[0].password -eq $beforeLandingPassword -and $cityOutbounds.outbounds[1].detour -eq 'US-West-LA Entry') 'CLI city rename preserves credentials and entry detour'
+Assert-True ($cityMihomo.Contains('US-West-LA Exit A IPv4') -and $cityMihomo.Contains('US-West-SF Exit A ATT IPv6')) 'both client exporters use the same egress city labels'
+$landingContext.Plan.Shadowsocks.Remove('ClientPrimaryName'); $landingContext.Plan.Shadowsocks.Remove('ClientSecondaryName')
 $singleStackLandingContext = [pscustomobject]@{
     Plan = [ordered]@{
         NodeName = 'Example-US.SingleLanding'
@@ -727,7 +737,7 @@ $migrationPlans = foreach ($case in $migrationCases) {
         -AnyTlsPaddingScheme @('stop=8', '0=10-20') -ForceIpv4Egress $true `
         -TrustedTlsEnabled ($case.Target -eq 'AnyTlsEntry') -CloudflareZoneName 'example.invalid' `
         -CertbotEmail 'fixture@example.invalid' -CloudflareTokenFile 'C:\fixture-token.private.txt' `
-        -TrustedEntryIps $migrationAllowlist -ClientTransitTag 'US-West Entry' `
+        -TrustedEntryIps $migrationAllowlist -ClientTransitTag 'US-West-LA Entry' `
         -ValidationEntryPlanPath 'C:\fixture-entry-plan.json' `
         -SecondaryIpv6Enabled $false -NetworkTuning $baselineTuning
 }
@@ -887,7 +897,7 @@ Save-VpsJson -Value $migrationSourceSecrets -Path (Join-Path $migrationFixtureRo
 Assert-True (Test-MxhProtocolMigrationSource -PlanPath $migrationSourcePlanPath -Plan $migrationSourcePlan -State $migrationSourceState) 'completed script-managed source is accepted for migration'
 $migrationTargetPlan = New-MxhProtocolMigrationPlan -SourcePlan $migrationSourcePlan -SourcePlanPath $migrationSourcePlanPath `
     -TargetRole ShadowsocksLanding -TargetServicePort 34201 -TrustedEntryIps $migrationAllowlist `
-    -ClientTransitTag 'US-West Entry' -SingBoxVersion '1.14.0' -NetworkTuning $baselineTuning
+    -ClientTransitTag 'US-West-LA Entry' -SingBoxVersion '1.14.0' -NetworkTuning $baselineTuning
 $migrationResultFixture = [pscustomobject]@{
     Plan = $migrationTargetPlan
     Source = [pscustomobject]@{ PlanPath = $migrationSourcePlanPath; Plan = $migrationSourcePlan; State = $migrationSourceState }
@@ -1397,7 +1407,7 @@ proxies:
     type: vless
     server: 192.0.2.9
 proxy-groups:
-  - name: US-West Entry
+  - name: US-West-LA Entry
     type: select
     proxies:
       - Existing-IPv4
@@ -1406,7 +1416,7 @@ proxy-groups:
     proxies:
       - Existing-IPv4
 rules:
-  - MATCH,US-West Entry
+  - MATCH,US-West-LA Entry
 "@)
 [IO.File]::WriteAllText((Join-Path $fragmentRoot 'mihomo-test-primary.yaml'), @"
 proxies:
@@ -1419,7 +1429,7 @@ rules: []
 Save-VpsJson -Value ([ordered]@{ outbounds=@([ordered]@{type='vless';tag='Candidate-IPv4';server='192.0.2.1'}) }) -Path (Join-Path $fragmentRoot 'sing-box-outbounds.private.json')
 Save-VpsJson -Value ([ordered]@{ outbounds=@(
         [ordered]@{type='vless';tag='Existing-IPv4';server='192.0.2.9'},[ordered]@{type='direct';tag='DIRECT'},[ordered]@{type='block';tag='BLOCK'},
-        [ordered]@{type='selector';tag='US-West Entry';outbounds=@('Existing-IPv4')},
+        [ordered]@{type='selector';tag='US-West-LA Entry';outbounds=@('Existing-IPv4')},
         [ordered]@{type='selector';tag='Europe Entry';outbounds=@('Existing-IPv4')}
     ); route=[ordered]@{rules=@()} }) -Path $authorityJson
 $pythonCommandForClient = Get-Command python.exe -ErrorAction SilentlyContinue
@@ -1432,13 +1442,13 @@ if ($clientBuilderAvailable) {
 $python = $pythonCommandForClient.Source
 $merge = Invoke-VpsProcess -FilePath $python -ArgumentList @(
     (Join-Path $ProjectRoot 'scripts\merge_client_authority.py'),'--clash',$authorityYaml,'--sing-box',$authorityJson,
-    '--fragments',$fragmentRoot,'--output',$outputRoot,'--roles','RealityEntry','--entry-group','US-West Entry'
+    '--fragments',$fragmentRoot,'--output',$outputRoot,'--roles','RealityEntry','--entry-group','US-West-LA Entry'
 ) -TimeoutSeconds 60
 Assert-True ($merge.ExitCode -eq 0) 'client authority candidate merge fixture succeeds'
 $mergedJson = Get-Content -Raw (Join-Path $outputRoot 'sing-box-general.candidate.json') | ConvertFrom-Json -AsHashtable
 Assert-True ((Get-Item (Join-Path $outputRoot 'sing-box-general.candidate.json')).Length -lt 4MB) 'legacy candidate merger keeps runtime JSON below the desktop IPC ceiling'
 Assert-True ('Candidate-IPv4' -in @($mergedJson.outbounds.tag)) 'candidate merge adds sing-box outbound'
-Assert-True ('Candidate-IPv4' -in @((@($mergedJson.outbounds | Where-Object tag -eq 'US-West Entry')[0]).outbounds)) 'candidate merge updates selected sing-box entry selector'
+Assert-True ('Candidate-IPv4' -in @((@($mergedJson.outbounds | Where-Object tag -eq 'US-West-LA Entry')[0]).outbounds)) 'candidate merge updates selected sing-box entry selector'
 $removeRoot = Join-Path $candidateRoot 'remove-output'
 $remove = Invoke-VpsProcess -FilePath $python -ArgumentList @(
     (Join-Path $ProjectRoot 'scripts\merge_client_authority.py'),'--clash',(Join-Path $outputRoot 'Clash_General.candidate.yaml'),
@@ -1452,23 +1462,23 @@ Assert-True ('Candidate-IPv4' -notin @($removedJson.outbounds.tag)) 'decommissio
 $designerOutput = Join-Path $candidateRoot 'designer-output'
 $designerSpec = Join-Path $candidateRoot 'designer-spec.private.json'
 $manualLanding = [ordered]@{
-    name='Example Exit A IPv4';kind='landing';region_group=$null;transit_group='US-West Entry'
-    clash=[ordered]@{name='Example Exit A IPv4';type='ss';server='192.0.2.2';port=34567;cipher='2022-blake3-aes-128-gcm';password='fixture';udp=$true;'dialer-proxy'='US-West Entry'}
-    sing_box=[ordered]@{type='shadowsocks';tag='Example Exit A IPv4';server='192.0.2.2';server_port=34567;method='2022-blake3-aes-128-gcm';password='fixture';detour='US-West Entry'}
+    name='Example Exit A IPv4';kind='landing';region_group=$null;transit_group='US-West-LA Entry'
+    clash=[ordered]@{name='Example Exit A IPv4';type='ss';server='192.0.2.2';port=34567;cipher='2022-blake3-aes-128-gcm';password='fixture';udp=$true;'dialer-proxy'='US-West-LA Entry'}
+    sing_box=[ordered]@{type='shadowsocks';tag='Example Exit A IPv4';server='192.0.2.2';server_port=34567;method='2022-blake3-aes-128-gcm';password='fixture';detour='US-West-LA Entry'}
 }
 $designerSpecValue = [ordered]@{
     schema_version=1
-    fragment_sources=@([ordered]@{fragment_dir=$fragmentRoot;role='RealityEntry';node_names=@('Candidate-IPv4');region_group='US-West Entry';transit_group=$null})
+    fragment_sources=@([ordered]@{fragment_dir=$fragmentRoot;role='RealityEntry';node_names=@('Candidate-IPv4');region_group='US-West-LA Entry';transit_group=$null})
     manual_nodes=@($manualLanding)
-    existing_node_refs=@([ordered]@{name='Existing-IPv4';kind='entry';region_group='US-West Entry';transit_group=$null})
+    existing_node_refs=@([ordered]@{name='Existing-IPv4';kind='entry';region_group='US-West-LA Entry';transit_group=$null})
     groups=@(
-        [ordered]@{name='US-West Entry';members=@('Candidate-IPv4','Existing-IPv4')},
-        [ordered]@{name='Default Exit';members=@('Example Exit A IPv4','US-West Entry','DIRECT')},
+        [ordered]@{name='US-West-LA Entry';members=@('Candidate-IPv4','Existing-IPv4')},
+        [ordered]@{name='Default Exit';members=@('Example Exit A IPv4','US-West-LA Entry','DIRECT')},
         [ordered]@{name='Direct Route';members=@('DIRECT','Default Exit')},
-        [ordered]@{name='AI Services';members=@('Default Exit','US-West Entry','Example Exit A IPv4','Direct Route')}
+        [ordered]@{name='AI Services';members=@('Default Exit','US-West-LA Entry','Example Exit A IPv4','Direct Route')}
     )
     remove_groups=@('Europe Entry')
-    group_order=@('US-West Entry','Default Exit','Direct Route','AI Services')
+    group_order=@('US-West-LA Entry','Default Exit','Direct Route','AI Services')
 }
 Save-VpsJson -Value $designerSpecValue -Path $designerSpec -Private
 $designer = Invoke-VpsProcess -FilePath $python -ArgumentList @(
@@ -1478,23 +1488,23 @@ $designer = Invoke-VpsProcess -FilePath $python -ArgumentList @(
 Assert-True ($designer.ExitCode -eq 0) 'independent client authority designer builds a candidate from managed and manual nodes'
 $designerJson = Get-Content -Raw (Join-Path $designerOutput 'sing-box-general.candidate.json') | ConvertFrom-Json -AsHashtable
 Assert-True ((Get-Item (Join-Path $designerOutput 'sing-box-general.candidate.json')).Length -lt 4MB) 'independent designer emits compact sing-box runtime JSON'
-$designerEntry = @($designerJson.outbounds | Where-Object tag -eq 'US-West Entry')[0]
+$designerEntry = @($designerJson.outbounds | Where-Object tag -eq 'US-West-LA Entry')[0]
 $designerLanding = @($designerJson.outbounds | Where-Object tag -eq 'Example Exit A IPv4')[0]
 Assert-True (@($designerEntry.outbounds)[0] -eq 'Candidate-IPv4') 'regional entry order controls the selector first default'
 Assert-True ('Existing-IPv4' -in @($designerEntry.outbounds)) 'existing authority node can be reused without re-entering credentials'
-Assert-True ($designerLanding.detour -eq 'US-West Entry') 'landing detour follows the chosen regional entry group'
+Assert-True ($designerLanding.detour -eq 'US-West-LA Entry') 'landing detour follows the chosen regional entry group'
 Assert-True ((@($designerJson.outbounds | Where-Object tag -eq 'Default Exit')[0]).default -eq 'Example Exit A IPv4') 'default exit first member is written as sing-box selector default'
 Assert-True (-not @($designerJson.outbounds | Where-Object tag -eq 'Europe Entry').Count) 'disabled default region group is removed from the candidate'
 $designerYamlText = Get-Content -Raw (Join-Path $designerOutput 'Clash_General.candidate.yaml')
-Assert-True ($designerYamlText -match 'dialer-proxy:\s+US-West Entry') 'Clash landing node receives the matching dialer-proxy'
+Assert-True ($designerYamlText -match 'dialer-proxy:\s+US-West-LA Entry') 'Clash landing node receives the matching dialer-proxy'
 $genericOutput=Join-Path $candidateRoot 'generic-template-output'
 $genericSpecPath=Join-Path $candidateRoot 'generic-template-spec.private.json'
 $genericLayout=Get-Content -Raw (Join-Path $ProjectRoot 'config\client-layout.default.json')|ConvertFrom-Json -AsHashtable
-$genericNode=[ordered]@{name='Portable-Entry';kind='entry';region_group='US-West Entry';transit_group=$null;clash=[ordered]@{name='Portable-Entry';type='vless';server='192.0.2.80';port=443;uuid='fixture';network='tcp';tls=$true;servername='target.example.invalid';flow='xtls-rprx-vision';'client-fingerprint'='chrome';'reality-opts'=[ordered]@{'public-key'='fixture';'short-id'='0123456789abcdef'}};sing_box=[ordered]@{type='vless';tag='Portable-Entry';server='192.0.2.80';server_port=443;uuid='fixture';flow='xtls-rprx-vision';tls=[ordered]@{enabled=$true;server_name='target.example.invalid';reality=[ordered]@{enabled=$true;public_key='fixture';short_id='0123456789abcdef'}}}}
-$genericGroups=[Collections.Generic.List[object]]::new();$genericGroups.Add([ordered]@{name='US-West Entry';members=@('Portable-Entry')});$genericGroups.Add([ordered]@{name='Default Exit';members=@('US-West Entry','DIRECT')});$genericGroups.Add([ordered]@{name='Direct Route';members=@('DIRECT','Default Exit')})
-foreach($definition in $genericLayout.business_groups){$genericGroups.Add([ordered]@{name=[string]$definition.name;members=@([string]$definition.default,'US-West Entry','Direct Route')|Select-Object -Unique})}
+$genericNode=[ordered]@{name='Portable-Entry';kind='entry';region_group='US-West-LA Entry';transit_group=$null;clash=[ordered]@{name='Portable-Entry';type='vless';server='192.0.2.80';port=443;uuid='fixture';network='tcp';tls=$true;servername='target.example.invalid';flow='xtls-rprx-vision';'client-fingerprint'='chrome';'reality-opts'=[ordered]@{'public-key'='fixture';'short-id'='0123456789abcdef'}};sing_box=[ordered]@{type='vless';tag='Portable-Entry';server='192.0.2.80';server_port=443;uuid='fixture';flow='xtls-rprx-vision';tls=[ordered]@{enabled=$true;server_name='target.example.invalid';reality=[ordered]@{enabled=$true;public_key='fixture';short_id='0123456789abcdef'}}}}
+$genericGroups=[Collections.Generic.List[object]]::new();$genericGroups.Add([ordered]@{name='US-West-LA Entry';members=@('Portable-Entry')});$genericGroups.Add([ordered]@{name='Default Exit';members=@('US-West-LA Entry','DIRECT')});$genericGroups.Add([ordered]@{name='Direct Route';members=@('DIRECT','Default Exit')})
+foreach($definition in $genericLayout.business_groups){$genericGroups.Add([ordered]@{name=[string]$definition.name;members=@([string]$definition.default,'US-West-LA Entry','Direct Route')|Select-Object -Unique})}
 foreach($guard in $genericLayout.guard_groups){$genericGroups.Add([ordered]@{name=[string]$guard.name;members=@($guard.members|Where-Object{$_ -notin @('Hong Kong Entry','Europe Entry')})})}
-$genericSpec=[ordered]@{schema_version=1;source_mode='GenericTemplate';output_mode='GenerateNew';fragment_sources=@();manual_nodes=@($genericNode);existing_node_refs=@();groups=@($genericGroups);remove_groups=@('Hong Kong Entry','Europe Entry');group_order=@('US-West Entry','Default Exit','Direct Route')+@($genericLayout.business_groups.name)+@($genericLayout.guard_groups.name)}
+$genericSpec=[ordered]@{schema_version=1;source_mode='GenericTemplate';output_mode='GenerateNew';fragment_sources=@();manual_nodes=@($genericNode);existing_node_refs=@();groups=@($genericGroups);remove_groups=@('US-West-SF Entry','Hong Kong Entry','Europe Entry');group_order=@('US-West-LA Entry','Default Exit','Direct Route')+@($genericLayout.business_groups.name)+@($genericLayout.guard_groups.name)}
 Save-VpsJson -Value $genericSpec -Path $genericSpecPath -Private
 $genericBuild=Invoke-VpsProcess -FilePath $python -ArgumentList @((Join-Path $ProjectRoot 'scripts\build_client_authority.py'),'--clash',(Join-Path $ProjectRoot 'templates\client\clash-general.template.yaml'),'--sing-box',(Join-Path $ProjectRoot 'templates\client\sing-box-general.template.json'),'--spec',$genericSpecPath,'--output',$genericOutput) -TimeoutSeconds 60
 Assert-True ($genericBuild.ExitCode -eq 0) 'generic project templates build a complete candidate without personal authority files'
@@ -1519,7 +1529,7 @@ Assert-True ($cycle.ExitCode -ne 0 -and $cycle.StdErr -match 'cycle') 'client au
 $designerInstanceRoot = Join-Path $candidateRoot 'empty-instances'; [IO.Directory]::CreateDirectory($designerInstanceRoot)|Out-Null
 $designerDryOutput = Join-Path $candidateRoot 'dry-output-root'
 $designerDryInput = (@(
-    '6','n','US-West Entry','2',$authorityYaml,$authorityJson,'n','1','1','Existing-IPv4','US-West Entry,DIRECT','n','2',$designerDryOutput,$designerDryOutput,'Clash_General.yaml','sing-box-general.json'
+    '6','n','US-West-LA Entry','2',$authorityYaml,$authorityJson,'n','1','1','Existing-IPv4','US-West-LA Entry,DIRECT','n','2',$designerDryOutput,$designerDryOutput,'Clash_General.yaml','sing-box-general.json'
 ) -join [Environment]::NewLine) + [Environment]::NewLine
 $designerDry = Invoke-VpsProcess -FilePath $pwshPath -ArgumentList @(
     '-NoProfile','-File',(Join-Path $ProjectRoot 'Start-VPSDeploy.ps1'),'-Mode','ClientConfig','-DryRun','-InstanceRoot',$designerInstanceRoot

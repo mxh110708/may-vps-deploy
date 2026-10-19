@@ -32,10 +32,10 @@ internal sealed partial class BoundaryTests
         Check(ManagedNodeSources.Fingerprint(node) == ManagedNodeSources.Fingerprint(ClientProfiles.Nodes(changedPlan, credentials).First(n => n.Role == "RealityEntry")), "adding another protocol invalidated an unchanged connection by display name");
         var legacy = ClientSchemes.New(f.Paths);
         legacy["Sources"] = new JsonObject { [SafePath.Resolve(source.Directory, "deployment-plan.json")] = new string('a', 64), [secretFile] = encryptedHash };
-        legacy["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = node.Name, ["kind"] = "entry", ["region_group"] = "US-West Entry", ["clash"] = node.Clash.DeepClone(), ["sing_box"] = node.SingBox.DeepClone() });
+        legacy["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = node.Name, ["kind"] = "entry", ["region_group"] = "US-West-LA Entry", ["clash"] = node.Clash.DeepClone(), ["sing_box"] = node.SingBox.DeepClone() });
         var source2 = Managed("Second-legacy-source"); var secret2 = SafePath.Resolve(source2.Directory, "secrets.dotnet.private.json"); File.Delete(secret2); var credentials2 = Fixture.RealitySecrets(); encryptedStore.WriteSecret(secret2, credentials2);
         legacy["Sources"]![SafePath.Resolve(source2.Directory, "deployment-plan.json")] = new string('c', 64); legacy["Sources"]![secret2] = ClientSchemes.SourceFingerprint(secret2);
-        var node2 = ClientProfiles.Nodes(source2.Plan, credentials2).First(); legacy["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = node2.Name, ["kind"] = "entry", ["region_group"] = "US-West Entry", ["clash"] = node2.Clash.DeepClone(), ["sing_box"] = node2.SingBox.DeepClone() });
+        var node2 = ClientProfiles.Nodes(source2.Plan, credentials2).First(); legacy["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = node2.Name, ["kind"] = "entry", ["region_group"] = "US-West-LA Entry", ["clash"] = node2.Clash.DeepClone(), ["sing_box"] = node2.SingBox.DeepClone() });
         var legacyWorkbench = new ClientWorkbench(encryptedStore, new FakeTools(), new FakeAssets(), "synthetic-python");
         await RefusesAsync(() => legacyWorkbench.BuildAsync(legacy, default), "synthetic builder unexpectedly ran");
         Check(legacy["Nodes"]!.AsArray().All(n => n!["ManagedOrigin"] != null) && legacy["Sources"]!.AsObject().Count == 0, "multi-instance legacy sources did not migrate renamed connections in one pass");
@@ -58,7 +58,7 @@ internal sealed partial class BoundaryTests
         Check(File.ReadAllText(c) == "old-a" && File.ReadAllText(s) == "midpoint-external-edit", "publication did not preserve external edit or roll back first target");
 
         var scheme = ClientSchemes.New(f.Paths); scheme["AuthorityNodes"] = new JsonArray("A", "B");
-        scheme["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = "B", ["kind"] = "entry", ["region_group"] = "US-West Entry", ["clash"] = new JsonObject { ["name"] = "B" }, ["sing_box"] = new JsonObject { ["tag"] = "B" } });
+        scheme["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = "B", ["kind"] = "entry", ["region_group"] = "US-West-LA Entry", ["clash"] = new JsonObject { ["name"] = "B" }, ["sing_box"] = new JsonObject { ["tag"] = "B" } });
         Check(ClientSchemes.Specification(scheme).Strings("remove_nodes").SequenceEqual(new[] { "A" }), "editor deletion did not reach builder specification");
         var renamed = scheme["Nodes"]!.AsArray()[0]!; renamed["AuthorityName"] = "B"; renamed["name"] = "C"; renamed["clash"]!["name"] = "C"; renamed["sing_box"]!["tag"] = "C";
         var specification = ClientSchemes.Specification(scheme); Check(specification.Text("rename_nodes.B") == "C" && specification.Strings("remove_nodes").Contains("B"), "rename kept source name in export");

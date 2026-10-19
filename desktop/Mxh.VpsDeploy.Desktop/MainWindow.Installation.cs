@@ -87,9 +87,11 @@ public sealed partial class MainWindow
                     panel.Children.Add(FileField("证书 Token 私人文件", settings, "CloudflareTokenFile"));
                     panel.Children.Add(Text("两个名称使用受支持的 DNS 验证证书。独立端口可与 Reality 同时运行；保留原 Reality 配置和凭据。", 14, true)); break;
                 case "ShadowsocksLanding":
-                    settings["LandingPort"] = Port(45001); settings["TransitGroup"] = "US-West Entry";
+                    settings["LandingPort"] = Port(45001); settings["TransitGroup"] = "US-West-LA Entry";
                     panel.Children.Add(Field("可信入口 IP（逗号分隔）", settings, "TrustedEntries"));
                     panel.Children.Add(Fields(Field("新落地 TCP / UDP 端口", settings, "LandingPort", numeric: true), Field("客户端入口组", settings, "TransitGroup")));
+                    panel.Children.Add(Fields(Field("IPv4 出口节点名（可选）", settings, "LandingPrimaryName"), Field("IPv6 出口节点名（可选）", settings, "LandingSecondaryName")));
+                    panel.Children.Add(Text("入口组与出口位置分别命名；SF 表示旧金山湾区（含 San Jose），不会按落地机器所在城市推断 ATT 出口。", 14, true));
                     panel.Children.Add(Flag("启用 IPv6 专用第二用户", settings, "SecondaryIpv6Enabled"));
                     panel.Children.Add(Fields(Field("IPv6 源地址（启用第二用户时填写）", settings, "SecondaryIpv6Address"), Field("绑定网卡（可选）", settings, "SecondaryBindInterface")));
                     panel.Children.Add(Text("仅允许所填可信入口连接落地。已有入口继续运行。", 14, true)); break;
@@ -117,7 +119,7 @@ public sealed partial class MainWindow
         var selected = ComponentInstallations.Selected(request.Options); var versions = InstallationVersions.Additional(request.Options, ArchiveStore.ReadJson(paths.Resolve("config/versions.json")));
         var panel = Column(Card(Column(Text(plan.Text("Provider") + " / " + plan.Text("Instance"), 17), Text("本轮新增：" + ComponentInstallations.SelectionLabel(request.Options)), Text("管理连接：" + plan.Text("Server.IPv4") + " · SSH " + InstanceState(request.InstanceRelativePath).Number("CurrentManagementPort", plan.Number("Ports.SshPrimary"))))));
         if (request.Options["InstallationVersions"] is JsonObject selection) panel.Children.Add(Card(Column(Text("本轮安装版本", 17), Text(InstallationVersions.Summary(selection, InstallationVersions.AdditionalComponents(request.Options)), 14, true))));
-        var labels = new Dictionary<string, string> { ["RealityTarget"] = "Reality 目标 / SNI", ["RealityPort"] = "主入口端口", ["RealityBackupPort"] = "备用端口", ["AnyTlsName"] = "AnyTLS 服务器名称", ["EchPublicName"] = "ECH public name", ["AnyTlsPort"] = "新入口端口", ["ZoneName"] = "证书区域", ["CertbotEmail"] = "证书联系邮件", ["CloudflareTokenFile"] = "证书 Token 文件", ["LandingPort"] = "落地端口", ["TrustedEntries"] = "可信入口", ["TransitGroup"] = "客户端入口组", ["SecondaryIpv6Enabled"] = "IPv6 第二用户", ["SecondaryIpv6Address"] = "IPv6 源地址", ["SecondaryBindInterface"] = "绑定网卡", ["KomariEndpoint"] = "Agent 主控地址", ["ControllerPort"] = "主控本机端口", ["PublicUrl"] = "公开访问网址" };
+        var labels = new Dictionary<string, string> { ["RealityTarget"] = "Reality 目标 / SNI", ["RealityPort"] = "主入口端口", ["RealityBackupPort"] = "备用端口", ["AnyTlsName"] = "AnyTLS 服务器名称", ["EchPublicName"] = "ECH public name", ["AnyTlsPort"] = "新入口端口", ["ZoneName"] = "证书区域", ["CertbotEmail"] = "证书联系邮件", ["CloudflareTokenFile"] = "证书 Token 文件", ["LandingPort"] = "落地端口", ["TrustedEntries"] = "可信入口", ["TransitGroup"] = "客户端入口组", ["LandingPrimaryName"] = "IPv4 出口节点名", ["LandingSecondaryName"] = "IPv6 出口节点名", ["SecondaryIpv6Enabled"] = "IPv6 第二用户", ["SecondaryIpv6Address"] = "IPv6 源地址", ["SecondaryBindInterface"] = "绑定网卡", ["KomariEndpoint"] = "Agent 主控地址", ["ControllerPort"] = "主控本机端口", ["PublicUrl"] = "公开访问网址" };
         foreach (var component in selected)
         {
             var version = versions.Text(component == "RealityEntry" ? "xray.version" : component is "AnyTlsEntry" or "ShadowsocksLanding" ? "sing_box.version" : component == "KomariAgent" ? "komari_agent.version" : component == "KomariController" ? "komari_controller.version" : "cloudflared.version");

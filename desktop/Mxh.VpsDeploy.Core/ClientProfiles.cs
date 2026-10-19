@@ -11,6 +11,7 @@ public static class ClientProfiles
     }
     public static IEnumerable<NodePair> Nodes(JsonObject plan, JsonObject secrets, bool enabledOnly = false)
     {
+        var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var role in DeploymentPlans.Roles[..3])
         {
             var installed = plan.At("ProtocolInventory." + role) == null ? enabledOnly ? DeploymentPlans.InitiallyEnabled(plan, role) : DeploymentPlans.Uses(plan, role) : plan.Flag("ProtocolInventory." + role + (enabledOnly ? ".Enabled" : ".Installed"));
@@ -22,11 +23,12 @@ public static class ClientProfiles
                 var users = role == "ShadowsocksLanding" && plan.Flag("Shadowsocks.SecondaryIpv6Enabled") ? new[] { "IPv4", "IPv6" } : new[] { "IPv4" };
                 foreach (var egress in users)
                 {
-                    var name = plan.Text("NodeName") + (role == "ShadowsocksLanding" ? "." + egress + "-Exit" : "") + (plan.Text("Server.IPv6") == "" ? "" : "-" + family);
+                    var name = role == "ShadowsocksLanding" ? DeploymentNaming.LandingName(plan, egress, family) : plan.Text("NodeName") + (plan.Text("Server.IPv6") == "" ? "" : "-" + family);
                     if (role is "RealityEntry" or "AnyTlsEntry" && DeploymentPlans.Roles[..2].Count(r => plan.Flag("ProtocolInventory." + r + ".Installed", DeploymentPlans.Uses(plan, r))) > 1) name += role == "RealityEntry" ? "-Reality" : "-AnyTLS";
                     foreach (var port in (role == "RealityEntry" && plan.Number("Ports.XrayBackup") > 0 ? new[] { plan.Number("Ports.XrayPrimary"), plan.Number("Ports.XrayBackup") } : new[] { plan.Number(role == "RealityEntry" ? "Ports.XrayPrimary" : role == "AnyTlsEntry" ? "Ports.AnyTlsPrimary" : "Ports.LandingShadowsocks") }).Distinct())
                     {
                         var nodeName = name + (role == "RealityEntry" && port != plan.Number("Ports.XrayPrimary") ? "-Backup" : "");
+                        if (!names.Add(nodeName)) throw new OperationException("导出的节点名称重复，请调整落地节点名称。");
                         var clash = new JsonObject { ["name"] = nodeName, ["server"] = address, ["port"] = port, ["udp"] = true };
                         var sing = new JsonObject { ["tag"] = nodeName, ["server"] = address, ["server_port"] = port };
                         if (role == "RealityEntry")

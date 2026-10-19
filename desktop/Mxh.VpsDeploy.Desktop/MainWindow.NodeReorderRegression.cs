@@ -129,7 +129,7 @@ public sealed partial class MainWindow
             nodeDropRows[0].Handle.Key?.Invoke(VirtualKey.Down);
             require(Names() == "入口 A|入口 C|入口 B", "手柄方向键未调整顺序。");
 
-            for (var index = 4; index <= 20; index++) scheme!["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = "入口 " + index, ["kind"] = "entry", ["region_group"] = "US-West Entry" });
+            for (var index = 4; index <= 20; index++) scheme!["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = "入口 " + index, ["kind"] = "entry", ["region_group"] = "US-West-LA Entry" });
             Navigate("clients"); await Task.Delay(100); mainScroll!.ChangeView(null, 420, null, true);
             await WaitForState(() => Math.Abs(mainScroll.VerticalOffset - 420) < 2 && nodeDropRows.All(row => row.Row.ActualHeight > 0), "长列表没有滚动到测试起点。");
             var visible = nodeDropRows.Select((row, index) => (row, index)).First(item => Grip(item.index).Y > 70 && Grip(item.index).Y < mainScroll.ActualHeight - 70).index;
@@ -142,7 +142,7 @@ public sealed partial class MainWindow
             require(handle.Release?.Invoke(edge, 1) == true && scheme["Nodes"]!.AsArray()[visible]!.Text("name") != sourceName, "滚动后的落点不正确。");
             await WaitForState(() => Math.Abs(mainScroll.VerticalOffset - offsetBeforeDrop) < 2 && nodeDragPreview == null, "排序后滚动位置跳变或拖动视觉未清理。");
             scheme["Nodes"]!.AsArray().Clear();
-            foreach (var name in new[] { "入口 C", "入口 A", "入口 B" }) scheme["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = name, ["kind"] = "entry", ["region_group"] = "US-West Entry" });
+            foreach (var name in new[] { "入口 C", "入口 A", "入口 B" }) scheme["Nodes"]!.AsArray().Add(new JsonObject { ["name"] = name, ["kind"] = "entry", ["region_group"] = "US-West-LA Entry" });
             Navigate("clients"); mainScroll.ChangeView(null, 0, null, true);
         }
         finally { CancelNodeReorder(); AppWindow.Resize(originalSize); shell.UpdateLayout(); }
