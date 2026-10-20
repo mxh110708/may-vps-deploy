@@ -80,7 +80,7 @@ foreach ($entry in $entries) {
 }
 # A complete verified set needs neither network access nor the original bundle.
 if($missing.Count){
-    $bundle=$versions.client_compatibility.mxh_route.public_rules_bundle
+    $bundle=$versions.client_compatibility.may_route.public_rules_bundle
     if(-not $MayRouteBundlePath){
         if($Offline){throw '离线来源缺少规则；请提供固定的 May Route 规则包。'}
         $MayRouteBundlePath=Join-Path $work 'public-rules-v1.json'

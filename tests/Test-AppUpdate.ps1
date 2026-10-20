@@ -31,6 +31,31 @@ try {
     Assert-VpsUpdateAssetUri 'https://github.com/mxh110708/may-vps-deploy/releases/download/v1.1.0/app.zip' 'v1.1.0'
     Assert-Update $true 'official asset URL accepted'
     Assert-UpdateThrows {Assert-VpsUpdateAssetUri 'https://example.invalid/mxh110708/may-vps-deploy/releases/download/v1.1.0/app.zip' 'v1.1.0'} 'foreign download rejected'
+    & {
+        # Execute the real origin gate with an isolated transport; never fetch a remote in this test.
+        $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $ProjectRoot 'src/VpsDeploy.Update.psm1'),[ref]$null,[ref]$null)
+        $function=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-VpsGitApplicationRelease'},$false)
+        if(-not $function){throw 'Git release gate missing.'}
+        $gitOriginState=@{Remote='';Fetches=0}
+        function Invoke-VpsUpdateGit {
+            param($ProjectRoot,$Arguments,$Proxy)
+            if($Arguments[0] -eq 'remote'){return @{Output=$gitOriginState.Remote}}
+            if($Arguments[0] -ne 'fetch'){throw 'Unexpected fixture Git command.'}
+            $gitOriginState.Fetches++
+            return @{Output=''}
+        }
+        Invoke-Expression $function.Extent.Text
+        foreach($remote in @('https://github.com/mxh110708/may-vps-deploy.git','git@github.com:mxh110708/may-vps-deploy.git')){
+            $gitOriginState.Remote=$remote
+            Get-VpsGitApplicationRelease $fixture 'v1.1.0'
+        }
+        Assert-Update ($gitOriginState.Fetches -eq 2) 'current May HTTPS and SSH origins accepted'
+        foreach($remote in @('https://github.com/mxh110708/mxh-vps-deploy.git','git@github.com:mxh110708/mxh-vps-deploy.git','https://github.com/example/may-vps-deploy.git')){
+            $gitOriginState.Remote=$remote
+            Assert-UpdateThrows {Get-VpsGitApplicationRelease $fixture 'v1.1.0'} 'legacy and foreign origins rejected'
+        }
+        Assert-Update ($gitOriginState.Fetches -eq 2) 'rejected origins never fetch another repository'
+    }
     $old=Join-Path $fixture 'old';$new=Join-Path $fixture 'new'
     New-UpdateFixture $old '1.0.0' @{'main.ps1'='old';'obsolete.txt'='old-only'}
     New-UpdateFixture $new '1.1.0' @{'main.ps1'='new';'added.txt'='new-only'}

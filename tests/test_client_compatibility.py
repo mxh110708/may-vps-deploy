@@ -89,7 +89,7 @@ class ClientCompatibilityTests(unittest.TestCase):
         self.assertEqual(manifest["sing_box"]["version"], "1.14.2")
         self.assertEqual(manifest["sing_box"]["assets"]["amd64"]["name"], "sing-box-1.14.2-linux-amd64.tar.gz")
         self.assertEqual(manifest["sing_box"]["assets"]["windows_amd64"]["version"], "1.14.2")
-        self.assertEqual(manifest["client_compatibility"]["mxh_route"]["version"], "1.14.2-mxh.7")
+        self.assertEqual(manifest["client_compatibility"]["may_route"]["version"], "1.14.2-mxh.7")
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ $components = @(
     @{Name='sing-box Linux'; Pinned=[string]$versions.sing_box.version; Api=$settings.release_apis.sing_box},
     @{Name='sing-box Windows'; Pinned=[string]$versions.sing_box.assets.windows_amd64.version; Api=$settings.release_apis.sing_box},
     @{Name='Mihomo'; Pinned=[string]$versions.mihomo.version; Api=$settings.release_apis.mihomo},
-    @{Name='May Route'; Pinned=[string]$versions.client_compatibility.mxh_route.version; Api=$settings.release_apis.mxh_route}
+    @{Name='May Route'; Pinned=[string]$versions.client_compatibility.may_route.version; Api=$settings.release_apis.may_route}
 )
 $results = @{}
 foreach ($component in $components) {

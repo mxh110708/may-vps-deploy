@@ -257,7 +257,7 @@ function Complete-VpsGitApplicationUpdate {
 function Get-VpsGitApplicationRelease {
     param([Parameter(Mandatory)][string]$ProjectRoot,[Parameter(Mandatory)][string]$Tag,[string]$Proxy)
     $remote = (Invoke-VpsUpdateGit $ProjectRoot @('remote','get-url','origin')).Output
-    if ($remote -notmatch '^(https://github\.com/|git@github\.com:)mxh110708/(?:may|mxh)-vps-deploy(?:\.git)?$') { throw '使用副本的 origin 不属于本项目，未更新。' }
+    if ($remote -notmatch '^(https://github\.com/|git@github\.com:)mxh110708/may-vps-deploy(?:\.git)?$') { throw '使用副本的 origin 不属于本项目，未更新。' }
     [void](Invoke-VpsUpdateGit $ProjectRoot @('fetch','--no-tags','--no-recurse-submodules','https://github.com/mxh110708/may-vps-deploy.git',"refs/tags/${Tag}:refs/tags/$Tag") $Proxy)
 }
 function Start-VpsApplicationUpdate {

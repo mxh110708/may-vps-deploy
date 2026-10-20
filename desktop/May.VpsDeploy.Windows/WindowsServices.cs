@@ -7,8 +7,7 @@ namespace May.VpsDeploy.Windows;
 
 public sealed class WindowsSecretProtector : ISecretProtector
 {
-    // May uses its own credential format. Legacy credentials are imported by the
-    // explicitly authorized one-time migration, never silently read at runtime.
+    // Credentials use one May format, bound to the current Windows user.
     private static readonly byte[] Entropy = System.Text.Encoding.UTF8.GetBytes("May.VPSDeploy.Credentials.v1");
     public string Format => "WindowsCurrentUser.May.dotnet.v1";
     public byte[] Protect(ReadOnlySpan<byte> data) { var bytes = data.ToArray(); try { return ProtectedData.Protect(bytes, Entropy, DataProtectionScope.CurrentUser); } finally { CryptographicOperations.ZeroMemory(bytes); } }
