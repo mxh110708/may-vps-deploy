@@ -47,7 +47,7 @@ def query(component, proxy=None):
     if component not in REPOSITORIES:
         raise ReleaseFailure('ComponentReleaseUnsupported')
     url = 'https://api.github.com/repos/'+REPOSITORIES[component]+'/releases/latest'
-    request = urllib.request.Request(url, headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'mxh-vps-deploy-component-version-check', 'X-GitHub-Api-Version': '2022-11-28'})
+    request = urllib.request.Request(url, headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'may-vps-deploy-component-version-check', 'X-GitHub-Api-Version': '2022-11-28'})
     try:
         if proxy is not None:
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({'http': proxy, 'https': proxy} if proxy else {}))

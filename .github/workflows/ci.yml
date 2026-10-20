@@ -80,7 +80,7 @@ jobs:
         if: matrix.powershell != 'runner'
         shell: pwsh
         run: |
-          $runtime = ./scripts/Initialize-PowerShell74.ps1 -Destination (Join-Path $env:RUNNER_TEMP 'mxh-powershell-7.4.20')
+          $runtime = ./scripts/Initialize-PowerShell74.ps1 -Destination (Join-Path $env:RUNNER_TEMP 'may-powershell-7.4.20')
           $runtime | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Verify selected PowerShell
         shell: pwsh

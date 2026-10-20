@@ -8,7 +8,7 @@ v0.9.30 统一新方案的城市/湾区命名：LA 入口与 SF 湾区入口分�
 
 正式版为 [v0.9.31](https://github.com/mxh110708/may-vps-deploy/releases/tag/v0.9.31)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
 
-v0.9.28 将 BBR v3 改用 Google 官方 `google/bbr` v3 源码。固定版由 MXH 在开发机预编译，内核包、通用配置和校验清单随应用提供，小 VPS 只接收、验证和安装；不提供最新提交选择或 VPS 在线编译，固定包随应用版本更新。审阅展示真实基础版本、日期、提交及包 SHA256，不标作 Google 官方二进制或最新 LTS。旧版 XanMod 来源及其事务兼容处理已移除；默认仍沿用 VPS 原有内核。详见[网络调优流程](docs/NETWORK-TUNING.zh-CN.md)、[预编译维护](docs/GOOGLE-BBR-PREBUILT.zh-CN.md)及[安装启动验证](docs/GOOGLE-BBR-PREBUILT-2026-10-16.zh-CN.md)。下方 v0.9.16–v0.9.18 的内核发行、签名与 LTS 描述属于当时的第三方实现。
+v0.9.28 将 BBR v3 改用 Google 官方 `google/bbr` v3 源码。固定版由 May 在开发机预编译，内核包、通用配置和校验清单随应用提供，小 VPS 只接收、验证和安装；不提供最新提交选择或 VPS 在线编译，固定包随应用版本更新。审阅展示真实基础版本、日期、提交及包 SHA256，不标作 Google 官方二进制或最新 LTS。旧版 XanMod 来源及其事务兼容处理已移除；默认仍沿用 VPS 原有内核。详见[网络调优流程](docs/NETWORK-TUNING.zh-CN.md)、[预编译维护](docs/GOOGLE-BBR-PREBUILT.zh-CN.md)及[安装启动验证](docs/GOOGLE-BBR-PREBUILT-2026-10-16.zh-CN.md)。下方 v0.9.16–v0.9.18 的内核发行、签名与 LTS 描述属于当时的第三方实现。
 
 v0.9.21 继续全局审查并修复 16 项边界与功能问题：修正本机 Reality 证书及端口校验，接入时识别独立端口共存入口；首次部署和 SSH 恢复保留其他防火墙表，证书恢复限定受管域名，原生部署恢复不重放未修改的网络参数，补齐配置恢复兼容性、备份清理锁及初始公钥追加。导出保护应用及私人材料，调度等待审阅结束，健康检查覆盖本机证书与续期；同步修正 Agent 地址、分组生成及退役后证书复用。详见[全局审查与验证记录](docs/TESTING-0.9.21.zh-CN.md)。
 

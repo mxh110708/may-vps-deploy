@@ -67,7 +67,7 @@ v0.9.1 修正了更新检查结束后的状态提示，增加独立更新弹窗�
 ├─ app-helpers/                     安装校验与更新辅助程序
 ├─ config/*.local.json              原有本机文件，原样保留
 └─ private/
-   ├─ instances/<服务商>/<实例>/MXH-VPS-Deploy/
+   ├─ instances/<服务商>/<实例>/May-VPS-Deploy/
    │  ├─ deployment-plan.json
    │  ├─ deployment-state.json
    │  ├─ secrets.dotnet.private.json

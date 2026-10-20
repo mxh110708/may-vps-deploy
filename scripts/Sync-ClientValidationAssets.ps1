@@ -58,7 +58,7 @@ function Restore-RemoteAsset($Asset,[string]$Kind) {
     if($Offline){throw "离线资产来源中缺少：$($Asset.file)"}
     $download=Join-Path $work $Asset.file
     [IO.Directory]::CreateDirectory((Split-Path -Parent $download))|Out-Null
-    $headers=@{'User-Agent'='mxh-vps-deploy-assets'; Accept=if($Kind -eq 'GeoData'){'application/octet-stream'}else{'application/zip'}}
+    $headers=@{'User-Agent'='may-vps-deploy-assets'; Accept=if($Kind -eq 'GeoData'){'application/octet-stream'}else{'application/zip'}}
     Invoke-WebRequest -Uri $Asset.source -Headers $headers -OutFile $download -TimeoutSec 180
     Install-VerifiedAsset $download $Asset.file $Asset.sha256
 }

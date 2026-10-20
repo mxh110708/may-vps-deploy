@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.9.31",
+  "version": "0.9.32",
   "channel": "stable",
   "repository": "mxh110708/may-vps-deploy"
 }

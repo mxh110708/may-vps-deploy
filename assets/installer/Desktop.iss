@@ -183,7 +183,7 @@ begin
       Result := False;
     end;
     if Result then begin
-      PrivateDataHelper := ExpandConstant('{tmp}\MXH-PrivateData.exe');
+      PrivateDataHelper := ExpandConstant('{tmp}\May-PrivateData.exe');
       if not FileCopy(AddBackslash(AppDirectory) + 'app-helpers\PrivateData.exe', PrivateDataHelper, False) or
          not Exec(PrivateDataHelper, 'validate ' + AddQuotes(AppDirectory), '', SW_HIDE, ewWaitUntilTerminated, HelperResult) or
          (HelperResult <> 0) then begin
@@ -239,5 +239,6 @@ begin
       else if not DelTree(ExpandConstant('{app}'), True, True, True) then
         SuppressibleMsgBox('应用已卸载，部分数据仍被占用，未能全部删除。请关闭相关程序后核对安装目录。', mbError, MB_OK, IDOK);
     end;
+    if PrivateDataHelper <> '' then DeleteFile(PrivateDataHelper);
   end;
 end;

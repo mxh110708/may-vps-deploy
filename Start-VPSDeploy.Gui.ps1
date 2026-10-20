@@ -538,7 +538,7 @@ if ($PreviewPath) {
     return
 }
 if ($NoShow) { return }
-$mutexName='Local\mxh-vps-deploy-'+[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($script:GuiProjectRoot.ToLowerInvariant()))).Substring(0,24)
+$mutexName='Local\may-vps-deploy-'+[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($script:GuiProjectRoot.ToLowerInvariant()))).Substring(0,24)
 $instanceMutex=[Threading.Mutex]::new($false,$mutexName)
 $mutexHeld=$false
 try {$mutexHeld=$instanceMutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$mutexHeld=$true}
