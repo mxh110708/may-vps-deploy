@@ -56,7 +56,7 @@ $manifest = Join-Path $root 'test-session.private.json'
 if ($SyntheticFixture) {
     if ($AllowedEndpoints.Count) { throw 'Synthetic UI suites must not have remote targets.' }
     @{ schema_version = 1; synthetic_only = $true } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'qa-ui-review.fixture.json') -Encoding utf8
-    $directory = Join-Path $root 'private/instances/Example/Managed-Demo/MXH-VPS-Deploy'
+    $directory = Join-Path $root 'private/instances/Example/Managed-Demo/May-VPS-Deploy'
     [IO.Directory]::CreateDirectory($directory) | Out-Null
     @{ Provider='Example';Instance='Managed-Demo';NodeName='合成演示实例';Role='RealityEntry';Roles=@('RealityEntry');ActiveEntry='RealityEntry';Server=@{IPv4='192.0.2.10';IPv6='2001:db8::10';BootstrapSshPort=22};Ports=@{SshPrimary=22022;SshRescue=33022;XrayPrimary=443;XrayBackup=44443};Import=@{Status='Completed'};NetworkTuning=@{BandwidthMbps=100;ReferenceRttMs=0};ProtocolInventory=@{RealityEntry=@{Installed=$true;Enabled=$true}}} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $directory 'deployment-plan.json') -Encoding utf8
     @{ Engine='dotnet-v1';CurrentManagementPort=22022 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $directory 'deployment-state.json') -Encoding utf8

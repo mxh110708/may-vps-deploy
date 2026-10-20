@@ -31,7 +31,7 @@ function Toggle([string]$name,[bool]$value) { Send 'ui.toggle' @{name=$name;valu
 function Wait-Ui([scriptblock]$condition,[int]$seconds=15) {
     $until=[DateTimeOffset]::UtcNow.AddSeconds($seconds)
     do { $ui=Read-Ui; if (& $condition $ui) { return $ui }; Start-Sleep -Milliseconds 100 } while ([DateTimeOffset]::UtcNow -lt $until)
-    throw 'Native UI did not reach the expected state.'
+    throw ('Native UI did not reach the expected state on page ' + $ui.page + ': ' + $condition.ToString().Trim())
 }
 function Check([bool]$success,[string]$name) { if(-not $success){throw $name};$cases.Add(@{name=$name;state='passed';layer='native_ui'}) }
 try {
