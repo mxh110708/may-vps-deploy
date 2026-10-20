@@ -41,7 +41,7 @@ class TransactionTests(unittest.TestCase):
         source = (ROOT / 'assets' / 'remote' / name).read_text(encoding='utf-8')
         if prefix_only:
             source = source.split('stamp="$(date', 1)[0] + "\nprintf 'GUARD_PASSED\\n'\n"
-        source = source.replace('/var/lib/mxh-vps-deploy', shell_path(self.state))
+        source = source.replace('/var/lib/may-vps-deploy', shell_path(self.state))
         source = source.replace('/root/vps-deploy-backups', shell_path(self.root / 'backups'))
         source = source.replace('/etc/systemd/system', shell_path(self.root / 'units'))
         source = source.replace('/usr/local/libexec', shell_path(self.root / 'helpers'))
@@ -180,7 +180,7 @@ systemctl() {
 
     def mutation(self, *, expired=False, changed_owner=False):
         source=(ROOT/'assets/remote/maintenance-mutation-guard.sh').read_text()
-        source=source.replace('/var/lib/mxh-vps-deploy',shell_path(self.state)).replace('/root/vps-deploy-backups',shell_path(self.root/'backups'))
+        source=source.replace('/var/lib/may-vps-deploy',shell_path(self.state)).replace('/root/vps-deploy-backups',shell_path(self.root/'backups'))
         (self.backup/'deadline-epoch').write_text(str(int(time.time())+(-30 if expired else 300)))
         if changed_owner:
             self.owner.write_text('different-owner')

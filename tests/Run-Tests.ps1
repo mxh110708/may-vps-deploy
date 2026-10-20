@@ -51,7 +51,7 @@ foreach ($artifact in @($vendorManifest.artifacts)) {
     Assert-True ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -eq [string]$artifact.sha256) "vendored archive checksum matches: $($artifact.core)"
 }
 Assert-True (@($vendorManifest.data_files | Where-Object consumer -eq 'mihomo').Count -eq 2) 'vendor manifest contains both required Mihomo GeoData files'
-Assert-True (@($vendorManifest.data_files | Where-Object consumer -eq 'sing-box').Count -eq 5) 'vendor manifest contains all five MXH Route offline public rules'
+Assert-True (@($vendorManifest.data_files | Where-Object consumer -eq 'sing-box').Count -eq 5) 'vendor manifest contains all five May Route offline public rules'
 foreach ($dataFile in @($vendorManifest.data_files)) {
     $path = Join-Path $ProjectRoot ('vendor\test-cores\windows-amd64\' + [string]$dataFile.file)
     Assert-True (Test-Path -LiteralPath $path -PathType Leaf) "vendored data file exists: $($dataFile.file)"
@@ -390,7 +390,7 @@ $keygenResult = Invoke-VpsProcess -FilePath (Get-Command ssh-keygen.exe -ErrorAc
 Assert-True ($keygenResult.ExitCode -eq 0) 'fixture Ed25519 provider key generated'
 $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceKey).Hash
 $sourceAclBefore = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { (Get-Acl -LiteralPath $sourceKey).Sddl } else { $null }
-$managedDirectory = Join-Path $keyReuseRoot 'MXH-VPS-Deploy\ssh'
+$managedDirectory = Join-Path $keyReuseRoot 'May-VPS-Deploy\ssh'
 $reuseContext = [pscustomobject]@{ Plan = [ordered]@{
         NodeName='Example-Reused-Key';Server=[ordered]@{BootstrapKeyPath=$sourceKey}
         SshKey=[ordered]@{Mode='ReuseExisting';SourcePrivateKeyPath=$sourceKey;ManagedFileName='id_ed25519';PreserveSource=$true}
@@ -431,7 +431,7 @@ $rsaSourceKey = Join-Path $keyReuseRoot 'provider-rsa-pem-key'
 $rsaKeygenResult = Invoke-VpsProcess -FilePath (Get-Command ssh-keygen.exe -ErrorAction Stop).Source `
     -ArgumentList @('-t','rsa','-b','2048','-m','PEM','-N','','-C','provider-rsa-fixture','-f',$rsaSourceKey) -TimeoutSeconds 60
 Assert-True ($rsaKeygenResult.ExitCode -eq 0) 'fixture RSA PEM provider key generated'
-$rsaManagedDirectory = Join-Path $keyReuseRoot 'MXH-VPS-Deploy-RSA\ssh'
+$rsaManagedDirectory = Join-Path $keyReuseRoot 'May-VPS-Deploy-RSA\ssh'
 $rsaReuseContext = [pscustomobject]@{ Plan = [ordered]@{
         NodeName='Example-Reused-RSA-Key';Server=[ordered]@{BootstrapKeyPath=$rsaSourceKey}
         SshKey=[ordered]@{Mode='ReuseExisting';SourcePrivateKeyPath=$rsaSourceKey;ManagedFileName='id_vps_management';PreserveSource=$true}
@@ -1143,7 +1143,7 @@ $branchPlan = & $coreModule {
 Assert-True ($branchPlan.Role -eq 'MonitorOnly') 'back navigation can replace a previously completed role branch'
 Assert-True (-not $branchPlan.Reality.Target -and -not $branchPlan.TrustedTls.Enabled -and -not $branchPlan.AnyTls.Enabled) 'role change clears stale proxy and trusted TLS fields'
 Assert-True ($branchPlan.NetworkTuning.Mode -eq 'BaselineOnly') 'role change clears stale adaptive tuning fields'
-Assert-True ([string]$branchPlan.Paths.Archive -eq (Join-Path $branchResetArchive 'MXH-VPS-Deploy')) 'interactive archive root uses the instance managed-data subdirectory'
+Assert-True ([string]$branchPlan.Paths.Archive -eq (Join-Path $branchResetArchive 'May-VPS-Deploy')) 'interactive archive root uses the instance managed-data subdirectory'
 Assert-True ($branchQueue.Count -eq 0) 'branch-reset wizard consumed the expected navigation path'
 Assert-True (-not (Test-Path -LiteralPath $branchResetArchive)) 'in-memory branch-reset test writes no plan or archive'
 
@@ -1153,7 +1153,7 @@ $hierarchyResult = Invoke-VpsProcess -FilePath $pwshPath -ArgumentList @(
     '-NoProfile', '-File', (Join-Path $ProjectRoot 'Start-VPSDeploy.ps1'), '-Mode', 'Interactive', '-DryRun'
 ) -InputText $hierarchyInput -TimeoutSeconds 60
 Assert-True ($hierarchyResult.ExitCode -eq 0) 'first new-deployment field and resume path both return to the main menu'
-Assert-True ($hierarchyResult.StdOut -match 'MXH VPS Deploy' -and `
+Assert-True ($hierarchyResult.StdOut -match 'May VPS Deploy' -and `
     [regex]::Matches($hierarchyResult.StdOut, '(?m)^0\r?$').Count -eq 2) 'interactive hierarchy consumed the sole back command in both child workflows'
 Assert-True ($hierarchyResult.StdOut -notmatch '__MXH_VPS_WIZARD_' -and $hierarchyResult.StdErr -notmatch '__MXH_VPS_WIZARD_') 'navigation markers never leak to the console'
 Assert-True ($hierarchyResult.StdOut -match '(?m)^clear\r?$' -and $hierarchyResult.StdOut -match '(?m)^cls\r?$') 'clear and cls are consumed by live menu navigation'
@@ -1612,7 +1612,7 @@ Assert-True ($importResult.ExitCode -eq 0) 'existing VPS import wizard supports 
 Assert-True ($importResult.StdErr -notmatch 'Exception|Error') 'existing VPS import DryRun reports no execution error'
 $importSourceText = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'src\VpsDeploy.Import.ps1')
 Assert-True ($importSourceText -match "SshKeyMode = 'ReuseExisting'" -and $importSourceText -match 'EnforceKeyOnlySsh = \$false') 'existing VPS import defaults to key reuse and preserves SSH authentication policy'
-Assert-True ($importResult.StdOut -match '1000 Mbps' -and $importResult.StdOut -match 'MXH-VPS-Deploy') 'existing VPS import records nominal bandwidth and managed subdirectory layout'
+Assert-True ($importResult.StdOut -match '1000 Mbps' -and $importResult.StdOut -match 'May-VPS-Deploy') 'existing VPS import records nominal bandwidth and managed subdirectory layout'
 Assert-True (-not (Test-Path -LiteralPath $importArchive)) 'existing VPS import DryRun creates no private archive or plan'
 [IO.File]::Delete($importKey)
 

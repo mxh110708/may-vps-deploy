@@ -64,7 +64,7 @@ def matches(state):
     current = identity()
     return all(current[key] in (state['Original'][key], state.get('Applied', {}).get(key)) for key in current)
 def scoped(text):
-    return '#!/usr/sbin/nft -f\n# Managed by MXH VPS Deploy.\ntable inet filter {}\nflush table inet filter\n\n' + table(text)
+    return '#!/usr/sbin/nft -f\n# Managed by May VPS Deploy.\ntable inet filter {}\nflush table inet filter\n\n' + table(text)
 
 def baseline_identity():
     if config.exists(): regular(config)

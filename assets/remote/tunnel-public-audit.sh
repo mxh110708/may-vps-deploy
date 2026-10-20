@@ -18,7 +18,7 @@ opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect
 result = {'Passed': False, 'Code': '', 'ConnectorReady': False, 'LocalVersion': '', 'PublicVersion': '', 'HttpStatus': 0}
 
 def get(url):
-    request = urllib.request.Request(url, headers={'User-Agent': 'MXH-VPS-Deploy/TunnelAccess', 'Accept': 'application/json'})
+    request = urllib.request.Request(url, headers={'User-Agent': 'May-VPS-Deploy/TunnelAccess', 'Accept': 'application/json'})
     with opener.open(request, timeout=15) as response:
         data = response.read(65537)
         if response.status != 200 or len(data) > 65536:

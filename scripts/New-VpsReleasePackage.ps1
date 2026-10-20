@@ -55,7 +55,7 @@ try{
  $env:NUGET_PACKAGES=Join-Path $ProjectRoot '.cache/nuget'
  $env:DOTNET_CLI_TELEMETRY_OPTOUT='1';$env:DOTNET_GENERATE_ASPNET_CERTIFICATE='false'
  if($Proxy){$env:HTTP_PROXY=$Proxy;$env:HTTPS_PROXY=$Proxy}
- $desktopProject=Join-Path $ProjectRoot 'desktop/Mxh.VpsDeploy.Desktop/Mxh.VpsDeploy.Desktop.csproj'
+ $desktopProject=Join-Path $ProjectRoot 'desktop/May.VpsDeploy.Desktop/May.VpsDeploy.Desktop.csproj'
  & dotnet publish $desktopProject -c Release -p:Platform=x64 -p:RestoreLockedMode=true ("-p:Version=$version") -o $bundle -m:1 -nr:false -v minimal | Out-Host
  if($LASTEXITCODE -ne 0){throw 'WinUI 3 桌面与 .NET 运维核心构建失败。'}
  $compiler=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
@@ -66,10 +66,10 @@ try{
  $compile=@('/nologo','/target:winexe','/platform:x64','/optimize+','/r:System.Web.Extensions.dll','/r:System.Windows.Forms.dll','/r:System.Core.dll',('/win32manifest:'+(Join-Path $ProjectRoot 'src/desktop/app.manifest')))
  if($TestBuild){$compile+='/define:DESKTOP_TEST'}
  $targets=@(
-  @{Name='app-helpers/SetupGuard.exe';Main='Mxh.VpsDeploy.Desktop.SetupGuard';Sources=@('src/desktop/SetupGuard.cs','src/desktop/DesktopFiles.cs')},
-  @{Name='app-helpers/PrivateData.exe';Main='Mxh.VpsDeploy.Desktop.PrivateData';Sources=@('src/desktop/PrivateData.cs','src/desktop/DesktopFiles.cs')},
-  @{Name='app-helpers/InstalledUpdate.exe';Main='Mxh.VpsDeploy.Desktop.InstalledUpdate';Sources=@('src/desktop/InstalledUpdate.cs','src/desktop/DesktopFiles.cs')},
-  @{Name='app-helpers/CleanupUpdate.exe';Main='Mxh.VpsDeploy.Desktop.CleanupUpdate';Sources=@('src/desktop/CleanupUpdate.cs','src/desktop/DesktopFiles.cs')}
+  @{Name='app-helpers/SetupGuard.exe';Main='May.VpsDeploy.Desktop.SetupGuard';Sources=@('src/desktop/SetupGuard.cs','src/desktop/DesktopFiles.cs')},
+  @{Name='app-helpers/PrivateData.exe';Main='May.VpsDeploy.Desktop.PrivateData';Sources=@('src/desktop/PrivateData.cs','src/desktop/DesktopFiles.cs')},
+  @{Name='app-helpers/InstalledUpdate.exe';Main='May.VpsDeploy.Desktop.InstalledUpdate';Sources=@('src/desktop/InstalledUpdate.cs','src/desktop/DesktopFiles.cs')},
+  @{Name='app-helpers/CleanupUpdate.exe';Main='May.VpsDeploy.Desktop.CleanupUpdate';Sources=@('src/desktop/CleanupUpdate.cs','src/desktop/DesktopFiles.cs')}
  )
  foreach($target in $targets){
   $compileArgs=$compile+@("/main:$($target.Main)","/out:$(Join-Path $bundle $target.Name)",$assembly)
@@ -78,10 +78,10 @@ try{
   $compilerMessages=@(& $compiler @compileArgs)
   if($LASTEXITCODE -ne 0){$compilerMessages|Write-Host;throw ('桌面原生 EXE 编译失败：'+$target.Name)}
  }
- $critical=@('MXH-VPS-Deploy.exe','MXH-VPS-Deploy.dll','Mxh.VpsDeploy.Core.dll','Microsoft.WinUI.dll','System.Private.CoreLib.dll','runtime/python/python.exe','app-helpers/InstalledUpdate.exe','app-helpers/SetupGuard.exe','app-helpers/CleanupUpdate.exe','app-helpers/PrivateData.exe')
- @{schema_version=2;engine='dotnet';ui='winui3';test_build=[bool]$TestBuild;files=@($critical|ForEach-Object{@{path=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $bundle $_)).Hash.ToLowerInvariant()}});versions=@{dotnet=(Get-Content -Raw -LiteralPath (Join-Path $bundle 'MXH-VPS-Deploy.runtimeconfig.json')|ConvertFrom-Json -AsHashtable).runtimeOptions.includedFrameworks[0].version;windows_app_sdk='1.8.260804001';ssh_net='2026.0.0';python=$dependencies.Assets.python.version;yaml=$dependencies.Assets.yaml.version}}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $bundle 'desktop-runtime.json') -Encoding utf8
+ $critical=@('May-VPS-Deploy.exe','May-VPS-Deploy.dll','May.VpsDeploy.Core.dll','Microsoft.WinUI.dll','System.Private.CoreLib.dll','runtime/python/python.exe','app-helpers/InstalledUpdate.exe','app-helpers/SetupGuard.exe','app-helpers/CleanupUpdate.exe','app-helpers/PrivateData.exe')
+ @{schema_version=2;engine='dotnet';ui='winui3';test_build=[bool]$TestBuild;files=@($critical|ForEach-Object{@{path=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $bundle $_)).Hash.ToLowerInvariant()}});versions=@{dotnet=(Get-Content -Raw -LiteralPath (Join-Path $bundle 'May-VPS-Deploy.runtimeconfig.json')|ConvertFrom-Json -AsHashtable).runtimeOptions.includedFrameworks[0].version;windows_app_sdk='1.8.260804001';ssh_net='2026.0.0';python=$dependencies.Assets.python.version;yaml=$dependencies.Assets.yaml.version}}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $bundle 'desktop-runtime.json') -Encoding utf8
  $proof=Join-Path $bundle 'runtime-proof.json'
- $start=[Diagnostics.ProcessStartInfo]::new((Join-Path $bundle 'MXH-VPS-Deploy.exe'));$start.UseShellExecute=$false;$start.CreateNoWindow=$true
+ $start=[Diagnostics.ProcessStartInfo]::new((Join-Path $bundle 'May-VPS-Deploy.exe'));$start.UseShellExecute=$false;$start.CreateNoWindow=$true
  $start.ArgumentList.Add('--verify-runtime');$start.ArgumentList.Add($proof)
  $native=[Diagnostics.Process]::Start($start)
  try{if(-not $native.WaitForExit(120000)){$native.Kill($true);throw 'WinUI 3 运行环境复核超时。'};if($native.ExitCode -ne 0){throw 'WinUI 3 窗口或 .NET 核心加载失败。'}}finally{$native.Dispose()}
@@ -94,7 +94,7 @@ try{
  $files=@(Get-ChildItem -LiteralPath $bundle -File -Recurse|ForEach-Object{$relative=[IO.Path]::GetRelativePath($bundle,$_.FullName).Replace('\','/');Assert-VpsApplicationFilePath $relative;@{path=$relative;sha256=(Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant()}}|Sort-Object path)
  @{schema_version=1;version=$version;files=$files}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $bundle 'application-files.json') -Encoding utf8
  [IO.Directory]::CreateDirectory($Destination)|Out-Null
- $suffix=if($Development){'-ui-preview'}else{''};$stem="mxh-vps-deploy-v$version$suffix-windows-amd64"
+ $suffix=if($Development){'-ui-preview'}else{''};$stem="may-vps-deploy-v$version$suffix-windows-amd64"
  $archive=Join-Path $Destination ($stem+'.zip');$setup=Join-Path $Destination ($stem+'-setup.exe');$publicManifest=Join-Path $Destination ($stem+'.files.json')
  foreach($path in @($archive,$setup,$publicManifest)){if(Test-Path -LiteralPath $path){throw '目标发布附件已存在，未覆盖。'}}
  [IO.Directory]::CreateDirectory($installerSource)|Out-Null

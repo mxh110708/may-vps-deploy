@@ -13,7 +13,7 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
-namespace Mxh.VpsDeploy.Gui
+namespace May.VpsDeploy.Gui
 {
     public sealed class Notice
     {
@@ -267,7 +267,7 @@ if($Mode -in @('CheckUpdate','ApplyUpdate')) {
         readonly GuiUserInterface ui;
         public GuiHost(Session session) { ui = new GuiUserInterface(session); }
         public override Guid InstanceId => id;
-        public override string Name => "MXH VPS Deploy GUI";
+        public override string Name => "May VPS Deploy GUI";
         public override Version Version => new Version(1, 0);
         public override PSHostUserInterface UI => ui;
         public override CultureInfo CurrentCulture => CultureInfo.CurrentCulture;
@@ -340,7 +340,7 @@ if($Mode -in @('CheckUpdate','ApplyUpdate')) {
         public override Size MaxWindowSize => new Size(160, 100);
         public override Coordinates WindowPosition { get; set; }
         public override Size WindowSize { get; set; } = new Size(160, 100);
-        public override string WindowTitle { get; set; } = "MXH VPS Deploy";
+        public override string WindowTitle { get; set; } = "May VPS Deploy";
         public override void FlushInputBuffer() { }
         public override BufferCell[,] GetBufferContents(Rectangle rectangle) => throw new NotSupportedException();
         public override KeyInfo ReadKey(ReadKeyOptions options) => throw new NotSupportedException("请使用界面按钮。");

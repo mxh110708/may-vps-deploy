@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
-namespace Mxh.VpsDeploy.Desktop
+namespace May.VpsDeploy.Desktop
 {
     internal sealed class UpdateJob
     {
@@ -37,11 +37,11 @@ namespace Mxh.VpsDeploy.Desktop
                 var job=new JavaScriptSerializer().Deserialize<UpdateJob>(File.ReadAllText(jobPath));
                 string root=DesktopFiles.Root(job.ProjectRoot);
                 if(job.Stage!=stage || !stage.StartsWith(Path.Combine(root,".tmp")+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase) || !Regex.IsMatch(job.Version??"","^\\d+\\.\\d+\\.\\d+$")) throw new InvalidDataException();
-                string setup=Path.Combine(stage,"mxh-vps-deploy-v"+job.Version+"-windows-amd64-setup.exe");
-                string nextPath=Path.Combine(stage,"mxh-vps-deploy-v"+job.Version+"-windows-amd64.files.json");
+                string setup=Path.Combine(stage,"may-vps-deploy-v"+job.Version+"-windows-amd64-setup.exe");
+                string nextPath=Path.Combine(stage,"may-vps-deploy-v"+job.Version+"-windows-amd64.files.json");
                 if(DesktopFiles.Hash(setup)!=job.InstallerSha256 || DesktopFiles.Hash(nextPath)!=job.ManifestSha256) throw new InvalidDataException();
                 Wait(job.ParentPid,job.ParentStarted,Path.Combine(root,"runtime","powershell","pwsh.exe"));
-                Wait(job.LauncherPid,job.LauncherStarted,Path.Combine(root,"MXH-VPS-Deploy.exe"));
+                Wait(job.LauncherPid,job.LauncherStarted,Path.Combine(root,"May-VPS-Deploy.exe"));
                 string oldPath=Path.Combine(root,"application-files.json");
                 if(DesktopFiles.Hash(oldPath)!=job.CurrentManifestSha256) throw new InvalidDataException();
                 var old=DesktopFiles.Read(oldPath);
@@ -67,7 +67,7 @@ namespace Mxh.VpsDeploy.Desktop
 #if DESKTOP_TEST
                 File.WriteAllText(Path.Combine(root,"private","update-test-completed.txt"),job.Version);
 #endif
-                var restart=new ProcessStartInfo(Path.Combine(root,"MXH-VPS-Deploy.exe")) {UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=root};
+                var restart=new ProcessStartInfo(Path.Combine(root,"May-VPS-Deploy.exe")) {UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=root};
 #if DESKTOP_TEST
                 restart.Arguments="--verify-runtime "+Quote(Path.Combine(root,".tmp","update-restart-proof.json"));
 #endif
@@ -81,7 +81,7 @@ namespace Mxh.VpsDeploy.Desktop
             catch
             {
 #if !DESKTOP_TEST
-                MessageBox.Show(started?"更新未完成。私人数据保留；本次材料留在应用 .tmp 中，请处理后重试。":"更新尚未开始，原应用和私人数据保留。请重新打开应用后重试。","MXH VPS Deploy 更新",MessageBoxButtons.OK,MessageBoxIcon.Error);
+                MessageBox.Show(started?"更新未完成。私人数据保留；本次材料留在应用 .tmp 中，请处理后重试。":"更新尚未开始，原应用和私人数据保留。请重新打开应用后重试。","May VPS Deploy 更新",MessageBoxButtons.OK,MessageBoxIcon.Error);
 #endif
                 return 1;
             }

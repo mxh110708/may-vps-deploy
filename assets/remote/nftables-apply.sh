@@ -55,7 +55,7 @@ trap 'rm -f "$temporary"' EXIT
 cat > "$temporary" <<EOF
 #!/usr/sbin/nft -f
 
-# Managed by MXH VPS Deploy.
+# Managed by May VPS Deploy.
 table inet filter {}
 flush table inet filter
 

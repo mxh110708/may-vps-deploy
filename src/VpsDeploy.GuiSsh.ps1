@@ -31,7 +31,7 @@ function Get-VpsGuiAskPassPath {
 function Invoke-VpsGuiSshAuthentication {
     param([Parameter(Mandatory)]$Context,[Parameter(Mandatory)][string]$FilePath,[string[]]$ArgumentList)
     $helper=Get-VpsGuiAskPassPath $Context.ProjectRoot
-    $broker=[Mxh.VpsDeploy.Gui.SshSecretBroker]::new($script:VpsInteractionSession)
+    $broker=[May.VpsDeploy.Gui.SshSecretBroker]::new($script:VpsInteractionSession)
     $start=[Diagnostics.ProcessStartInfo]::new($FilePath)
     $start.UseShellExecute=$false;$start.CreateNoWindow=$true
     $start.RedirectStandardInput=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true

@@ -26,7 +26,7 @@ try{
  $hash=(Get-FileHash -LiteralPath (Join-Path $app 'private/record.txt')).Hash
  $proof=Join-Path $app '.tmp/storage-ui/runtime-proof.json'
  [IO.Directory]::CreateDirectory((Split-Path -Parent $proof))|Out-Null
- $uiExit=Invoke-Private (Join-Path $app 'MXH-VPS-Deploy.exe') @('--ui-smoke',$proof,'--app-root',$app,'--exercise-storage')
+ $uiExit=Invoke-Private (Join-Path $app 'May-VPS-Deploy.exe') @('--ui-smoke',$proof,'--app-root',$app,'--exercise-storage')
  if($uiExit -ne 0 -and (Test-Path -LiteralPath $proof)){Get-Content -Raw -LiteralPath $proof|Write-Host}
  if($uiExit -ne 0 -and (Test-Path -LiteralPath ($proof+'.startup.txt'))){Get-Content -LiteralPath ($proof+'.startup.txt')|Select-Object -Last 15|Write-Host}
  Assert-Private ($uiExit -eq 0) 'native storage and node picker regression failed'
@@ -44,17 +44,17 @@ try{
  if(-not $old.StartsWith($fixture+'\',[StringComparison]::OrdinalIgnoreCase) -or -not $custom.StartsWith($fixture+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe fixture movement.'}
  Move-Item -LiteralPath $old -Destination $custom
  $id=[guid]::NewGuid().ToString('N')
- @{SchemaVersion=1;OwnerId=$id;AppRoot=$app}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $custom '.mxh-private-directory.json') -Encoding utf8
+ @{SchemaVersion=1;OwnerId=$id;AppRoot=$app}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $custom '.may-private-directory.json') -Encoding utf8
  @{SchemaVersion=1;OwnerId=$id;Directory=$custom}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $app 'archive-location.private.json') -Encoding utf8
  Assert-Private ((Invoke-Private $package.Installer $installArguments) -eq 0) 'in-place installation with external archive failed'
  Assert-Private ((Get-FileHash -LiteralPath (Join-Path $custom 'record.txt')).Hash -eq $hash) 'in-place installation changed archive'
  Assert-Private ((Invoke-Private (Join-Path $app 'unins000.exe') @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART')) -eq 0) 'keep-data uninstall failed'
  Assert-Private ((Test-Path -LiteralPath (Join-Path $app 'archive-location.private.json')) -and (Get-FileHash -LiteralPath (Join-Path $custom 'record.txt')).Hash -eq $hash) 'keep-data uninstall lost archive or locator'
  Assert-Private ((Invoke-Private $package.Installer $installArguments) -eq 0) 'reinstallation with preserved custom archive failed'
- $marker=Join-Path $custom '.mxh-private-directory.json';$original=[IO.File]::ReadAllBytes($marker)
+ $marker=Join-Path $custom '.may-private-directory.json';$original=[IO.File]::ReadAllBytes($marker)
  @{SchemaVersion=1;OwnerId=[guid]::NewGuid().ToString('N');AppRoot=$app}|ConvertTo-Json|Set-Content -LiteralPath $marker -Encoding utf8
  Assert-Private ((Invoke-Private (Join-Path $app 'unins000.exe') @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/REMOVEDATA=1')) -ne 0) 'uninstall accepted mismatching archive ownership'
- Assert-Private ((Test-Path -LiteralPath (Join-Path $app 'MXH-VPS-Deploy.exe')) -and (Get-FileHash -LiteralPath (Join-Path $custom 'record.txt')).Hash -eq $hash) 'blocked uninstall modified app or data'
+ Assert-Private ((Test-Path -LiteralPath (Join-Path $app 'May-VPS-Deploy.exe')) -and (Get-FileHash -LiteralPath (Join-Path $custom 'record.txt')).Hash -eq $hash) 'blocked uninstall modified app or data'
  [IO.File]::WriteAllBytes($marker,$original)
  $outside=Join-Path $fixture 'unrelated.txt';'keep unrelated file'|Set-Content -LiteralPath $outside
  $uninstallLog=Join-Path $fixture 'remove-data.log'

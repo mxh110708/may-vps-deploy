@@ -38,7 +38,7 @@ try {
     $nativeRequest=Join-Path $FixtureRoot 'test-artifacts/native-client-request.json'
     $nativeResponse=Join-Path $FixtureRoot 'test-artifacts/native-client-response.json'
     @{command='ui.read';arguments=@{}} | ConvertTo-Json | Set-Content -LiteralPath $nativeRequest -Encoding utf8
-    $clientStart=[Diagnostics.ProcessStartInfo]::new((Join-Path $ApplicationDirectory 'MXH-VPS-Deploy.exe'))
+    $clientStart=[Diagnostics.ProcessStartInfo]::new((Join-Path $ApplicationDirectory 'May-VPS-Deploy.exe'))
     $clientStart.UseShellExecute=$false; $clientStart.CreateNoWindow=$true; $clientStart.WindowStyle=[Diagnostics.ProcessWindowStyle]::Hidden
     foreach($argument in @('--test-command',$session,$nativeRequest,$nativeResponse)) { $clientStart.ArgumentList.Add($argument) }
     $clientProcess=[Diagnostics.Process]::Start($clientStart)
@@ -130,20 +130,20 @@ try {
         Check ((Test-Path -LiteralPath (Join-Path $export 'test.yaml')) -and (Test-Path -LiteralPath (Join-Path $export 'test.json'))) 'two real core-validated configs exported through normal UI'
     } else { $cases.Add(@{name='real core generation validation export';state='skipped';reason='No bundled Python runtime supplied.'}) }
     Click '保存方案'; Click '退出编辑'; $null=Wait-Ui {param($ui) -not $ui.dialog}
-    $peerDirectory=Join-Path $FixtureRoot 'private/instances/Example/Native-Landing/MXH-VPS-Deploy'
+    $peerDirectory=Join-Path $FixtureRoot 'private/instances/Example/Native-Landing/May-VPS-Deploy'
     [IO.Directory]::CreateDirectory($peerDirectory) | Out-Null
     @{Provider='Example';Instance='Native-Landing';NodeName='原生合成落地';Role='ShadowsocksLanding';Roles=@('ShadowsocksLanding');Server=@{IPv4='192.0.2.20';IPv6='2001:db8::20'};Ports=@{SshPrimary=22022;SshRescue=33022;LandingShadowsocks=4000};Import=@{Status='Completed'};Shadowsocks=@{Method='2022-blake3-aes-128-gcm';SecondaryIpv6Enabled=$true;SecondaryIpv6Address='2001:db8:1::20'};ProtocolInventory=@{ShadowsocksLanding=@{Installed=$true;Enabled=$true}}} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $peerDirectory 'deployment-plan.json') -Encoding utf8
     @{Engine='dotnet-v1';CurrentManagementPort=22022} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $peerDirectory 'deployment-state.json') -Encoding utf8
-    Click 'network'; Choose '目标实例' 'Example/Managed-Demo/MXH-VPS-Deploy'
-    $canonical=Join-Path $FixtureRoot 'private/instances/Example/Managed-Demo/MXH-VPS-Deploy'
+    Click 'network'; Choose '目标实例' 'Example/Managed-Demo/May-VPS-Deploy'
+    $canonical=Join-Path $FixtureRoot 'private/instances/Example/Managed-Demo/May-VPS-Deploy'
     $backup=Join-Path $canonical 'ip-change-example'
     [IO.Directory]::CreateDirectory($backup) | Out-Null
     Copy-Item -LiteralPath (Join-Path $canonical 'deployment-plan.json') -Destination (Join-Path $backup 'deployment-plan.json')
     Click 'instances'
-    Check (@((Control '选择实例').choices|Where-Object value -eq 'Example/Managed-Demo/MXH-VPS-Deploy').Count -eq 1 -and @((Control '选择实例').choices|Where-Object value -Like '*ip-change-example*').Count -eq 0) 'nested IP-change backup is not a duplicate native instance choice'
-    Choose '选择实例' 'Example/Managed-Demo/MXH-VPS-Deploy'; Click '删除实例'; $null=Wait-Ui {param($ui) $ui.dialog -eq '删除本地实例'}
+    Check (@((Control '选择实例').choices|Where-Object value -eq 'Example/Managed-Demo/May-VPS-Deploy').Count -eq 1 -and @((Control '选择实例').choices|Where-Object value -Like '*ip-change-example*').Count -eq 0) 'nested IP-change backup is not a duplicate native instance choice'
+    Choose '选择实例' 'Example/Managed-Demo/May-VPS-Deploy'; Click '删除实例'; $null=Wait-Ui {param($ui) $ui.dialog -eq '删除本地实例'}
     Check (((Read-Ui).elements.name -join ' ') -match '删除范围' -and (Test-Path -LiteralPath (Join-Path $backup 'deployment-plan.json'))) 'canonical instance deletion review opens while backup data is preserved'
-    Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}; Click 'network'; Choose '目标实例' 'Example/Managed-Demo/MXH-VPS-Deploy'
+    Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}; Click 'network'; Choose '目标实例' 'Example/Managed-Demo/May-VPS-Deploy'
     Check ((Control '优化偏好').value -eq 'Balanced') 'balanced diagnostics is the normal default'
     Choose '入口连接地址族' 'Both'
     Check (((Read-Ui).elements.name -join ' ') -match '每条路径有效载荷最多 204 MiB') 'dual stack shares one total payload budget'
@@ -151,7 +151,7 @@ try {
     Check (-not (Read-Ui).dialog -and (Read-Ui).notice) 'over 20 GiB is rejected before any review or connection'
     Set-Text '自定义总预算（MiB，64–20480）' '20480'; Choose '调优总流量预算' 'Maximum'
     Choose 'TCP 角色与测试路径' 'Relay'; Choose '优化偏好' 'Upload'
-    Check ((Control '中转后的已有落地（仅读取归档）').value -eq 'Example/Native-Landing/MXH-VPS-Deploy') 'relay selector discovers managed landing and preserves source instance'
+    Check ((Control '中转后的已有落地（仅读取归档）').value -eq 'Example/Native-Landing/May-VPS-Deploy') 'relay selector discovers managed landing and preserves source instance'
     Choose '入口 → 落地连接地址族' 'IPv6'; Choose '落地访问网站使用的 IP' 'IPv6'
     Choose '落地访问网站使用的 IP' 'Both'
     Check (((Read-Ui).elements.name -join ' ') -match '共 4 条路径') 'both exit families refresh the shared budget without rebuilding the page'
@@ -163,7 +163,7 @@ try {
     Choose 'TCP 角色与测试路径' 'ForwardOnly'; Click '采集并生成建议'; $ui=Wait-Ui {param($ui) [bool]$ui.dialog}
     Check (($ui.elements.name -join ' ') -match '不发起公网吞吐测试') 'forward-only review does not promise irrelevant throughput tests'
     Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}
-    Choose '目标实例' 'Example/Native-Landing/MXH-VPS-Deploy'
+    Choose '目标实例' 'Example/Native-Landing/May-VPS-Deploy'
     Check ((Control 'TCP 角色与测试路径').value -eq 'Landing' -and @((Read-Ui).elements|Where-Object name -eq '审阅并应用建议').Count -eq 0) 'landing offers diagnostics and only basic fq BBR tuning'
     Check ((Control '落地访问网站使用的 IP').value -eq 'Both') 'dual-exit landing defaults to testing both exits'
     Choose '入口连接地址族' 'Both'; Choose '落地访问网站使用的 IP' 'IPv6'; Choose '落地访问网站使用的 IP' 'Both'
@@ -176,7 +176,7 @@ try {
     $kernelState=Get-Content -Raw -LiteralPath $kernelStateFile | ConvertFrom-Json -AsHashtable
     $kernelState.LastKernelCheck=@{Compatible=$true;Kernel='6.12.1-amd64';BbrVersion='VersionUnverified';Reasons=@();At=[DateTimeOffset]::UtcNow.ToString('O')}
     $kernelState | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $kernelStateFile -Encoding utf8
-    Click 'instances'; Click 'network'; Choose '目标实例' 'Example/Managed-Demo/MXH-VPS-Deploy'
+    Click 'instances'; Click 'network'; Choose '目标实例' 'Example/Managed-Demo/May-VPS-Deploy'
     Check ((Control 'BBR 版本').value -eq 'Current') 'kernel replacement remains opt-in'
     Choose 'BBR 版本' 'v3'; $ui=Read-Ui
     Check (@($ui.elements | Where-Object name -eq 'BBR v3 内核来源').Count -eq 0 -and ($ui.elements.name -join ' ') -match '固定预编译' -and ($ui.elements.name -join ' ') -notmatch '最新提交|VPS 源码构建') 'BBR v3 exposes only the embedded precompiled package'

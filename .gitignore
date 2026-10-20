@@ -26,7 +26,7 @@ config/app-defaults.local.json
 config/gui.local.json
 
 # Compiled desktop distribution (built from public source, never private data).
-/MXH-VPS-Deploy.exe
+/May-VPS-Deploy.exe
 /application-files.json
 /desktop-runtime.json
 /installation.json

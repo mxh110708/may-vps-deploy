@@ -14,7 +14,7 @@ import sys
 import time
 from pathlib import Path
 
-BASE = Path('/var/lib/mxh-vps-deploy/kernel-google-v3')
+BASE = Path('/var/lib/may-vps-deploy/kernel-google-v3')
 DEFAULT = Path('/etc/default/grub.d/99-mxh-bbr-kernel.cfg')
 UNIT = Path('/etc/systemd/system/mxh-kernel-boot-guard.service')
 TERMINAL = ('Committed', 'RolledBack', 'Aborted')

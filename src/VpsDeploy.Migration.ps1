@@ -263,7 +263,7 @@ function ConvertTo-MxhCompatiblePlan {
     if(-not$result.Contains('Komari')){$result.Komari=[ordered]@{Enabled=$false;Endpoint=$null;AgentVersion=$null}}
     if(-not$result.Contains('Firewall')){$result.Firewall=[ordered]@{Mode='PreserveExisting'}}
     if(-not$result.Paths.Contains('InstanceDirectory')){$result.Paths.InstanceDirectory=[string]$result.Paths.Archive}
-    if(-not$result.Contains('Compatibility')){$result.Compatibility=[ordered]@{NormalizedBy='MXH-VPS-Deploy';OriginalSchema=if($result.Contains('SchemaVersion')){$result.SchemaVersion}else{$null};NormalizedAt=(Get-Date).ToString('o')}}
+    if(-not$result.Contains('Compatibility')){$result.Compatibility=[ordered]@{NormalizedBy='May-VPS-Deploy';OriginalSchema=if($result.Contains('SchemaVersion')){$result.SchemaVersion}else{$null};NormalizedAt=(Get-Date).ToString('o')}}
     return $result
 }
 

@@ -62,7 +62,7 @@ $module=Get-Module VpsDeploy.Core
         }
         try{Fails {Publish-MxhAuthorityPair $sourceClash $sourceSing $targetClash $targetSing (Join-Path $temporary 'failure')} 'first replacement failure propagates'}finally{Remove-Item Function:\Save-VpsJson;Remove-Variable baseSave -Scope Script}
         Check ((Get-Content -Raw $targetClash) -eq 'old clash' -and (Get-Content -Raw $targetSing) -eq 'old sing') 'first replacement failure restores pair'
-        $held=[IO.File]::Open($targetSing+'.mxh-publish.lock','OpenOrCreate','ReadWrite','None')
+        $held=[IO.File]::Open($targetSing+'.may-publish.lock','OpenOrCreate','ReadWrite','None')
         try{Fails {Publish-MxhAuthorityPair $sourceClash $sourceSing $targetClash $targetSing (Join-Path $temporary 'locked')} 'concurrent publisher blocked'}finally{$held.Dispose()}
         function Test-MxhClientAuthorityPair {return @{mihomo=@{Status='Ready'};'sing-box'=@{Status='Ready'}}}
         Invoke-MxhSchemeBuild $scheme $root -OutputRoot (Join-Path $temporary 'candidate')

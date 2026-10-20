@@ -16,7 +16,7 @@ $root = [IO.Path]::GetFullPath($FixtureRoot).TrimEnd('\','/')
 $source = [IO.Path]::GetFullPath($PublicAssetRoot).TrimEnd('\','/')
 if ($root -eq $app -or $root.StartsWith($app + '\', [StringComparison]::OrdinalIgnoreCase) -or $app.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Test data must be independent of the application directory.' }
 if (Test-Path -LiteralPath $root) { throw 'Choose a new, empty test directory. Existing data was preserved.' }
-$exe = Join-Path $app 'MXH-VPS-Deploy.exe'
+$exe = Join-Path $app 'May-VPS-Deploy.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Native application not found.' }
 for ($candidate = $root; $candidate; $candidate = [IO.Path]::GetDirectoryName($candidate)) {
     if ((Test-Path -LiteralPath $candidate) -and ((Get-Item -LiteralPath $candidate -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Test directory contains a link.' }
@@ -51,7 +51,7 @@ $sessionId = [guid]::NewGuid().ToString('N')
 $token = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant()
 @{ IsolatedTestRoot = $true; SessionId = $sessionId } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'background-test.fixture.json') -Encoding utf8
 $manifest = Join-Path $root 'test-session.private.json'
-@{ SchemaVersion = 1; Root = $root; SessionId = $sessionId; PipeName = 'mxh-test-' + $sessionId; Token = $token; AllowedEndpoints = $AllowedEndpoints; AllowManagementPortTransition = [bool]$AllowManagementPortTransition; AllowTransportFaults = [bool]$AllowTransportFaults } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifest -Encoding utf8
+@{ SchemaVersion = 1; Root = $root; SessionId = $sessionId; PipeName = 'may-test-' + $sessionId; Token = $token; AllowedEndpoints = $AllowedEndpoints; AllowManagementPortTransition = [bool]$AllowManagementPortTransition; AllowTransportFaults = [bool]$AllowTransportFaults } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifest -Encoding utf8
 @{ Appearance = 'Dark'; FontId = 'Route'; AutoCheckUpdates = $false } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'private/desktop-settings.json') -Encoding utf8
 if ($SyntheticFixture) {
     if ($AllowedEndpoints.Count) { throw 'Synthetic UI suites must not have remote targets.' }

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
-    [string]$MxhRouteBundlePath,
+    [string]$MayRouteBundlePath,
     [string]$SourceDirectory,
     [switch]$Offline,
     [switch]$RepairExisting
@@ -81,13 +81,13 @@ foreach ($entry in $entries) {
 # A complete verified set needs neither network access nor the original bundle.
 if($missing.Count){
     $bundle=$versions.client_compatibility.mxh_route.public_rules_bundle
-    if(-not $MxhRouteBundlePath){
-        if($Offline){throw '离线来源缺少规则；请提供固定的 MXH Route 规则包。'}
-        $MxhRouteBundlePath=Join-Path $work 'public-rules-v1.json'
-        Invoke-WebRequest -Uri $bundle.source -OutFile $MxhRouteBundlePath -TimeoutSec 60
+    if(-not $MayRouteBundlePath){
+        if($Offline){throw '离线来源缺少规则；请提供固定的 May Route 规则包。'}
+        $MayRouteBundlePath=Join-Path $work 'public-rules-v1.json'
+        Invoke-WebRequest -Uri $bundle.source -OutFile $MayRouteBundlePath -TimeoutSec 60
     }
-    if(-not(Test-AssetHash $MxhRouteBundlePath $bundle.sha256)){throw 'MXH Route 规则包 SHA-256 不匹配。'}
-    $rules=Get-Content -Raw -LiteralPath $MxhRouteBundlePath|ConvertFrom-Json
+    if(-not(Test-AssetHash $MayRouteBundlePath $bundle.sha256)){throw 'May Route 规则包 SHA-256 不匹配。'}
+    $rules=Get-Content -Raw -LiteralPath $MayRouteBundlePath|ConvertFrom-Json
     if($rules.version -ne 1 -or $rules.files.Count -ne 5){throw '规则包结构无效。'}
     foreach($entry in $missing){
         $found=@($rules.files|Where-Object name -eq $entry.tag)

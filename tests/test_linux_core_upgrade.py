@@ -194,7 +194,7 @@ systemctl(){ case "$1" in is-active|is-enabled) return 1;; *) return 0;; esac; }
 nginx(){ return 0; }
 tar(){ local args=();while (($#));do if [[ "$1" == -C && "$2" == / ]];then args+=(-C "$TEST_ROOT");shift 2;else args+=("$1");shift;fi;done;command tar "${args[@]}"; }
 '''
-    (root/'var/lib/mxh-vps-deploy').mkdir(exist_ok=True)
+    (root/'var/lib/may-vps-deploy').mkdir(exist_ok=True)
     env=dict(os.environ,TEST_ROOT=str(root))
     result=subprocess.run(['/bin/bash','-s','--',str(backup)],input=preamble+source,text=True,capture_output=True,timeout=30,env=env)
     assert result.returncode==0,result.stderr

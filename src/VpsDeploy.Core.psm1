@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:VpsWizardBackMarker = '__MXH_VPS_WIZARD_BACK__'
 $script:VpsWizardCancelMarker = '__MXH_VPS_WIZARD_CANCEL__'
-$script:VpsManagedDirectoryName = 'MXH-VPS-Deploy'
+$script:VpsManagedDirectoryName = 'May-VPS-Deploy'
 $script:VpsInteractionSession = $null
 
 function Set-VpsInteractionSession {
@@ -1008,7 +1008,7 @@ function Resolve-VpsXrayVersion {
     }
     try {
         $api = if ($versions.xray.latest_stable_api) { [string]$versions.xray.latest_stable_api } else { 'https://api.github.com/repos/XTLS/Xray-core/releases/latest' }
-        $release = Invoke-RestMethod -Method Get -Headers @{ 'User-Agent' = 'MXH-VPS-Deploy' } -Uri $api -TimeoutSec 20
+        $release = Invoke-RestMethod -Method Get -Headers @{ 'User-Agent' = 'May-VPS-Deploy' } -Uri $api -TimeoutSec 20
         if ([bool]$release.draft -or [bool]$release.prerelease) { throw 'GitHub latest 指向草稿或预发行版。' }
         $resolved = ([string]$release.tag_name).TrimStart('v')
         if ($resolved -notmatch '^\d+\.\d+\.\d+$') { throw '官方 latest 标签格式无法识别。' }
@@ -1054,7 +1054,7 @@ function New-VpsInteractivePlan {
     $versions = Get-VpsVersions -ProjectRoot $ProjectRoot
     $defaultTransitTag = [string](Get-MxhClientLayoutTemplate -ProjectRoot $ProjectRoot).Value.region_groups[0]
     Write-Host ''
-    Write-Host 'MXH VPS Deploy - 新部署向导' -ForegroundColor White
+    Write-Host 'May VPS Deploy - 新部署向导' -ForegroundColor White
     Write-Host '支持初始密码或服务商现有私钥；现有 OpenSSH 私钥默认复用，也可明确选择生成新的管理密钥。' -ForegroundColor DarkGray
     if ($null -eq $script:VpsInteractionSession) { Write-Host '返回统一输入 0；第一项输入 0 返回主菜单。' -ForegroundColor DarkGray }
 

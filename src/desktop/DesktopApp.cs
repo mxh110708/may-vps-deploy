@@ -10,12 +10,12 @@ using System.Windows.Forms;
 using System.Threading;
 using System.Runtime.InteropServices;
 
-[assembly: AssemblyTitle("MXH VPS Deploy")]
-[assembly: AssemblyProduct("MXH VPS Deploy")]
-[assembly: AssemblyCompany("MXH")]
+[assembly: AssemblyTitle("May VPS Deploy")]
+[assembly: AssemblyProduct("May VPS Deploy")]
+[assembly: AssemblyCompany("May")]
 [assembly: AssemblyDescription("Windows desktop for VPS deployment and maintenance")]
 
-namespace Mxh.VpsDeploy.Desktop
+namespace May.VpsDeploy.Desktop
 {
     internal static class DesktopApp
     {
@@ -44,11 +44,11 @@ namespace Mxh.VpsDeploy.Desktop
                     using (var process = Process.Start(probe)) { process.WaitForExit(); return process.ExitCode; }
                 }
                 if (args.Length != 0) throw new ArgumentException();
-                using (var mutex = new Mutex(false, "Local\\mxh-vps-deploy-desktop"))
+                using (var mutex = new Mutex(false, "Local\\may-vps-deploy-desktop"))
                 {
                     bool owned;
                     try { owned = mutex.WaitOne(0); } catch (AbandonedMutexException) { owned=true; }
-                    if (!owned) { IntPtr window=FindWindow(null,"MXH VPS Deploy"); if(window!=IntPtr.Zero){ShowWindow(window,9);SetForegroundWindow(window);} return 0; }
+                    if (!owned) { IntPtr window=FindWindow(null,"May VPS Deploy"); if(window!=IntPtr.Zero){ShowWindow(window,9);SetForegroundWindow(window);} return 0; }
                     try
                     {
                         var start = CreateStart(root, runtime);
@@ -61,7 +61,7 @@ namespace Mxh.VpsDeploy.Desktop
             }
             catch
             {
-                if (!diagnostic) MessageBox.Show("应用文件不完整或运行环境无法启动。请重新运行正式安装包修复；私人数据会保留。", "MXH VPS Deploy", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (!diagnostic) MessageBox.Show("应用文件不完整或运行环境无法启动。请重新运行正式安装包修复；私人数据会保留。", "May VPS Deploy", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }
         }

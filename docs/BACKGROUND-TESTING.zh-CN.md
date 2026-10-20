@@ -86,7 +86,7 @@ $ui = ./scripts/Invoke-VpsBackgroundTest.ps1 `
 同一 EXE 还提供无需 PowerShell 的客户端：
 
 ```text
-MXH-VPS-Deploy.exe --test-command <会话清单> <请求 JSON 文件> <响应 JSON 文件>
+May-VPS-Deploy.exe --test-command <会话清单> <请求 JSON 文件> <响应 JSON 文件>
 ```
 
 请求文件包含 `command` 和 `arguments`；客户端读取会话认证信息，在进入 WinUI 前完成管道调用。响应文件位于本轮目录，保留协议结果；退出码 0 表示指令接受、2 表示明确拒绝、1 表示客户端未完成。测试模式不提供任意命令执行接口。

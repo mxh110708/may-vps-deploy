@@ -11,10 +11,10 @@ done
 [[ "$VPS_PARAM_NEW_PUBLIC_KEY" == ssh-ed25519\ * ]]
 [[ "$VPS_PARAM_ADMIN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
 command -v flock >/dev/null || { echo 'Missing flock (util-linux); install it before starting maintenance.' >&2; exit 1; }
-install -d -m 0700 /var/lib/mxh-vps-deploy
-exec 9>/var/lib/mxh-vps-deploy/transaction.lock
+install -d -m 0700 /var/lib/may-vps-deploy
+exec 9>/var/lib/may-vps-deploy/transaction.lock
 flock -n 9 || exit 1
-[[ ! -f /var/lib/mxh-vps-deploy/transaction.owner ]]
+[[ ! -f /var/lib/may-vps-deploy/transaction.owner ]]
 if systemctl is-active --quiet mxh-ssh-maintenance-rollback.timer; then exit 1; fi
 if systemctl is-active --quiet mxh-ssh-maintenance-rollback.service; then exit 1; fi
 if systemctl is-active --quiet mxh-protocol-migration-rollback.timer; then exit 1; fi
@@ -25,8 +25,8 @@ if [[ "$firewall_required" == true ]]; then mxh_firewall check; fi
 stamp="$(date -u +%Y%m%d-%H%M%S)"; backup="/root/vps-deploy-backups/${stamp}/ssh-maintenance"
 [[ ! -e "$backup" ]]
 install -d -m 0700 "$backup"
-printf '%s\n' "$backup" > /var/lib/mxh-vps-deploy/transaction.owner
-chmod 0600 /var/lib/mxh-vps-deploy/transaction.owner
+printf '%s\n' "$backup" > /var/lib/may-vps-deploy/transaction.owner
+chmod 0600 /var/lib/may-vps-deploy/transaction.owner
 cp -a /etc/ssh "$backup/etc-ssh"
 if [[ "$firewall_required" == true ]]; then
   mxh_firewall snapshot "$backup/firewall-state.json"
@@ -41,10 +41,10 @@ fi
 cat > "$backup/rollback" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-exec 9>/var/lib/mxh-vps-deploy/transaction.lock
+exec 9>/var/lib/may-vps-deploy/transaction.lock
 flock -w 30 9 || exit 1
 [[ ! -f '$backup/transaction-committed' ]] || exit 0
-[[ "\$(cat /var/lib/mxh-vps-deploy/transaction.owner)" == '$backup' ]]
+[[ "\$(cat /var/lib/may-vps-deploy/transaction.owner)" == '$backup' ]]
 if [[ -f '$backup/nftables.conf' ]]; then
   [[ -f '$backup/firewall-state.json' && -f '$backup/firewall-tools.sh' ]] || { echo 'Legacy SSH firewall recovery needs ownership review.' >&2; exit 1; }
   # shellcheck disable=SC1091
@@ -62,7 +62,7 @@ sshd -t
 systemctl reload ssh.service 2>/dev/null || systemctl reload sshd.service
 if [[ -f '$backup/firewall.restore' ]]; then install -m 0755 '$backup/firewall.restore' /etc/nftables.conf; nft -c -f /etc/nftables.conf; nft -f /etc/nftables.conf; fi
 date -u +%FT%TZ > '$backup/rollback-executed'
-rm -f /var/lib/mxh-vps-deploy/transaction.owner
+rm -f /var/lib/may-vps-deploy/transaction.owner
 EOF
 chmod 0700 "$backup/rollback"
 cat > /etc/systemd/system/mxh-ssh-maintenance-rollback.service <<EOF

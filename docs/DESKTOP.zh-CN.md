@@ -12,7 +12,7 @@ v0.9.1 修正了更新检查结束后的状态提示，增加独立更新弹窗�
 
 ## 启动与环境
 
-安装 EXE 默认目录为 `C:\Programs\MXH VPS Deploy`，仍按当前用户安装，也可选择其他可写目录。已有安装通过原目录升级，保留原位置和私人数据，不自动搬迁。支持 Windows 10 2004 及以上、Windows 11 amd64；从桌面或开始菜单打开，也可双击应用目录的 `MXH-VPS-Deploy.exe`。便携 ZIP 解压后直接运行 EXE。
+安装 EXE 默认目录为 `C:\Programs\May VPS Deploy`，仍按当前用户安装，也可选择其他可写目录。已有安装通过原目录升级，保留原位置和私人数据，不自动搬迁。支持 Windows 10 2004 及以上、Windows 11 amd64；从桌面或开始菜单打开，也可双击应用目录的 `May-VPS-Deploy.exe`。便携 ZIP 解压后直接运行 EXE。
 
 应用内置 .NET 与 WinUI 3，SSH.NET 直接负责 SSH/SFTP，不加载 PowerShell 或 WPF。Python 3.13.16 与 ruamel.yaml 0.18.10 仅用于现有配置的专用转换，不驱动界面或运维任务。运行不修改全局 PATH，不安装 SSH 服务。
 
@@ -56,13 +56,13 @@ v0.9.1 修正了更新检查结束后的状态提示，增加独立更新弹窗�
 
 默认私人归档仍为 `<应用目录>/private`。设置中的“私人归档”显示当前实际路径，点击“修改目录”选择一个空的独立本地文件夹，审阅文件数量和目标后迁移。迁移包含实例、密钥、受保护凭据、方案、字体和任务记录；应用文件与 `config/*.local.json` 保留在安装目录。路径、方案来源指纹和归档校验清单同步更新，已有候选必须重新生成与校验。迁移拒绝非空目标、嵌套目录、链接、只读材料和未完成的恢复事务；复制成功后才启用新目录并移除旧副本。自定义目录不可用时停止启动，不回退到空归档。
 
-安装目录的 `archive-location.private.json` 只记录所选目录及归属标识，属于本地文件，更新保留、发行包不携带。归档目录中的 `.mxh-private-directory.json` 用于确认卸载删除的范围。卸载选择“保留”时同时保留定位设置和自定义归档；选择“彻底删除”时校验归属并删除该归档目录，保留其父目录中的其他文件。凭据仍由原 Windows 账号保护，改目录不等于转换账号或操作系统。
+安装目录的 `archive-location.private.json` 只记录所选目录及归属标识，属于本地文件，更新保留、发行包不携带。归档目录中的 `.may-private-directory.json` 用于确认卸载删除的范围。卸载选择“保留”时同时保留定位设置和自定义归档；选择“彻底删除”时校验归属并删除该归档目录，保留其父目录中的其他文件。凭据仍由原 Windows 账号保护，改目录不等于转换账号或操作系统。
 
 配置设计的受管节点选择提供“全选／取消全选”，只作用于当前显示的可添加节点；已在方案中的节点不会重复添加。Reality 的备用端口连接默认隐藏，可启用“显示备用入口”后选择，显示为“备用入口”。这是真实备用连接，不是导入了备份文件；导出保留原节点名以兼容现有配置。
 
 ```text
 <应用目录>/
-├─ MXH-VPS-Deploy.exe 与 .NET/WinUI 库
+├─ May-VPS-Deploy.exe 与 .NET/WinUI 库
 ├─ runtime/python/                  专用配置转换环境
 ├─ app-helpers/                     安装校验与更新辅助程序
 ├─ config/*.local.json              原有本机文件，原样保留
@@ -110,8 +110,8 @@ SSH 服务商源私钥不修改；只有新生成的管理私钥和本应用建�
 ## 开发验证
 
 ```powershell
-dotnet restore .\desktop\Mxh.VpsDeploy.Tests\Mxh.VpsDeploy.Tests.csproj --locked-mode
-dotnet run --project .\desktop\Mxh.VpsDeploy.Tests -c Release --no-restore -- $PWD
+dotnet restore .\desktop\May.VpsDeploy.Tests\May.VpsDeploy.Tests.csproj --locked-mode
+dotnet run --project .\desktop\May.VpsDeploy.Tests -c Release --no-restore -- $PWD
 pwsh -NoProfile -File .\Start-VPSDeploy.ps1 -Mode ValidateProject
 pwsh -NoProfile -File .\scripts\New-VpsReleasePackage.ps1 -Development -Destination '<预览目录>'
 ```

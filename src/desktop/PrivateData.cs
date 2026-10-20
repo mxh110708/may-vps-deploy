@@ -4,14 +4,14 @@ using System.IO;
 using System.Linq;
 using System.Web.Script.Serialization;
 
-namespace Mxh.VpsDeploy.Desktop
+namespace May.VpsDeploy.Desktop
 {
     internal sealed class DataLocation { public int SchemaVersion {get;set;} public string Directory {get;set;} public string OwnerId {get;set;} public string AppRoot {get;set;} }
     // Native uninstall helper: keep is the default. External deletion requires matching ownership.
     internal static class PrivateData
     {
         internal const string LocationFile = "archive-location.private.json";
-        internal const string OwnershipFile = ".mxh-private-directory.json";
+        internal const string OwnershipFile = ".may-private-directory.json";
         internal static string Location(string app)
         {
             app=DesktopFiles.Root(app);

@@ -1,5 +1,5 @@
 using System;
-namespace Mxh.VpsDeploy.Desktop
+namespace May.VpsDeploy.Desktop
 {
     internal static class SetupGuard
     {

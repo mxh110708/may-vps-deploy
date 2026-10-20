@@ -7,7 +7,7 @@ if (-not $IsWindows) { throw 'GUI behavior checks require Windows.' }
 $passed=0
 function Assert-Gui { param([bool]$Condition,[string]$Message) if(-not $Condition){throw "GUI ASSERT: $Message"}; $script:passed++ }
 function Wait-GuiRequest {
-    param([Mxh.VpsDeploy.Gui.Session]$Session)
+    param([May.VpsDeploy.Gui.Session]$Session)
     $watch=[Diagnostics.Stopwatch]::StartNew(); $request=$null
     while($watch.ElapsedMilliseconds -lt 10000) {
         if($Session.Requests.TryDequeue([ref]$request)){return $request}
@@ -18,7 +18,7 @@ function Wait-GuiRequest {
     throw "GUI input timed out. $reason"
 }
 function Wait-GuiDone {
-    param([Mxh.VpsDeploy.Gui.Session]$Session,[switch]$Ui)
+    param([May.VpsDeploy.Gui.Session]$Session,[switch]$Ui)
     $watch=[Diagnostics.Stopwatch]::StartNew()
     while($watch.ElapsedMilliseconds -lt 10000) {
         if($Ui){Receive-VpsGuiEvents}else{[void]$Session.Poll()}
@@ -37,7 +37,7 @@ try {
     Assert-Gui (-not $GuiControls.ContainsKey('BrowseInstances') -and -not $GuiControls.ContainsKey('BrowsePlan')) 'no legacy archive import or external root chooser'
     Assert-Gui ($GuiWindow.FontFamily.FamilyMaps.Count -eq 2) 'consistent Latin and Chinese font mapping'
     Assert-Gui (-not $GuiControls.AutoUpdateCheck.IsChecked) 'update checks opt in'
-    $session=[Mxh.VpsDeploy.Gui.Session]::new()
+    $session=[May.VpsDeploy.Gui.Session]::new()
     $worker=@'
 param($Root,$Session)
 $ErrorActionPreference='Stop'
@@ -72,7 +72,7 @@ $matched=(Read-MxhSecretText 'secret') -eq 'fixture-hidden-only'
     Assert-Gui ($log -notmatch 'fixture-hidden-only' -and $session.HasWarnings) 'validation warning preserved without secret echo'
     $session.Dispose()
 
-    $session=[Mxh.VpsDeploy.Gui.Session]::new()
+    $session=[May.VpsDeploy.Gui.Session]::new()
     $cancelModules=@'
 param($Root,$Session)
 Import-Module (Join-Path $Root 'src/VpsDeploy.Core.psm1') -Force
@@ -123,7 +123,7 @@ Set-VpsInteractionSession $Session
     Assert-Gui ($history.schema_version -eq 1 -and @($history.tasks)[-1].Status -eq 'Canceled') 'desktop task outcome is persisted separately from sensitive logs'
     Assert-Gui ($GuiControls.TaskNew.IsEnabled) 'task controls restored after cancel'
 
-    $session=[Mxh.VpsDeploy.Gui.Session]::new()
+    $session=[May.VpsDeploy.Gui.Session]::new()
     $multiple=@'
 param($Root,$Session)
 Import-Module (Join-Path $Root 'src/VpsDeploy.Core.psm1') -Force
@@ -137,8 +137,8 @@ Set-VpsInteractionSession $Session
     Assert-Gui (-not $session.Failed -and $session.Result[0].ToString() -eq '0,2') 'multi-select preserves exact backend indexes'
     $session.Dispose()
 
-    $session=[Mxh.VpsDeploy.Gui.Session]::new()
-    $broker=[Mxh.VpsDeploy.Gui.SshSecretBroker]::new($session)
+    $session=[May.VpsDeploy.Gui.Session]::new()
+    $broker=[May.VpsDeploy.Gui.SshSecretBroker]::new($session)
     try {
         $helper=& $GuiModule {param($Root)Get-VpsGuiAskPassPath $Root} $ProjectRoot
         $start=[Diagnostics.ProcessStartInfo]::new($helper);$start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
@@ -155,7 +155,7 @@ Set-VpsInteractionSession $Session
         }finally{$child.Dispose()}
     }finally{$broker.Dispose();$session.Dispose()}
 
-    $session=[Mxh.VpsDeploy.Gui.Session]::new()
+    $session=[May.VpsDeploy.Gui.Session]::new()
     $saveCanceledDraft=@'
 param($Root,$Fixture,$Session)
 Import-Module (Join-Path $Root 'src/VpsDeploy.Core.psm1') -Force
@@ -174,7 +174,7 @@ Set-VpsInteractionSession $Session
     Assert-Gui (-not $session.Failed -and $session.Result[0].Saved -and $session.Result[0].Encrypted -and -not $session.Result[0].Dirty) 'desktop cancellation saves encrypted dirty draft'
     $session.Dispose()
 
-    $archive=Join-Path $fixture 'FixtureProvider/FixtureInstance/MXH-VPS-Deploy'
+    $archive=Join-Path $fixture 'FixtureProvider/FixtureInstance/May-VPS-Deploy'
     [IO.Directory]::CreateDirectory($archive)|Out-Null
     $plan=Join-Path $archive 'deployment-plan.json'
     @{Provider='FixtureProvider';Instance='FixtureInstance';Role='AuditOnly';Paths=@{Archive=$archive;InstanceDirectory=(Split-Path -Parent $archive);KeyDirectory=(Join-Path $archive 'ssh')}}|ConvertTo-Json -Depth 5|Set-Content $plan
@@ -182,13 +182,13 @@ Set-VpsInteractionSession $Session
     Assert-Gui (-not (Test-VpsGuiPlanPath (Join-Path $fixture 'other') $plan)) 'outside archive rejected'
     Update-VpsGuiCatalog
     Assert-Gui ($GuiControls.InstanceList.Items.Count -eq 1) 'catalog shows current local plan'
-    $GuiState.Session.Dispose();$GuiState.Session=[Mxh.VpsDeploy.Gui.Session]::new()
+    $GuiState.Session.Dispose();$GuiState.Session=[May.VpsDeploy.Gui.Session]::new()
     $GuiState.Mode='New'
     $GuiState.Session.StartScript("throw 'fixture failure'",[Collections.Generic.Dictionary[string,object]]::new())
     Wait-GuiDone $GuiState.Session -Ui
     Assert-Gui ($GuiState.Session.Failed -and $GuiControls.TaskDetails.IsExpanded) 'failure opens details'
     Assert-Gui ($GuiControls.FooterStatus.Text -match '未完成') 'failure is never displayed as success'
-    $rootMenu=[Mxh.VpsDeploy.Gui.InputRequest]::new();$rootMenu.Title='Clash/sing-box 客户端权威配置设计器';$rootMenu.Kind='menu';$rootMenu.Options=@('create','open')
+    $rootMenu=[May.VpsDeploy.Gui.InputRequest]::new();$rootMenu.Title='Clash/sing-box 客户端权威配置设计器';$rootMenu.Kind='menu';$rootMenu.Options=@('create','open')
     $GuiState.Mode='ClientConfig';Show-VpsGuiInput $rootMenu
     Assert-Gui ($GuiControls.ClientsPage.Visibility -eq 'Visible' -and $GuiControls.InputCard.Visibility -eq 'Collapsed') 'client root uses desktop page without stale workflow input'
     Show-VpsGuiPage 'OverviewPage' '概述'

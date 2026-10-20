@@ -14,10 +14,10 @@ $script:GuiProjectRoot = $PSScriptRoot
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 trap {
     if ($NoShow -or $PreviewPath) { break }
-    [void][Windows.MessageBox]::Show("应用无法继续：$($_.Exception.Message)",'MXH VPS Deploy','OK','Error')
+    [void][Windows.MessageBox]::Show("应用无法继续：$($_.Exception.Message)",'May VPS Deploy','OK','Error')
     exit 1
 }
-if (-not ('Mxh.VpsDeploy.Gui.Session' -as [type])) {
+if (-not ('May.VpsDeploy.Gui.Session' -as [type])) {
     Add-Type -Path (Join-Path $PSScriptRoot 'src/gui/VpsDeploy.GuiHost.cs')
 }
 Import-Module (Join-Path $PSScriptRoot 'src/VpsDeploy.Core.psm1') -Force
@@ -110,7 +110,7 @@ function Update-VpsGuiHistory {
     $script:GuiControls.NoTaskHistory.Visibility=if($script:GuiControls.TaskHistory.Items.Count){'Collapsed'}else{'Visible'}
 }
 function Save-VpsGuiTaskRecord {
-    param([Mxh.VpsDeploy.Gui.Session]$Session)
+    param([May.VpsDeploy.Gui.Session]$Session)
     if($script:GuiState.Mode -in @('CheckUpdate','ApplyUpdate')){return}
     $status=if($Session.Failed){'Failed'}elseif($Session.CancelRequested -or $Session.NavigatedBack){'Canceled'}elseif($Session.HasWarnings){'Warning'}else{'Completed'}
     $script:GuiState.History+=@{Mode=$script:GuiState.Mode;Title=$script:GuiState.Title;Status=$status;StartedAt=$script:GuiState.StartedAt;EndedAt=(Get-Date).ToUniversalTime().ToString('o')}
@@ -269,7 +269,7 @@ function Start-VpsGuiTask {
     if ($script:GuiState.Session) { $script:GuiState.Session.Dispose() }
     $script:GuiState.Mode = $Mode; $script:GuiState.Title = $Title
     $script:GuiState.Request = $null; $script:GuiState.Context.Clear()
-    $script:GuiState.Session = [Mxh.VpsDeploy.Gui.Session]::new()
+    $script:GuiState.Session = [May.VpsDeploy.Gui.Session]::new()
     $selectedPlan = $script:GuiState.PlanPath
     if ($script:GuiControls.InstanceList.SelectedItem) { $selectedPlan = [string]$script:GuiControls.InstanceList.SelectedItem.Tag }
     if ($Mode -in @('Maintain','Migrate','Resume','TuneNetwork')) {
@@ -312,7 +312,7 @@ function Start-VpsGuiTask {
     Set-VpsGuiTaskAvailability $true
 }
 function Show-VpsGuiInput {
-    param([Mxh.VpsDeploy.Gui.InputRequest]$Request)
+    param([May.VpsDeploy.Gui.InputRequest]$Request)
     $script:GuiState.Request = $Request
     if($Request.Title -match '核对.*摘要'){$script:GuiControls.WorkflowStage.Text='审阅方案 → 确认执行'}
     elseif($Request.Title -match '确认按以上顺序'){$script:GuiControls.WorkflowStage.Text='即将执行 · 最后确认'}
@@ -542,7 +542,7 @@ $mutexName='Local\mxh-vps-deploy-'+[Convert]::ToHexString([Security.Cryptography
 $instanceMutex=[Threading.Mutex]::new($false,$mutexName)
 $mutexHeld=$false
 try {$mutexHeld=$instanceMutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$mutexHeld=$true}
-if(-not $mutexHeld){[void][Windows.MessageBox]::Show('此目录中的应用已在运行，请使用已有窗口。','MXH VPS Deploy','OK','Information');$instanceMutex.Dispose();return}
+if(-not $mutexHeld){[void][Windows.MessageBox]::Show('此目录中的应用已在运行，请使用已有窗口。','May VPS Deploy','OK','Information');$instanceMutex.Dispose();return}
 $script:GuiTimer.Start()
 $script:GuiWindow.Add_ContentRendered({
     if ($script:GuiPreferences.automatic_update_check) { Start-VpsGuiTask 'CheckUpdate' '检查应用更新' }

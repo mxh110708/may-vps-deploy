@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 action="${VPS_PARAM_ACTION:-Status}"
-owner=/var/lib/mxh-vps-deploy/transaction.owner
+owner=/var/lib/may-vps-deploy/transaction.owner
 current=''
 [[ ! -f "$owner" ]] || current="$(cat "$owner")"
 if [[ "$action" == 'Status' && -n "${VPS_PARAM_EXPECTED_BACKUP:-}" ]]; then
@@ -9,7 +9,7 @@ if [[ "$action" == 'Status' && -n "${VPS_PARAM_EXPECTED_BACKUP:-}" ]]; then
   current="$VPS_PARAM_EXPECTED_BACKUP"
 fi
 if [[ "$action" == 'VerifyUnowned' ]]; then
-  exec 9>/var/lib/mxh-vps-deploy/transaction.lock
+  exec 9>/var/lib/may-vps-deploy/transaction.lock
   flock -n 9 || exit 1
   [[ ! -e "$owner" ]]
   for unit in mxh-protocol-migration-rollback.timer mxh-protocol-migration-rollback.service mxh-ssh-maintenance-rollback.timer mxh-ssh-maintenance-rollback.service; do
@@ -19,7 +19,7 @@ if [[ "$action" == 'VerifyUnowned' ]]; then
   exit 0
 elif [[ "$action" == 'ReleaseUnarmed' ]]; then
   : "${VPS_PARAM_EXPECTED_BACKUP:?}"
-  exec 9>/var/lib/mxh-vps-deploy/transaction.lock
+  exec 9>/var/lib/may-vps-deploy/transaction.lock
   flock -n 9 || exit 1
   [[ -n "$current" && "$current" == "$VPS_PARAM_EXPECTED_BACKUP" ]]
   [[ "$(cat "$owner")" == "$current" ]]

@@ -1,10 +1,12 @@
-# MXH VPS Deploy
+# May VPS Deploy
 
 面向个人 Debian VPS 的中文部署与运维工具，由 Windows 控制端统一管理部署计划、远端操作、私有归档和客户端配置。
 
+v0.9.31 将项目与应用统一更名为 May VPS Deploy，采用独立安装身份、私人归档目录和凭据加密格式。旧版由用户自行卸载；迁移前先备份，再导入新目录。GitHub 账号保持不变。详见[全新安装迁移说明](docs/BRAND-MIGRATION-2026-10-20.zh-CN.md)。
+
 v0.9.30 统一新方案的城市/湾区命名：LA 入口与 SF 湾区入口分别建组，SF 包含 San Jose。IPv4、IPv6 落地出口可分别保存节点名，避免重新提取时恢复旧名称；改名保留原连接与凭据。详见[命名约定与归档同步](docs/CITY-NAMING-2026-10-19.zh-CN.md)。
 
-正式版为 [v0.9.28](https://github.com/mxh110708/mxh-vps-deploy/releases/tag/v0.9.28)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+正式版为 [v0.9.31](https://github.com/mxh110708/may-vps-deploy/releases/tag/v0.9.31)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
 
 v0.9.28 将 BBR v3 改用 Google 官方 `google/bbr` v3 源码。固定版由 MXH 在开发机预编译，内核包、通用配置和校验清单随应用提供，小 VPS 只接收、验证和安装；不提供最新提交选择或 VPS 在线编译，固定包随应用版本更新。审阅展示真实基础版本、日期、提交及包 SHA256，不标作 Google 官方二进制或最新 LTS。旧版 XanMod 来源及其事务兼容处理已移除；默认仍沿用 VPS 原有内核。详见[网络调优流程](docs/NETWORK-TUNING.zh-CN.md)、[预编译维护](docs/GOOGLE-BBR-PREBUILT.zh-CN.md)及[安装启动验证](docs/GOOGLE-BBR-PREBUILT-2026-10-16.zh-CN.md)。下方 v0.9.16–v0.9.18 的内核发行、签名与 LTS 描述属于当时的第三方实现。
 
@@ -77,14 +79,14 @@ Debian 是远端目标环境，不是控制端运行平台。操作前请保留�
 
 ```powershell
 pwsh -NoProfile -File .\Start-VPSDeploy.ps1 -Mode ValidateProject
-dotnet run --project .\desktop\Mxh.VpsDeploy.Tests -c Release -- $PWD
+dotnet run --project .\desktop\May.VpsDeploy.Tests -c Release -- $PWD
 ```
 
 自检不连接 VPS，检查项目文件、脚本和离线测试；通过不等于真实服务器或代理连接已经验收。
 
 ### 3. 启动工具
 
-在正式发行页下载 `mxh-vps-deploy-v0.9.28-windows-amd64-setup.exe`，按同页 `SHA256SUMS.txt` 核对后安装，通过桌面／开始菜单启动。便携 ZIP 解压后双击 `MXH-VPS-Deploy.exe`；需要应用内原位更新时使用安装版。源码可先构建预览：
+在正式发行页下载 `may-vps-deploy-v0.9.28-windows-amd64-setup.exe`，按同页 `SHA256SUMS.txt` 核对后安装，通过桌面／开始菜单启动。便携 ZIP 解压后双击 `May-VPS-Deploy.exe`；需要应用内原位更新时使用安装版。源码可先构建预览：
 
 ```powershell
 pwsh -NoProfile -File .\scripts\New-VpsReleasePackage.ps1 -Development -Destination '<预览输出目录>'
@@ -185,7 +187,7 @@ AnyTLS 和 Reality 本机 HTTPS 目标的准备步骤，见[证书与域名配�
 
 截至 2026-10-01，版本目录固定 Komari Controller **1.5.1**、Agent **1.5.11**。通用和专用升级入口使用相同流程：停服务创建一致性备份、等待人工完成数据库迁移并复验。取消或保护窗口到期会恢复升级前二进制和完整数据，不把 HTTP 页面能打开当成迁移完成。
 
-客户端通用 JSON 面向官方 **sing-box 1.14.2** 和 **MXH Route 1.14.2-mxh.7**，不需要拆成两套模板。它保留本机回环 mixed 入站、TUN、规则/全局/直连模式、策略选择缓存，以及同一组公共规则。官方版本首次加载远程规则仍需网络；MXH Route 可用自带的五个规则集离线初始化，之后按原地址与间隔更新。模板不携带应用缓存绝对路径，也不包含 MXH Route 专用字段。
+客户端通用 JSON 面向官方 **sing-box 1.14.2** 和 **May Route 1.14.2-mxh.7**，不需要拆成两套模板。它保留本机回环 mixed 入站、TUN、规则/全局/直连模式、策略选择缓存，以及同一组公共规则。官方版本首次加载远程规则仍需网络；May Route 可用自带的五个规则集离线初始化，之后按原地址与间隔更新。模板不携带应用缓存绝对路径，也不包含 May Route 专用字段。
 
 Clash 模板同步补齐 DNS 分流、嗅探、国内直连、广告与 UDP 防护规则；TUN 默认关闭，交由用户选择。两套模板保留地区入口、入口/落地链路和业务分组结构。导入已有高级配置仍以保留原内容为原则，不会自动替换个人 DNS、端口、规则或系统代理设置。
 
@@ -196,7 +198,7 @@ Windows 客户端校验核心与 VPS 部署核心分别固定版本，当前 sin
 源码、通用模板和 Git 仓库不应包含实例真实 IP、端口、UUID、私钥、密码、Token 或完整个人配置。请单独保管实例归档，不要上传到公开仓库。
 
 ```text
-<实例归档根目录>\<服务商>\<实例>\MXH-VPS-Deploy\
+<实例归档根目录>\<服务商>\<实例>\May-VPS-Deploy\
 ├─ deployment-plan.json             部署计划
 ├─ deployment-state.json            执行状态
 ├─ deployment-secrets.private.json  私有凭据
@@ -210,7 +212,7 @@ Windows 客户端校验核心与 VPS 部署核心分别固定版本，当前 sin
 └─ SHA256SUMS-private.txt            归档校验值
 ```
 
-桌面版实例统一保存在应用目录下的 `private/instances/<服务商>/<实例>/MXH-VPS-Deploy`，客户端方案、候选、发布记录和界面设置也保存在应用 `private` 下。原命令行的归档根目录仍依次取自 `-InstanceRoot`、环境变量 `MXH_VPS_INSTANCE_ROOT`、本地覆盖文件 `config/app-defaults.local.json`，最后使用项目通用默认值。旧版根目录计划仍可由命令行读取，桌面端切换前由维护者离线转换。
+桌面版实例统一保存在应用目录下的 `private/instances/<服务商>/<实例>/May-VPS-Deploy`，客户端方案、候选、发布记录和界面设置也保存在应用 `private` 下。原命令行的归档根目录仍依次取自 `-InstanceRoot`、环境变量 `MXH_VPS_INSTANCE_ROOT`、本地覆盖文件 `config/app-defaults.local.json`，最后使用项目通用默认值。旧版根目录计划仍可由命令行读取，桌面端切换前由维护者离线转换。
 
 普通归档沿用用户目录权限，不做额外 ACL 收紧；**受管 SSH 私钥是例外**：为满足 Windows OpenSSH 最低运行要求，仅在其权限过宽时修复必要权限，不改服务商源私钥，也不因其他错误调整 ACL。
 

@@ -4,7 +4,7 @@
 
 本轮只更新 MXH-VPS-Deploy 项目及公开验证资产。未连接、升级或修改生产 VPS，未更改个人权威配置、系统代理、TUN 或桌面程序状态。版本清单更新不会使已有实例自动升级。
 
-固定版本：Mihomo **1.19.32**，Linux/Windows sing-box **1.14.2**，Komari Controller **1.5.1**、Agent **1.5.11**；MXH Route 客户端基线保持 **1.14.2-mxh.7**。资产 SHA-256 记录在版本及 vendor 清单中。
+固定版本：Mihomo **1.19.32**，Linux/Windows sing-box **1.14.2**，Komari Controller **1.5.1**、Agent **1.5.11**；May Route 客户端基线保持 **1.14.2-mxh.7**。资产 SHA-256 记录在版本及 vendor 清单中。
 
 ## 修复对应关系
 
@@ -46,17 +46,17 @@ GeoData 使用 2026-10-01 的固定文件哈希和 GitHub 资产 ID。重建覆�
 
 损坏文件默认拒绝覆盖。明确增加 `-RepairExisting` 后才隔离旧文件并替换。上游若删除历史资产 ID，请从本版本的完整发布包恢复，不将 `latest` 的新数据配上旧哈希。
 
-`Check-UpstreamVersions.ps1` 现在分别报告 Linux/Windows sing-box、Mihomo、MXH Route、Xray、Komari；一项查询失败不妨碍其他结果，不执行自动升级。
+`Check-UpstreamVersions.ps1` 现在分别报告 Linux/Windows sing-box、Mihomo、May Route、Xray、Komari；一项查询失败不妨碍其他结果，不执行自动升级。
 
 ## 验证方式和已知限制
 
 - PowerShell 主回归 **799 项断言**、审计行为 **54 项断言**全部通过；交互、工作台、SSH 权限及菜单回归也通过。
 - Python 兼容、健康、事务、组件回滚、导入/SSH 和 Komari 分别通过 **8、4、21、6、9、37 项测试**。这些测试执行项目实际分支，仅命令/服务接口模拟，快照和归档操作使用临时目录。
-- 官方 Windows sing-box/Mihomo 配置检查，MXH Route 空缓存离线初始化及系统代理/TUN 运行副本 `check`。
+- 官方 Windows sing-box/Mihomo 配置检查，May Route 空缓存离线初始化及系统代理/TUN 运行副本 `check`。
 - Ubuntu 24.04 WSL 临时目录中执行真实 Linux 核心：sing-box 1.14.0 → 1.14.2 → 项目回滚脚本还原；三个阶段的 IPv4/IPv6 用户 TCP/UDP 回环连接、IPv6 回环源地址绑定通过；安装器拒绝错误哈希；AnyTLS 安装升级后完成可信 TLS/ECH 回环连接；Mihomo 1.19.32 模板与 IPv4/IPv6 回环代理通过。项目构建器生成配置和 CI 使用的独立合成配置两条路径均验证。
 - Bash 语法、ShellCheck 警告级检查、公开源码保密扫描和 Git 补丁空白检查通过。
 
-MXH Route 检查使用当前源码（提交 `1209921e`）单独构建的 CLI，开启本项目模板所需的功能标签，不是重新打包或启动完整桌面客户端。其他可选协议、正式安装包和 GUI 行为不在这项检查范围内。
+May Route 检查使用当前源码（提交 `1209921e`）单独构建的 CLI，开启本项目模板所需的功能标签，不是重新打包或启动完整桌面客户端。其他可选协议、正式安装包和 GUI 行为不在这项检查范围内。
 
 可复现 Linux 隔离验证：
 

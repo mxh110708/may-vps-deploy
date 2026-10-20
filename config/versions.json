@@ -85,9 +85,9 @@
     "mxh_route": {
       "version": "1.14.2-mxh.7",
       "core_version": "1.14.2",
-      "release_url": "https://github.com/mxh110708/mxh-route-desktop/releases/tag/v1.14.2-mxh.7",
+      "release_url": "https://github.com/mxh110708/may-route-desktop/releases/tag/v1.14.2-mxh.7",
       "public_rules_bundle": {
-        "source": "https://raw.githubusercontent.com/mxh110708/mxh-route-desktop/61715f8b20e7e95a068e71b67a80ed058d692774/resources/public-rules-v1.json",
+        "source": "https://raw.githubusercontent.com/mxh110708/may-route-desktop/61715f8b20e7e95a068e71b67a80ed058d692774/resources/public-rules-v1.json",
         "sha256": "859c99058f5c9a481f01a8048dce72cf7ce1f623175c85815866b06e8fc29839"
       }
     }

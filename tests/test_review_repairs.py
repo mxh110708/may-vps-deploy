@@ -158,7 +158,7 @@ class ReviewRepairs(unittest.TestCase):
                 root = Path(folder)
                 for relative, content in {'etc/ssh/sshd_config': 'original ssh', 'etc/nftables.conf': 'flush ruleset\noriginal rules', 'root/.ssh/authorized_keys': 'ssh-ed25519 old'}.items():
                     file = root/relative; file.parent.mkdir(parents=True, exist_ok=True); file.write_text(content)
-                for relative in ('etc/systemd/system', 'root/vps-deploy-backups', 'var/lib/mxh-vps-deploy'): (root/relative).mkdir(parents=True, exist_ok=True)
+                for relative in ('etc/systemd/system', 'root/vps-deploy-backups', 'var/lib/may-vps-deploy'): (root/relative).mkdir(parents=True, exist_ok=True)
                 source = (ROOT/'assets/remote/maintenance-ssh-apply.sh').read_text()
                 source = re.sub(r"/(?:var/lib|root|etc)(?=/|['\"\s])", lambda match: shell_path(root)+match[0], source)
                 preamble = r'''
@@ -296,7 +296,7 @@ nft(){ [[ "$1" != -f ]] || { ! grep -q 'flush ruleset' "$2" || return 90; }; }
             for relative in ('etc/sysctl.d', 'etc/systemd/system', 'usr/local/libexec', 'snapshot'): (root/relative).mkdir(parents=True)
             (root/'snapshot/network-state.json').write_text('{}')
             config = root/'etc/sysctl.d/99-mxh-vps-deploy.conf'
-            config.write_text('# Managed by MXH VPS Deploy.\nnet.ipv4.tcp_fastopen = 3\nnet.ipv4.tcp_mtu_probing = 1\nnet.core.rmem_max = 16777216\n')
+            config.write_text('# Managed by May VPS Deploy.\nnet.ipv4.tcp_fastopen = 3\nnet.ipv4.tcp_mtu_probing = 1\nnet.core.rmem_max = 16777216\n')
             source = (ROOT/'assets/remote/network-apply.sh').read_text(encoding='utf-8')
             for prefix in ('/etc', '/usr/local'): source = source.replace(prefix, shell_path(root)+prefix)
             source = re.sub(r"(<<'PY'\n)(.*?)(\nPY)", lambda m: m[1]+m[2].replace(shell_path(root), root.as_posix())+m[3], source, flags=re.S)
@@ -328,7 +328,7 @@ sysctl(){
             for relative in ('etc/sysctl.d', 'etc/systemd/system', 'usr/local/libexec', 'snapshot'): (root/relative).mkdir(parents=True)
             (root/'snapshot/network-state.json').write_text('{}')
             config = root/'etc/sysctl.d/99-mxh-vps-deploy.conf'
-            config.write_text('# Managed by MXH VPS Deploy.\nnet.core.rmem_max = 16777216\nnet.ipv4.tcp_rmem = 4096 131072 6291456\nnet.ipv4.tcp_fastopen = 3\n')
+            config.write_text('# Managed by May VPS Deploy.\nnet.core.rmem_max = 16777216\nnet.ipv4.tcp_rmem = 4096 131072 6291456\nnet.ipv4.tcp_fastopen = 3\n')
             source = (ROOT/'assets/remote/network-apply.sh').read_text(encoding='utf-8')
             for prefix in ('/etc', '/usr/local'): source = source.replace(prefix, shell_path(root)+prefix)
             source = re.sub(r"(<<'PY'\n)(.*?)(\nPY)", lambda m: m[1]+m[2].replace(shell_path(root), root.as_posix())+m[3], source, flags=re.S)

@@ -1,4 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
-  <ItemGroup><ProjectReference Include="../Mxh.VpsDeploy.Infrastructure/Mxh.VpsDeploy.Infrastructure.csproj" /></ItemGroup>
-</Project>

@@ -386,7 +386,7 @@ function New-MxhSingBoxValidationConfig {
         $vendorRoot = [IO.Path]::GetFullPath((Join-Path $ProjectRoot 'vendor/test-cores/windows-amd64'))
         $manifest = Read-VpsJsonHashtable -Path (Join-Path $vendorRoot 'checksums.json')
         $entries = @($manifest.data_files | Where-Object { [string]$_.consumer -eq 'sing-box' })
-        if ($entries.Count -ne 5) { throw 'MXH Route 离线公共规则清单必须包含五个规则集。' }
+        if ($entries.Count -ne 5) { throw 'May Route 离线公共规则清单必须包含五个规则集。' }
         foreach ($rule in @($config.route.rule_set)) {
             if ([string]$rule.type -ne 'remote') { continue }
             $matched = @($entries | Where-Object {
@@ -403,7 +403,7 @@ function New-MxhSingBoxValidationConfig {
                 (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$entry.sha256) {
                 throw '离线公共规则文件缺失、越界或 SHA-256 不匹配。'
             }
-            # Official 1.14.2 check reads the same SRS bytes that MXH Route seeds offline.
+            # Official 1.14.2 check reads the same SRS bytes that May Route seeds offline.
             $rule.type = 'local'
             $rule.path = $source
             foreach ($key in @('url', 'download_detour', 'update_interval', 'initial_path')) { $null = $rule.Remove($key) }
@@ -532,7 +532,7 @@ function Publish-MxhAuthorityPair {
     $singChanged=$false
     try{
         foreach($target in @($TargetClash,$TargetSingBox) | Sort-Object){
-            $locks.Add([IO.File]::Open($target+'.mxh-publish.lock',[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None))
+            $locks.Add([IO.File]::Open($target+'.may-publish.lock',[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None))
         }
         $before=@{Clash=Get-MxhFileFingerprint $TargetClash;SingBox=Get-MxhFileFingerprint $TargetSingBox}
         if($Expected -and ($Expected.Clash -ne $before.Clash -or $Expected.SingBox -ne $before.SingBox)){throw '确认后目标文件已经变化，未覆盖，请重新查看发布摘要。'}

@@ -10,6 +10,6 @@
     "komari_agent": "https://api.github.com/repos/komari-monitor/komari-agent/releases/latest",
     "sing_box": "https://api.github.com/repos/SagerNet/sing-box/releases/latest",
     "mihomo": "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest",
-    "mxh_route": "https://api.github.com/repos/mxh110708/mxh-route-desktop/releases/latest"
+    "mxh_route": "https://api.github.com/repos/mxh110708/may-route-desktop/releases/latest"
   }
 }

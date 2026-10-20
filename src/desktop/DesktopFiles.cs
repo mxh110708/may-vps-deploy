@@ -5,7 +5,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Web.Script.Serialization;
 
-namespace Mxh.VpsDeploy.Desktop
+namespace May.VpsDeploy.Desktop
 {
     internal sealed class AppFile { public string path {get;set;} public string sha256 {get;set;} }
     internal sealed class AppFiles { public int schema_version {get;set;} public string version {get;set;} public List<AppFile> files {get;set;} }
@@ -59,6 +59,8 @@ namespace Mxh.VpsDeploy.Desktop
             if(File.Exists(oldPath))
             {
                 if(!File.Exists(Path.Combine(root,"installation.json"))) throw new InvalidDataException();
+                var installation=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(root,"installation.json")));
+                if(installation==null || !installation.ContainsKey("app_id") || !Object.Equals(installation["app_id"],"may-vps-deploy-desktop")) throw new InvalidDataException();
                 var old=Read(oldPath);
                 if(new Version(next.version)<new Version(old.version)) throw new InvalidDataException();
                 foreach(var file in old.files)

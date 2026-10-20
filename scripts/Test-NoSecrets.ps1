@@ -58,7 +58,7 @@ foreach ($file in $files) {
         }
         # Published Windows Shell COM identifiers in their exact declarations.
         # Do not exempt other UUIDs or copies in configuration/public documents.
-        if($entry.Key -eq 'Concrete UUID' -and $relative.Replace('\','/') -eq 'desktop/Mxh.VpsDeploy.Windows/WindowsSavePathPicker.cs'){
+        if($entry.Key -eq 'Concrete UUID' -and $relative.Replace('\','/') -eq 'desktop/May.VpsDeploy.Windows/WindowsSavePathPicker.cs'){
             $saveDialog='C0B4E2F3-'+'BA21-'+'4773-'+'8DBA-'+'335EC946EB8B'
             $fileDialog='42F85136-'+'DB7E-'+'439C-'+'85F1-'+'E4075D135FC8'
             $shellItem='43826D1E-'+'E718-'+'42EE-'+'BC55-'+'A1E261C37BFE'

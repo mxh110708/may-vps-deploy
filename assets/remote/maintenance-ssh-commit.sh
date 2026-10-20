@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 : "${VPS_PARAM_EXPECTED_BACKUP:?}"
-exec 9>/var/lib/mxh-vps-deploy/transaction.lock
+exec 9>/var/lib/may-vps-deploy/transaction.lock
 flock -n 9 || exit 1
-[[ "$(cat /var/lib/mxh-vps-deploy/transaction.owner)" == "$VPS_PARAM_EXPECTED_BACKUP" ]]
+[[ "$(cat /var/lib/may-vps-deploy/transaction.owner)" == "$VPS_PARAM_EXPECTED_BACKUP" ]]
 [[ ! -f "$VPS_PARAM_EXPECTED_BACKUP/rollback-executed" ]]
 : "${VPS_PARAM_NEW_PRIMARY:?}"; : "${VPS_PARAM_NEW_RESCUE:?}"; : "${VPS_PARAM_NEW_PUBLIC_KEY:?}"
 old_public="${VPS_PARAM_OLD_PUBLIC_KEY:-}"; admin="${VPS_PARAM_ADMIN_USER:-root}"

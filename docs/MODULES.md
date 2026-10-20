@@ -1,10 +1,10 @@
-# MXH VPS Deploy 模块与内部结构
+# May VPS Deploy 模块与内部结构
 
 本文面向维护脚本的人。普通使用者应先阅读 [中文完整使用手册](USER-GUIDE.zh-CN.md)。
 
 ## 原生应用边界
 
-正式桌面入口是 `desktop/Mxh.VpsDeploy.Desktop`。界面收集表单并展示审阅与进度，由 Core 的任务协调器锁定实例、来源和具体操作，再调用 `WorkflowEngine`。Infrastructure 提供 SSH.NET、客户端核心、文件生成和测量适配；Windows 适配器负责凭据保护、托盘、窗口及安装更新。Core 不依赖 WinUI、PowerShell 或 Windows API。
+正式桌面入口是 `desktop/May.VpsDeploy.Desktop`。界面收集表单并展示审阅与进度，由 Core 的任务协调器锁定实例、来源和具体操作，再调用 `WorkflowEngine`。Infrastructure 提供 SSH.NET、客户端核心、文件生成和测量适配；Windows 适配器负责凭据保护、托盘、窗口及安装更新。Core 不依赖 WinUI、PowerShell 或 Windows API。
 
 远端脚本和配置生成器由两个控制端共用。远端维护使用事务身份、期限与锁；首次部署使用单独基线，未知结果先核对状态。协议、网络、防火墙、监控、内核各有恢复范围；客户端导出是独立的本地双文件事务，不属于远端部署事务。桌面新部署支持多用途选择，追加安装支持组合组件，两个入口可在不同端口共存；受管状态以实际清单为准。
 

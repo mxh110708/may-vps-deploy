@@ -13,7 +13,7 @@ This directory contains unmodified official Windows amd64 release archives used 
 ## sing-box
 
 - Project: <https://github.com/SagerNet/sing-box>
-- Client validation release: `v1.14.2`, matching the official core version used by MXH Route `1.14.2-mxh.7`.
+- Client validation release: `v1.14.2`, matching the official core version used by May Route `1.14.2-mxh.7`.
 - Current client archive: `sing-box-1.14.2-windows-amd64.zip`.
 - Obsolete Windows validation ZIPs are not included. Linux 1.14.0 is downloaded only into ignored temporary directories when running the upgrade regression.
 - License: GNU General Public License v3.0 or later with the upstream name-use restriction; the upstream license is included inside the official archive.
@@ -30,12 +30,12 @@ The corresponding download URLs and SHA-256 digests are recorded in `checksums.j
 
 These files are copied into each temporary Mihomo validation directory so authority configurations using `GEOSITE` or `GEOIP` can be checked offline and deterministically.
 
-## MXH Route public SRS bootstrap data
+## May Route public SRS bootstrap data
 
 - Original data project and license: <https://github.com/MetaCubeX/meta-rules-dat>, GNU General Public License v3.0.
-- Source bundle: <https://github.com/mxh110708/mxh-route-desktop/blob/61715f8b20e7e95a068e71b67a80ed058d692774/resources/public-rules-v1.json>, the fixed public bundle shipped with MXH Route `1.14.2-mxh.7`.
+- Source bundle: <https://github.com/mxh110708/may-route-desktop/blob/61715f8b20e7e95a068e71b67a80ed058d692774/resources/public-rules-v1.json>, the fixed public bundle shipped with May Route `1.14.2-mxh.7`.
 - Files: the five `mxh-route-public-rules/*.srs` assets. Per-file SHA-256 and original public URLs are recorded in `checksums.json`; the whole-bundle hash is in `config/versions.json`.
 
-These unchanged binary rules are used only for isolated offline candidate validation. Exported profiles keep the canonical MetaCubeX remote URLs, download detours and update intervals. No `initial_path` or developer machine path is embedded in portable templates. Official sing-box can download the rules normally; MXH Route can seed the same rules from its own application resources before the proxy has started.
+These unchanged binary rules are used only for isolated offline candidate validation. Exported profiles keep the canonical MetaCubeX remote URLs, download detours and update intervals. No `initial_path` or developer machine path is embedded in portable templates. Official sing-box can download the rules normally; May Route can seed the same rules from its own application resources before the proxy has started.
 
 Use `scripts/Sync-ClientValidationAssets.ps1` to reproduce the cores, GeoData and public rules. `-SourceDirectory <verified-vendor-directory> -Offline` reconstructs missing assets from a release/source copy without network access. `-RepairExisting` explicitly quarantines mismatched files before replacing them. A complete verified set needs no download. If upstream removes an old asset ID, use the vendored bytes from this version; do not substitute rolling latest data with an old hash.

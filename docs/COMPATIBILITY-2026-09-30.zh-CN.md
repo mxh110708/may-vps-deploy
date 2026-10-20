@@ -3,18 +3,18 @@
 ## 版本与范围
 
 - [Komari Controller 1.5.1](https://github.com/komari-monitor/komari/releases/tag/1.5.1) 与 [Agent 1.5.11](https://github.com/komari-monitor/komari-agent/releases/tag/1.5.11)：采用当日最新正式版本，不采用 Snapshot、RC 或 1.6 预发布版。Linux amd64/arm64 的文件名和 SHA-256 固定在 `config/versions.json`；项目正式 VPS 支持范围仍为 Debian 12/13 amd64。
-- [官方 sing-box 1.14.2](https://github.com/SagerNet/sing-box/releases/tag/v1.14.2) Windows amd64 验证核心，匹配 [MXH Route 1.14.2-mxh.7](https://github.com/mxh110708/mxh-route-desktop/releases/tag/v1.14.2-mxh.7) 所用的官方核心版本。
+- [官方 sing-box 1.14.2](https://github.com/SagerNet/sing-box/releases/tag/v1.14.2) Windows amd64 验证核心，匹配 [May Route 1.14.2-mxh.7](https://github.com/mxh110708/may-route-desktop/releases/tag/v1.14.2-mxh.7) 所用的官方核心版本。
 - Linux VPS 的 sing-box 部署/升级资产经独立隔离验证更新到 1.14.2；Mihomo Windows/Linux 校验基线更新到 1.19.32。Windows 资产自身的 `version` 仍优先用于客户端验证，不能把客户端版本自动套用于远端。
 
-本次适配只更新工具源码、通用模板、测试与公开验证资产，不执行现有服务器升级，不覆盖用户的 Clash/MXH Route 权威配置，不改变桌面客户端、系统代理或 TUN 状态。
+本次适配只更新工具源码、通用模板、测试与公开验证资产，不执行现有服务器升级，不覆盖用户的 Clash/May Route 权威配置，不改变桌面客户端、系统代理或 TUN 状态。
 
 ## 同一份 JSON 适用于两种客户端
 
-`templates/client/sing-box-general.template.json` 使用官方 1.14.2 字段：mixed/TUN、显式 route action、新版类型化 DNS、selector、缓存与 Clash 模式。没有 MXH Route 专用字段，因此保留一份模板；生成的 `sing-box-general.candidate.json` 可用于官方版本或 MXH Route。
+`templates/client/sing-box-general.template.json` 使用官方 1.14.2 字段：mixed/TUN、显式 route action、新版类型化 DNS、selector、缓存与 Clash 模式。没有 May Route 专用字段，因此保留一份模板；生成的 `sing-box-general.candidate.json` 可用于官方版本或 May Route。
 
-mixed 默认只监听回环地址的 2080 端口。MXH Route 端口设置读取并修改配置的原生入站，不需要额外的应用全局端口字段。TUN 模板保留 `auto_route`、`strict_route` 和 `dns_mode: hijack`；应用在系统代理模式的临时运行副本中禁用 TUN 接管并配置本机 HTTP 代理，在 TUN 模式恢复原生路由。通用模板不会预置 `platform.http_proxy`，不会自行更改系统代理。
+mixed 默认只监听回环地址的 2080 端口。May Route 端口设置读取并修改配置的原生入站，不需要额外的应用全局端口字段。TUN 模板保留 `auto_route`、`strict_route` 和 `dns_mode: hijack`；应用在系统代理模式的临时运行副本中禁用 TUN 接管并配置本机 HTTP 代理，在 TUN 模式恢复原生路由。通用模板不会预置 `platform.http_proxy`，不会自行更改系统代理。
 
-五个公共规则的 tag/type/format/URL 与 MXH Route 离线白名单完全一致：广告、私有域名、中国域名、中国 IP、非中国域名。导出保留远程地址、`download_detour` 和每日更新；官方版本首次加载仍需网络，MXH Route 可先使用自身资源初始化。只有本机验证的临时副本把已识别公共规则转成 SHA-256 校验过的本地 SRS；验证成功不代表规则联网更新或每个真实节点连接已经验收。
+五个公共规则的 tag/type/format/URL 与 May Route 离线白名单完全一致：广告、私有域名、中国域名、中国 IP、非中国域名。导出保留远程地址、`download_detour` 和每日更新；官方版本首次加载仍需网络，May Route 可先使用自身资源初始化。只有本机验证的临时副本把已识别公共规则转成 SHA-256 校验过的本地 SRS；验证成功不代表规则联网更新或每个真实节点连接已经验收。
 
 从现有配置导入时，构建器仅移除这五个已识别公共规则的 `initial_path`，让新客户端重新建立缓存；不同 URL、自定义规则及其 `initial_path` 不擅自更改。UTF-8 配置必须小于 4 MiB；失败不会写出超限候选。已有节点、端口、DNS、TUN 和高级规则不被通用模板强制覆盖。
 
@@ -41,6 +41,6 @@ pwsh -NoProfile -File .\Start-VPSDeploy.ps1 -Mode ValidateProject
 pwsh -NoProfile -File .\tests\Test-ClientCompatibility.ps1 -ProjectRoot $PWD
 ```
 
-可用 `Test-ClientCompatibility.ps1 -MxhRouteCorePath '<隔离的 MXH Route CLI 验证核心>'` 加验同一份模板和生成配置。`Test-MxhRouteRuntime.mts` 是可选跨项目集成测试：使用最新桌面源码的真实配置预处理函数，在空缓存且禁用网络时加载自带公开规则，再对系统代理/TUN 临时运行配置执行核心 `check`；不启动应用、服务或 TUN。
+可用 `Test-ClientCompatibility.ps1 -MayRouteCorePath '<隔离的 May Route CLI 验证核心>'` 加验同一份模板和生成配置。`Test-MayRouteRuntime.mts` 是可选跨项目集成测试：使用最新桌面源码的真实配置预处理函数，在空缓存且禁用网络时加载自带公开规则，再对系统代理/TUN 临时运行配置执行核心 `check`；不启动应用、服务或 TUN。
 
 CI 验证官方 Windows 核心及生成配置，Debian 12/13 容器执行远端脚本语法与隔离 Komari/事务回归。真实 VPS 的数据量、systemd 调度、登录/TOTP、第三方主题及端到端网络连接仍需维护窗口中的实际验收，不能用这些离线检查代替。

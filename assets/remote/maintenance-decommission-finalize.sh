@@ -2,10 +2,10 @@
 set -euo pipefail
 : "${VPS_PARAM_CONFIRM:?}"
 [[ "$VPS_PARAM_CONFIRM" == 'WIPE-REMOTE-BACKUPS' ]]
-install -d -m 0700 /var/lib/mxh-vps-deploy
-exec 9>/var/lib/mxh-vps-deploy/transaction.lock
+install -d -m 0700 /var/lib/may-vps-deploy
+exec 9>/var/lib/may-vps-deploy/transaction.lock
 flock -n 9 || exit 1
-[[ ! -f /var/lib/mxh-vps-deploy/transaction.owner ]]
+[[ ! -f /var/lib/may-vps-deploy/transaction.owner ]]
 if systemctl is-active --quiet mxh-protocol-migration-rollback.timer; then exit 1; fi
 if systemctl is-active --quiet mxh-protocol-migration-rollback.service; then exit 1; fi
 if systemctl is-active --quiet mxh-ssh-maintenance-rollback.timer; then exit 1; fi

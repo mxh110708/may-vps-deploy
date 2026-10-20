@@ -117,11 +117,11 @@ class NetworkRuntimeTests(unittest.TestCase):
     def test_private_backup_does_not_change_restored_sysctl_permissions(self):
         model = Model()
         filename = '/etc/sysctl.d/99-mxh-vps-deploy.conf'
-        original = b'# Managed by MXH VPS Deploy.\nnet.core.default_qdisc = fq_codel\n'
+        original = b'# Managed by May VPS Deploy.\nnet.core.default_qdisc = fq_codel\n'
         model.files[filename] = original
         model.modes[filename] = 0o644
         model.execute('snapshot')
-        model.write_owned(filename, b'# Managed by MXH VPS Deploy.\nnet.core.default_qdisc = fq\n', 0o644)
+        model.write_owned(filename, b'# Managed by May VPS Deploy.\nnet.core.default_qdisc = fq\n', 0o644)
         model.execute('restore')
         self.assertEqual(model.files[filename], original)
         self.assertEqual(model.modes[filename], 0o644)
@@ -178,7 +178,7 @@ class NetworkRuntimeTests(unittest.TestCase):
         model.execute('snapshot'); model.execute('apply'); model.execute('verify')
         model.set_owned('net.core.default_qdisc', 'fq'); model.set_owned('net.ipv4.tcp_congestion_control', 'bbr')
         for name in ('/usr/local/libexec/mxh-network-queue', '/etc/systemd/system/mxh-network-queue.service'):
-            model.write_owned(name, b'# Managed by MXH VPS Deploy.\n', 0o750 if name.endswith('mxh-network-queue') else 0o644)
+            model.write_owned(name, b'# Managed by May VPS Deploy.\n', 0o750 if name.endswith('mxh-network-queue') else 0o644)
         model.execute('restore')
         self.assertEqual(KEYS, model.values); self.assertEqual(queues, model.queues)
         self.assertNotIn('/usr/local/libexec/mxh-network-queue', model.files)
@@ -232,9 +232,9 @@ class NetworkRuntimeTests(unittest.TestCase):
 
     def test_managed_marker_does_not_allow_overwriting_external_edit(self):
         model = Model(); name = '/etc/sysctl.d/99-mxh-vps-deploy.conf'
-        model.files[name] = b'# Managed by MXH VPS Deploy.\nnet.ipv4.tcp_fastopen = 3\n'; model.modes[name] = 0o644
-        model.execute('snapshot'); model.write_owned(name, b'# Managed by MXH VPS Deploy.\nnet.core.default_qdisc = fq\n')
-        external = b'# Managed by MXH VPS Deploy.\nnet.ipv4.tcp_fastopen = 0\n'; model.files[name] = external
+        model.files[name] = b'# Managed by May VPS Deploy.\nnet.ipv4.tcp_fastopen = 3\n'; model.modes[name] = 0o644
+        model.execute('snapshot'); model.write_owned(name, b'# Managed by May VPS Deploy.\nnet.core.default_qdisc = fq\n')
+        external = b'# Managed by May VPS Deploy.\nnet.ipv4.tcp_fastopen = 0\n'; model.files[name] = external
         calls = len(model.calls)
         with self.assertRaisesRegex(SystemExit, 'changed externally'): model.execute('restore')
         self.assertEqual(model.files[name], external)

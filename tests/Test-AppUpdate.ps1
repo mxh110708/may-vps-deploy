@@ -28,9 +28,9 @@ try {
     foreach($path in @('../escape.txt','/absolute.txt','folder/../escape.txt','private/plan.json','config/app-defaults.local.json','folder/secret.private.json','id_ed25519','file.pem','CON.txt','folder\file.ps1','folder/file.','folder/file ')) {
         Assert-UpdateThrows {Assert-VpsApplicationFilePath $path} 'unsafe/private paths rejected'
     }
-    Assert-VpsUpdateAssetUri 'https://github.com/mxh110708/mxh-vps-deploy/releases/download/v1.1.0/app.zip' 'v1.1.0'
+    Assert-VpsUpdateAssetUri 'https://github.com/mxh110708/may-vps-deploy/releases/download/v1.1.0/app.zip' 'v1.1.0'
     Assert-Update $true 'official asset URL accepted'
-    Assert-UpdateThrows {Assert-VpsUpdateAssetUri 'https://example.invalid/mxh110708/mxh-vps-deploy/releases/download/v1.1.0/app.zip' 'v1.1.0'} 'foreign download rejected'
+    Assert-UpdateThrows {Assert-VpsUpdateAssetUri 'https://example.invalid/mxh110708/may-vps-deploy/releases/download/v1.1.0/app.zip' 'v1.1.0'} 'foreign download rejected'
     $old=Join-Path $fixture 'old';$new=Join-Path $fixture 'new'
     New-UpdateFixture $old '1.0.0' @{'main.ps1'='old';'obsolete.txt'='old-only'}
     New-UpdateFixture $new '1.1.0' @{'main.ps1'='new';'added.txt'='new-only'}
@@ -89,7 +89,7 @@ try {
     $badHash=Join-Path $fixture 'bad-hash.zip';[IO.Compression.ZipFile]::CreateFromDirectory($new,$badHash)
     Assert-UpdateThrows {Expand-VpsVerifiedApplicationPackage $badHash (Join-Path $fixture 'bad-hash-out')} 'tampered release rejected'
 
-    $release=@{tag_name='v1.1.0';draft=$false;prerelease=$false;body='Fixture notes';html_url='https://github.com/mxh110708/mxh-vps-deploy/releases/tag/v1.1.0';assets=@()}
+    $release=@{tag_name='v1.1.0';draft=$false;prerelease=$false;body='Fixture notes';html_url='https://github.com/mxh110708/may-vps-deploy/releases/tag/v1.1.0';assets=@()}
     $info=& $updateModule {param($Root,$Release)
         $script:FixtureRelease=$Release
         function Invoke-RestMethod {return $script:FixtureRelease}
@@ -104,11 +104,11 @@ try {
 
     $installed=Join-Path $fixture 'installed-contract'
     New-UpdateFixture $installed '1.0.0' @{'main.ps1'='installed app'}
-    @{schema_version=1;type='installed';app_id='mxh-vps-deploy-desktop';version='1.0.0'}|ConvertTo-Json|Set-Content (Join-Path $installed 'installation.json')
+    @{schema_version=1;type='installed';app_id='may-vps-deploy-desktop';version='1.0.0'}|ConvertTo-Json|Set-Content (Join-Path $installed 'installation.json')
     Assert-Update ((Get-VpsApplicationDistribution $installed) -eq 'Installed') 'installed marker selects installer update mode'
-    $installerRelease=@{tag_name='v1.1.0';draft=$false;prerelease=$false;body='Fixture installer';html_url='https://github.com/mxh110708/mxh-vps-deploy/releases/tag/v1.1.0';assets=@()}
-    foreach($name in @('mxh-vps-deploy-v1.1.0-windows-amd64.zip','SHA256SUMS.txt','mxh-vps-deploy-v1.1.0-windows-amd64-setup.exe','mxh-vps-deploy-v1.1.0-windows-amd64.files.json')){
-        $installerRelease.assets+=@{name=$name;size=20;digest=('sha256:'+('a'*64));browser_download_url=('https://github.com/mxh110708/mxh-vps-deploy/releases/download/v1.1.0/'+$name)}
+    $installerRelease=@{tag_name='v1.1.0';draft=$false;prerelease=$false;body='Fixture installer';html_url='https://github.com/mxh110708/may-vps-deploy/releases/tag/v1.1.0';assets=@()}
+    foreach($name in @('may-vps-deploy-v1.1.0-windows-amd64.zip','SHA256SUMS.txt','may-vps-deploy-v1.1.0-windows-amd64-setup.exe','may-vps-deploy-v1.1.0-windows-amd64.files.json')){
+        $installerRelease.assets+=@{name=$name;size=20;digest=('sha256:'+('a'*64));browser_download_url=('https://github.com/mxh110708/may-vps-deploy/releases/download/v1.1.0/'+$name)}
     }
     $installerInfo=& $updateModule {param($Root,$Release)
         $script:FixtureRelease=$Release;function Invoke-RestMethod {return $script:FixtureRelease}

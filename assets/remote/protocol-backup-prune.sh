@@ -8,7 +8,7 @@ check_only="${VPS_PARAM_CHECK_ONLY:-false}"
 [[ "$check_only" == 'true' || "$check_only" == 'false' ]]
 
 assert_no_transaction(){
-  [[ ! -e /var/lib/mxh-vps-deploy/transaction.owner ]] || { echo 'An unfinished transaction protects backups; cleanup refused.' >&2; return 1; }
+  [[ ! -e /var/lib/may-vps-deploy/transaction.owner ]] || { echo 'An unfinished transaction protects backups; cleanup refused.' >&2; return 1; }
   for service in mxh-protocol-migration-rollback.timer mxh-protocol-migration-rollback.service mxh-ssh-maintenance-rollback.timer mxh-ssh-maintenance-rollback.service; do
     if systemctl is-active --quiet "$service" 2>/dev/null; then echo 'An active rollback actor protects backups; cleanup refused.' >&2; return 1; fi
   done
@@ -20,8 +20,8 @@ if [[ "$check_only" == 'true' ]]; then
   exit 0
 fi
 
-install -d -m 0700 /var/lib/mxh-vps-deploy
-exec 9>/var/lib/mxh-vps-deploy/transaction.lock
+install -d -m 0700 /var/lib/may-vps-deploy
+exec 9>/var/lib/may-vps-deploy/transaction.lock
 flock -n 9 || exit 1
 assert_no_transaction
 root='/root/vps-deploy-backups'

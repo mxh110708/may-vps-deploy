@@ -1,6 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <ProjectReference Include="../Mxh.VpsDeploy.Core/Mxh.VpsDeploy.Core.csproj" />
-    <PackageReference Include="SSH.NET" Version="2026.0.0" />
-  </ItemGroup>
-</Project>

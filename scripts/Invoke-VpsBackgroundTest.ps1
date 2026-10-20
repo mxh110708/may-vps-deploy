@@ -7,7 +7,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $session = Get-Content -Raw -LiteralPath $SessionManifest | ConvertFrom-Json
-if ($session.SchemaVersion -ne 1 -or $session.PipeName -notmatch '^mxh-test-[a-f0-9]{32}$') { throw 'Invalid test manifest.' }
+if ($session.SchemaVersion -ne 1 -or $session.PipeName -notmatch '^may-test-[a-f0-9]{32}$') { throw 'Invalid test manifest.' }
 $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', $session.PipeName, [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::Asynchronous -bor [IO.Pipes.PipeOptions]::CurrentUserOnly)
 $timeout = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSeconds))
 try {

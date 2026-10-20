@@ -33,7 +33,7 @@ try {
         $started = $true
         Install-VpsPortableApplicationUpdate $root $job.Package (Join-Path $stage 'rollback')
     }
-    $native=Join-Path $root 'MXH-VPS-Deploy.exe'
+    $native=Join-Path $root 'May-VPS-Deploy.exe'
     $start = [Diagnostics.ProcessStartInfo]::new($(if(Test-Path -LiteralPath $native){$native}else{Join-Path $PSHOME 'pwsh.exe'}))
     $start.UseShellExecute=$false; $start.CreateNoWindow=$true
     if(-not(Test-Path -LiteralPath $native)){foreach ($arg in @('-NoLogo','-NoProfile','-STA','-WindowStyle','Hidden','-File',(Join-Path $root 'Start-VPSDeploy.Gui.ps1'))) { $start.ArgumentList.Add($arg) }}
@@ -50,6 +50,6 @@ try {
         Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
     }
     Add-Type -AssemblyName PresentationFramework
-    [void][Windows.MessageBox]::Show($message,'MXH VPS Deploy 更新','OK','Error')
+    [void][Windows.MessageBox]::Show($message,'May VPS Deploy 更新','OK','Error')
     exit 1
 }

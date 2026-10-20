@@ -1,7 +1,7 @@
 #requires -Version 7.4
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$script:UpdateRepository = 'mxh110708/mxh-vps-deploy'
+$script:UpdateRepository = 'mxh110708/may-vps-deploy'
 $script:UpdateApi = 'https://api.github.com/repos/' + $script:UpdateRepository
 
 function Get-VpsApplicationVersion {
@@ -25,7 +25,7 @@ function Assert-VpsUpdateAssetUri {
 function Get-VpsApplicationUpdate {
     param([Parameter(Mandatory)][string]$ProjectRoot, [string]$Proxy)
     $current = Get-VpsApplicationVersion $ProjectRoot
-    $request = @{ Uri = "$script:UpdateApi/releases/latest"; Headers = @{ 'User-Agent' = 'MXH-VPS-Deploy'; Accept = 'application/vnd.github+json' }; TimeoutSec = 30 }
+    $request = @{ Uri = "$script:UpdateApi/releases/latest"; Headers = @{ 'User-Agent' = 'May-VPS-Deploy'; Accept = 'application/vnd.github+json' }; TimeoutSec = 30 }
     if ($Proxy) {
         $uri = [uri]$Proxy
         if ($uri.Scheme -notin @('http','https')) { throw '请填写 HTTP/HTTPS 代理地址。' }
@@ -42,14 +42,14 @@ function Get-VpsApplicationUpdate {
         Distribution=$distribution
     }
     if (-not $result.Available) { return $result }
-    $name = "mxh-vps-deploy-$tag-windows-amd64.zip"
+    $name = "may-vps-deploy-$tag-windows-amd64.zip"
     $archives = @($release.assets | Where-Object name -CEQ $name)
     $checksums = @($release.assets | Where-Object name -CEQ 'SHA256SUMS.txt')
     if ($archives.Count -ne 1 -or $checksums.Count -ne 1) { throw '发布包或校验文件不完整。' }
     $required=@($archives[0],$checksums[0])
     if($distribution -eq 'Installed'){
-        $setups=@($release.assets|Where-Object name -CEQ "mxh-vps-deploy-$tag-windows-amd64-setup.exe")
-        $manifests=@($release.assets|Where-Object name -CEQ "mxh-vps-deploy-$tag-windows-amd64.files.json")
+        $setups=@($release.assets|Where-Object name -CEQ "may-vps-deploy-$tag-windows-amd64-setup.exe")
+        $manifests=@($release.assets|Where-Object name -CEQ "may-vps-deploy-$tag-windows-amd64.files.json")
         if($setups.Count -ne 1 -or $manifests.Count -ne 1){throw '安装版更新附件不完整。'}
         $required+=@($setups[0],$manifests[0]);$result.Installer=$setups[0];$result.FileManifest=$manifests[0]
     }
@@ -66,7 +66,7 @@ function Get-VpsApplicationDistribution {
     $marker=Join-Path $ProjectRoot 'installation.json'
     if(Test-Path -LiteralPath $marker){
         $value=Get-Content -Raw -LiteralPath $marker|ConvertFrom-Json -AsHashtable
-        if($value.schema_version -ne 1 -or $value.type -ne 'installed' -or $value.app_id -ne 'mxh-vps-deploy-desktop'){throw '应用安装记录无效，请核对完整安装目录。'}
+        if($value.schema_version -ne 1 -or $value.type -ne 'installed' -or $value.app_id -ne 'may-vps-deploy-desktop'){throw '应用安装记录无效，请核对完整安装目录。'}
         return 'Installed'
     }
     if(Test-Path -LiteralPath (Join-Path $ProjectRoot '.git')){return 'Git'}
@@ -257,8 +257,8 @@ function Complete-VpsGitApplicationUpdate {
 function Get-VpsGitApplicationRelease {
     param([Parameter(Mandatory)][string]$ProjectRoot,[Parameter(Mandatory)][string]$Tag,[string]$Proxy)
     $remote = (Invoke-VpsUpdateGit $ProjectRoot @('remote','get-url','origin')).Output
-    if ($remote -notmatch '^(https://github\.com/|git@github\.com:)mxh110708/mxh-vps-deploy(?:\.git)?$') { throw '使用副本的 origin 不属于本项目，未更新。' }
-    [void](Invoke-VpsUpdateGit $ProjectRoot @('fetch','--no-tags','--no-recurse-submodules','https://github.com/mxh110708/mxh-vps-deploy.git',"refs/tags/${Tag}:refs/tags/$Tag") $Proxy)
+    if ($remote -notmatch '^(https://github\.com/|git@github\.com:)mxh110708/(?:may|mxh)-vps-deploy(?:\.git)?$') { throw '使用副本的 origin 不属于本项目，未更新。' }
+    [void](Invoke-VpsUpdateGit $ProjectRoot @('fetch','--no-tags','--no-recurse-submodules','https://github.com/mxh110708/may-vps-deploy.git',"refs/tags/${Tag}:refs/tags/$Tag") $Proxy)
 }
 function Start-VpsApplicationUpdate {
     param([Parameter(Mandatory)][string]$ProjectRoot,[string]$Proxy,[Parameter(Mandatory)][int]$ParentProcessId,[AllowNull()][object]$InteractionSession)

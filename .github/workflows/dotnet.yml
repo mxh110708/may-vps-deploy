@@ -13,7 +13,7 @@ jobs:
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
-      MXH_TEST_SSH_PYTHON: python
+      MAY_TEST_SSH_PYTHON: python
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -23,9 +23,9 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install --disable-pip-version-check paramiko==5.0.0
-      - run: dotnet restore desktop/Mxh.VpsDeploy.Tests/Mxh.VpsDeploy.Tests.csproj --locked-mode
-      - run: dotnet run --project desktop/Mxh.VpsDeploy.Tests/Mxh.VpsDeploy.Tests.csproj -c Release --no-restore -- "${{ github.workspace }}"
+      - run: dotnet restore desktop/May.VpsDeploy.Tests/May.VpsDeploy.Tests.csproj --locked-mode
+      - run: dotnet run --project desktop/May.VpsDeploy.Tests/May.VpsDeploy.Tests.csproj -c Release --no-restore -- "${{ github.workspace }}"
       - if: runner.os == 'Windows'
-        run: dotnet restore desktop/Mxh.VpsDeploy.Windows.Tests/Mxh.VpsDeploy.Windows.Tests.csproj --locked-mode
+        run: dotnet restore desktop/May.VpsDeploy.Windows.Tests/May.VpsDeploy.Windows.Tests.csproj --locked-mode
       - if: runner.os == 'Windows'
-        run: dotnet run --project desktop/Mxh.VpsDeploy.Windows.Tests/Mxh.VpsDeploy.Windows.Tests.csproj -c Release --no-restore -- "${{ github.workspace }}"
+        run: dotnet run --project desktop/May.VpsDeploy.Windows.Tests/May.VpsDeploy.Windows.Tests.csproj -c Release --no-restore -- "${{ github.workspace }}"

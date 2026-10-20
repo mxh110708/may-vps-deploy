@@ -8,21 +8,22 @@
   #error OutputPath is required
 #endif
 #ifndef OutputName
-  #define OutputName "mxh-vps-deploy-v" + AppVersion + "-windows-amd64-setup"
+  #define OutputName "may-vps-deploy-v" + AppVersion + "-windows-amd64-setup"
 #endif
 #ifndef IsTestBuild
   #define IsTestBuild "0"
 #endif
 
 [Setup]
-AppId=mxh-vps-deploy-desktop
-AppName=MXH VPS Deploy
+; Independent May installation; the old application is not upgraded or uninstalled.
+AppId=may-vps-deploy-desktop
+AppName=May VPS Deploy
 AppVersion={#AppVersion}
-AppPublisher=MXH
-AppPublisherURL=https://github.com/mxh110708/mxh-vps-deploy
-AppSupportURL=https://github.com/mxh110708/mxh-vps-deploy/issues
-DefaultDirName=C:\Programs\MXH VPS Deploy
-DefaultGroupName=MXH VPS Deploy
+AppPublisher=May
+AppPublisherURL=https://github.com/mxh110708/may-vps-deploy
+AppSupportURL=https://github.com/mxh110708/may-vps-deploy/issues
+DefaultDirName=C:\Programs\May VPS Deploy
+DefaultGroupName=May VPS Deploy
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
@@ -30,10 +31,10 @@ MinVersion=10.0.19041
 OutputDir={#OutputPath}
 OutputBaseFilename={#OutputName}
 SetupIconFile={#BundleRoot}\assets\gui\app.ico
-UninstallDisplayIcon={app}\MXH-VPS-Deploy.exe
-UninstallDisplayName=MXH VPS Deploy
-AppMutex=Local\mxh-vps-deploy-desktop
-SetupMutex=Local\mxh-vps-deploy-setup
+UninstallDisplayIcon={app}\May-VPS-Deploy.exe
+UninstallDisplayName=May VPS Deploy
+AppMutex=Local\may-vps-deploy-desktop
+SetupMutex=Local\may-vps-deploy-setup
 WizardStyle=modern dynamic
 WizardSizePercent=100
 Compression=lzma2/normal
@@ -64,13 +65,13 @@ Source: "{#BundleRoot}\application-files.json"; DestName: "new-application-files
 
 [Icons]
 #if IsTestBuild == "0"
-Name: "{autoprograms}\MXH VPS Deploy"; Filename: "{app}\MXH-VPS-Deploy.exe"; AppUserModelID: "MXH.VPSDeploy.Desktop"
-Name: "{autodesktop}\MXH VPS Deploy"; Filename: "{app}\MXH-VPS-Deploy.exe"; Tasks: desktopicon; AppUserModelID: "MXH.VPSDeploy.Desktop"
+Name: "{autoprograms}\May VPS Deploy"; Filename: "{app}\May-VPS-Deploy.exe"; AppUserModelID: "May.VPSDeploy.Desktop"
+Name: "{autodesktop}\May VPS Deploy"; Filename: "{app}\May-VPS-Deploy.exe"; Tasks: desktopicon; AppUserModelID: "May.VPSDeploy.Desktop"
 #endif
 
 [Run]
 #if IsTestBuild == "0"
-Filename: "{app}\MXH-VPS-Deploy.exe"; Description: "启动 MXH VPS Deploy"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\May-VPS-Deploy.exe"; Description: "启动 May VPS Deploy"; Flags: nowait postinstall skipifsilent
 #endif
 
 [Code]
@@ -151,7 +152,7 @@ begin
   end else begin
     Form := CreateCustomForm(ScaleX(440), ScaleY(245), False, False);
     try
-      Form.Caption := '卸载 MXH VPS Deploy';
+      Form.Caption := '卸载 May VPS Deploy';
       LabelText := TNewStaticText.Create(Form); LabelText.Parent := Form;
       LabelText.Left := ScaleX(24); LabelText.Top := ScaleY(20); LabelText.Caption := '选择如何处理这台电脑上的应用数据';
       Keep := TNewRadioButton.Create(Form); Keep.Parent := Form;
@@ -202,7 +203,8 @@ begin
     Result := '请选择独立的应用安装目录。安装包不覆盖 Git 开发或使用副本。';
     exit;
   end;
-  if FileExists(ExpandConstant('{app}\MXH-VPS-Deploy.exe')) and
+  if (FileExists(ExpandConstant('{app}\May-VPS-Deploy.exe')) or
+      FileExists(ExpandConstant('{app}\MXH-VPS-Deploy.exe'))) and
      not FileExists(ExpandConstant('{app}\installation.json')) then begin
     Result := '此目录包含便携版或未受管文件。请选择独立安装目录，以保留原文件。';
     exit;
@@ -219,7 +221,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
     SaveStringToFile(ExpandConstant('{app}\installation.json'),
-      '{"schema_version":1,"type":"installed","app_id":"mxh-vps-deploy-desktop","version":"{#AppVersion}"}', False);
+      '{"schema_version":1,"type":"installed","app_id":"may-vps-deploy-desktop","version":"{#AppVersion}"}', False);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

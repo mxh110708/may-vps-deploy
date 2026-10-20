@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $versions = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'config\versions.json') | ConvertFrom-Json
 $settings = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'config\app-defaults.json') | ConvertFrom-Json
-$headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'mxh-vps-deploy-version-check' }
+$headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'may-vps-deploy-version-check' }
 $components = @(
     @{Name='Xray-core'; Pinned=[string]$versions.xray.version; Api=$settings.release_apis.xray},
     @{Name='Komari Agent'; Pinned=[string]$versions.komari_agent.version; Api=$settings.release_apis.komari_agent},
@@ -14,7 +14,7 @@ $components = @(
     @{Name='sing-box Linux'; Pinned=[string]$versions.sing_box.version; Api=$settings.release_apis.sing_box},
     @{Name='sing-box Windows'; Pinned=[string]$versions.sing_box.assets.windows_amd64.version; Api=$settings.release_apis.sing_box},
     @{Name='Mihomo'; Pinned=[string]$versions.mihomo.version; Api=$settings.release_apis.mihomo},
-    @{Name='MXH Route'; Pinned=[string]$versions.client_compatibility.mxh_route.version; Api=$settings.release_apis.mxh_route}
+    @{Name='May Route'; Pinned=[string]$versions.client_compatibility.mxh_route.version; Api=$settings.release_apis.mxh_route}
 )
 $results = @{}
 foreach ($component in $components) {

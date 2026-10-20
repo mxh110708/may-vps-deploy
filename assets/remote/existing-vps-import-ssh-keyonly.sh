@@ -25,7 +25,7 @@ cleanup() {
 trap cleanup EXIT
 
 cat > "$config" <<'EOF'
-# Managed by MXH VPS Deploy existing-instance import.
+# Managed by May VPS Deploy existing-instance import.
 PubkeyAuthentication yes
 PasswordAuthentication no
 KbdInteractiveAuthentication no

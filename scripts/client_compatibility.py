@@ -1,4 +1,4 @@
-"""Portable MXH Route profile serialization shared by both candidate builders."""
+"""Portable May Route profile serialization shared by both candidate builders."""
 from __future__ import annotations
 
 import json
@@ -27,5 +27,5 @@ def serialize_profile(document: dict[str, Any]) -> str:
             rule.pop("initial_path", None)
     text = json.dumps(document, ensure_ascii=False, separators=(",", ":")) + "\n"
     if len(text.encode("utf-8")) >= MAX_PROFILE_BYTES:
-        raise SystemExit("MXH Route profile must be smaller than 4 MiB; no oversized candidate was written")
+        raise SystemExit("May Route profile must be smaller than 4 MiB; no oversized candidate was written")
     return text

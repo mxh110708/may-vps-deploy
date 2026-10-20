@@ -242,7 +242,7 @@ $module=Get-Module VpsDeploy.Core
         [IO.File]::WriteAllText((Join-Path $zip 'private/runtime.private.json'),'fixture')
         & (Join-Path $root 'scripts/Test-NoSecrets.ps1') -ProjectRoot $zip
         Check $true 'source ZIP recognizes runtime data boundary'
-        $pickerRelative='desktop/Mxh.VpsDeploy.Windows/WindowsSavePathPicker.cs'
+        $pickerRelative='desktop/May.VpsDeploy.Windows/WindowsSavePathPicker.cs'
         $picker=Join-Path $zip $pickerRelative;[IO.Directory]::CreateDirectory((Split-Path -Parent $picker))|Out-Null
         $pickerSource=Get-Content -Raw -LiteralPath (Join-Path $root $pickerRelative)
         [IO.File]::WriteAllText($picker,$pickerSource)

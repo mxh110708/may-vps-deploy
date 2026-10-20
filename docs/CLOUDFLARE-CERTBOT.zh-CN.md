@@ -1,6 +1,6 @@
 # Cloudflare、Certbot、AnyTLS 与 Reality 本机 target 配置手册
 
-本文是 `MXH VPS Deploy` 的 Cloudflare 操作备忘录。适用于：
+本文是 `May VPS Deploy` 的 Cloudflare 操作备忘录。适用于：
 
 - 部署 AnyTLS + 可信 TLS + ECH；
 - 给 Reality 使用自有域名的本机 HTTPS target；
@@ -280,7 +280,7 @@ dns_cloudflare_api_token = <Token>
 
 不要把 Token 复制到聊天、截图、README、GitHub Issue 或客户端配置。Cloudflare Token 泄漏后应立即撤销并创建新 Token。
 
-## 7. 在 MXH VPS Deploy 向导中怎么填写
+## 7. 在 May VPS Deploy 向导中怎么填写
 
 ### 7.1 AnyTLS
 

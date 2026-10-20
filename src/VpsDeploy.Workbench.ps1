@@ -271,7 +271,7 @@ function Restore-MxhPendingPublication {
     if($journal.Phase -in @('Committed','RolledBack')){return}
     $locks=[Collections.Generic.List[object]]::new()
     try{
-        foreach($target in @($journal.Clash,$journal.SingBox) | Sort-Object){$locks.Add([IO.File]::Open($target+'.mxh-publish.lock','OpenOrCreate','ReadWrite','None'))}
+        foreach($target in @($journal.Clash,$journal.SingBox) | Sort-Object){$locks.Add([IO.File]::Open($target+'.may-publish.lock','OpenOrCreate','ReadWrite','None'))}
         foreach($key in @('Clash','SingBox')){
             $current=Get-MxhFileFingerprint $journal[$key]
             $candidate=if($journal.Contains('Candidates')){[string]$journal.Candidates[$key]}else{''}

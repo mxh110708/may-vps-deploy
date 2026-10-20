@@ -94,7 +94,7 @@ if (( VPS_PARAM_QUEUE_FLOOR > 0 )); then
 fi
 
 {
-  echo '# Managed by MXH VPS Deploy. Conservative adaptive tuning.'
+  echo '# Managed by May VPS Deploy. Conservative adaptive tuning.'
   echo "# profile=${VPS_PARAM_PROFILE} role=${VPS_PARAM_ROLE} memory_kib=${VPS_PARAM_MEMORY_KIB}"
   if [[ -n "${VPS_PARAM_BANDWIDTH_MBPS:-}" ]]; then
     echo "# nominal_bandwidth_mbps=${VPS_PARAM_BANDWIDTH_MBPS} (provider plan value; not an interface speed guess)"

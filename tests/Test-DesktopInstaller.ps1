@@ -28,7 +28,7 @@ try{
  $next=& (Join-Path $ProjectRoot 'scripts/New-VpsReleasePackage.ps1') -ProjectRoot $ProjectRoot -Destination (Join-Path $fixture 'next-package') -Development -TestBuild -PackageVersion $nextVersion -Proxy $Proxy
  $installArgs=@('/SP-','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NOICONS',('/DIR='+$app))
  Assert-Desktop ((Invoke-DesktopFixtureProcess $first.Installer $installArgs) -eq 0) 'real installer installs to isolated directory with spaces and Chinese'
- Assert-Desktop (Test-Path -LiteralPath (Join-Path $app 'MXH-VPS-Deploy.exe')) 'native desktop EXE installed'
+ Assert-Desktop (Test-Path -LiteralPath (Join-Path $app 'May-VPS-Deploy.exe')) 'native desktop EXE installed'
  $kernelCatalog=Get-Content -Raw -LiteralPath (Join-Path $app 'config/kernel-catalog.json')|ConvertFrom-Json -AsHashtable
  $kernelFile=Join-Path $app 'assets/kernel/kernel.deb'
  Assert-Desktop ((Get-Item -LiteralPath $kernelFile).Length -eq $kernelCatalog.Prebuilt.Bytes -and (Get-FileHash -LiteralPath $kernelFile).Hash.ToLowerInvariant() -eq $kernelCatalog.Prebuilt.Sha256) 'installer preserves the exact fixed precompiled kernel'
@@ -41,17 +41,17 @@ try{
   Assert-Desktop (-not(Test-Path -LiteralPath (Join-Path $app ([IO.Path]::GetFileName($first.KernelSourceArchive))))) 'full kernel source is not installed into every client application'
  }
  Assert-Desktop ((Get-VpsApplicationDistribution $app) -eq 'Installed') 'installer mode recognized'
- $exeBytes=[IO.File]::ReadAllBytes((Join-Path $app 'MXH-VPS-Deploy.exe'));$pe=[BitConverter]::ToInt32($exeBytes,0x3c)
+ $exeBytes=[IO.File]::ReadAllBytes((Join-Path $app 'May-VPS-Deploy.exe'));$pe=[BitConverter]::ToInt32($exeBytes,0x3c)
  Assert-Desktop ([BitConverter]::ToUInt16($exeBytes,$pe+4) -eq 0x8664 -and [BitConverter]::ToUInt16($exeBytes,$pe+24+68) -eq 2) 'x64 Windows GUI EXE, no console subsystem'
  $proof=Join-Path $app 'runtime-proof.json'
- Assert-Desktop ((Invoke-DesktopFixtureProcess (Join-Path $app 'MXH-VPS-Deploy.exe') @('--verify-runtime',$proof) -MinimalPath) -eq 0) 'native EXE works without global PowerShell or Python on PATH'
+ Assert-Desktop ((Invoke-DesktopFixtureProcess (Join-Path $app 'May-VPS-Deploy.exe') @('--verify-runtime',$proof) -MinimalPath) -eq 0) 'native EXE works without global PowerShell or Python on PATH'
  $runtimeProof=Get-Content -Raw -LiteralPath $proof|ConvertFrom-Json -AsHashtable
  Assert-Desktop ($runtimeProof.winui_loaded -and $runtimeProof.runtime_paths_local -and -not $runtimeProof.wpf_loaded -and -not $runtimeProof.powershell_loaded) 'real WinUI 3 and private .NET runtime loaded without PowerShell or WPF'
  Remove-Item -LiteralPath $proof
  if(Test-Path -LiteralPath ($proof+'.startup.txt')){Remove-Item -LiteralPath ($proof+'.startup.txt')}
  @{synthetic_only=$true}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $app 'qa-ui-review.fixture.json') -Encoding utf8
  $storageProof=Join-Path $app '.tmp/storage-ui/runtime-proof.json';[IO.Directory]::CreateDirectory((Split-Path -Parent $storageProof))|Out-Null
- $storageExit=Invoke-DesktopFixtureProcess (Join-Path $app 'MXH-VPS-Deploy.exe') @('--ui-smoke',$storageProof,'--app-root',$app,'--exercise-storage','--exercise-additions')
+ $storageExit=Invoke-DesktopFixtureProcess (Join-Path $app 'May-VPS-Deploy.exe') @('--ui-smoke',$storageProof,'--app-root',$app,'--exercise-storage','--exercise-additions')
  if($storageExit -ne 0 -and (Test-Path -LiteralPath $storageProof)){
   $failure=Get-Content -Raw -LiteralPath $storageProof|ConvertFrom-Json
   Write-Host ('Native storage UI proof: '+($failure|ConvertTo-Json -Depth 5 -Compress))
@@ -92,15 +92,15 @@ try{
  Assert-Desktop ((Invoke-DesktopFixtureProcess (Join-Path $app 'app-helpers/SetupGuard.exe') @($app,$fakePath)) -ne 0) 'new managed path cannot overwrite an unmanaged file'
  Remove-Item -LiteralPath $collision
  $updateFixture=Join-Path $app '.tmp/qa-update-fixture';[IO.Directory]::CreateDirectory($updateFixture)|Out-Null
- $setup=Join-Path $updateFixture "mxh-vps-deploy-v$nextVersion-windows-amd64-setup.exe"
- $files=Join-Path $updateFixture "mxh-vps-deploy-v$nextVersion-windows-amd64.files.json"
+ $setup=Join-Path $updateFixture "may-vps-deploy-v$nextVersion-windows-amd64-setup.exe"
+ $files=Join-Path $updateFixture "may-vps-deploy-v$nextVersion-windows-amd64.files.json"
  Copy-Item -LiteralPath $next.Installer -Destination $setup
  Copy-Item -LiteralPath $next.FileManifest -Destination $files
  $checksums=Join-Path $updateFixture 'SHA256SUMS.txt'
  @($setup,$files)|ForEach-Object{(Get-FileHash -LiteralPath $_).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($_)}|Set-Content -LiteralPath $checksums -Encoding ascii
- $assets=@($setup,$files,$checksums)|ForEach-Object{@{name=[IO.Path]::GetFileName($_);browser_download_url=('https://github.com/mxh110708/mxh-vps-deploy/releases/download/v'+$nextVersion+'/'+[IO.Path]::GetFileName($_));digest=('sha256:'+(Get-FileHash -LiteralPath $_).Hash.ToLowerInvariant());size=(Get-Item -LiteralPath $_).Length;state='uploaded'}}
+ $assets=@($setup,$files,$checksums)|ForEach-Object{@{name=[IO.Path]::GetFileName($_);browser_download_url=('https://github.com/mxh110708/may-vps-deploy/releases/download/v'+$nextVersion+'/'+[IO.Path]::GetFileName($_));digest=('sha256:'+(Get-FileHash -LiteralPath $_).Hash.ToLowerInvariant());size=(Get-Item -LiteralPath $_).Length;state='uploaded'}}
  @{tag_name=('v'+$nextVersion);draft=$false;prerelease=$false;body="## 本次更新`n- 修正检查更新结束后的状态提示。`n- 在更新弹窗显示下载与校验进度。`n- 安装时显示进度窗口，保留私人归档和本地配置。`n`n这是隔离测试的示例更新说明。";assets=@($assets)}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $updateFixture 'release.json') -Encoding utf8
- Assert-Desktop ((Invoke-DesktopFixtureProcess (Join-Path $app 'MXH-VPS-Deploy.exe') @('--verify-installed-update') -MinimalPath) -eq 0) 'actual WinUI check-update and confirmation download and launch update'
+ Assert-Desktop ((Invoke-DesktopFixtureProcess (Join-Path $app 'May-VPS-Deploy.exe') @('--verify-installed-update') -MinimalPath) -eq 0) 'actual WinUI check-update and confirmation download and launch update'
  $uiProof=Get-Content -LiteralPath (Join-Path $app '.tmp/ui-update-proof.json') -Raw|ConvertFrom-Json -AsHashtable
  Assert-Desktop ($uiProof.ui_update_started -and $uiProof.confirmation_clicked -and $uiProof.launcher_pid_recorded) 'real update confirmation and parent process handoff verified'
  Assert-Desktop ($uiProof.release_notes_displayed) 'update dialog displays the release body returned by the GitHub-format metadata'
@@ -134,15 +134,15 @@ try{
  $oldPrivate=[IO.Path]::GetFullPath((Join-Path $app 'private'));$custom=[IO.Path]::GetFullPath($custom)
  if(-not $oldPrivate.StartsWith($fixture+'\',[StringComparison]::OrdinalIgnoreCase) -or -not $custom.StartsWith($fixture+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe archive fixture relocation.'}
  Move-Item -LiteralPath $oldPrivate -Destination $custom
- @{SchemaVersion=1;OwnerId=$owner;AppRoot=$app}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $custom '.mxh-private-directory.json') -Encoding utf8
+ @{SchemaVersion=1;OwnerId=$owner;AppRoot=$app}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $custom '.may-private-directory.json') -Encoding utf8
  @{SchemaVersion=1;OwnerId=$owner;Directory=$custom}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $app 'archive-location.private.json') -Encoding utf8
  $customProof=Join-Path $app '.tmp/custom-location-proof.json'
- Assert-Desktop ((Invoke-DesktopFixtureProcess (Join-Path $app 'MXH-VPS-Deploy.exe') @('--verify-runtime',$customProof)) -eq 0) 'native EXE opens the custom private directory'
+ Assert-Desktop ((Invoke-DesktopFixtureProcess (Join-Path $app 'May-VPS-Deploy.exe') @('--verify-runtime',$customProof)) -eq 0) 'native EXE opens the custom private directory'
  $customRuntime=Get-Content -Raw -LiteralPath $customProof|ConvertFrom-Json
  Assert-Desktop (-not $customRuntime.font_fallback -and $customRuntime.initial_font -eq ('Custom:'+$fontDigest+'.ttf')) 'custom archive preserves imported font rendering'
  $uninstaller=Join-Path $app 'unins000.exe'
  Assert-Desktop ((Invoke-DesktopFixtureProcess $uninstaller @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART')) -eq 0) 'normal uninstall defaults to keeping data'
- Assert-Desktop (-not(Test-Path -LiteralPath (Join-Path $app 'MXH-VPS-Deploy.exe')) -and (Get-FileHash -LiteralPath (Join-Path $custom 'instances/record.txt')).Hash -eq $privateHash -and (Get-FileHash -LiteralPath (Join-Path $app 'config/app-defaults.local.json')).Hash -eq $localHash -and (Test-Path -LiteralPath (Join-Path $app 'archive-location.private.json'))) 'keep-data uninstall preserves custom directory, locator and local settings'
+ Assert-Desktop (-not(Test-Path -LiteralPath (Join-Path $app 'May-VPS-Deploy.exe')) -and (Get-FileHash -LiteralPath (Join-Path $custom 'instances/record.txt')).Hash -eq $privateHash -and (Get-FileHash -LiteralPath (Join-Path $app 'config/app-defaults.local.json')).Hash -eq $localHash -and (Test-Path -LiteralPath (Join-Path $app 'archive-location.private.json'))) 'keep-data uninstall preserves custom directory, locator and local settings'
  Assert-Desktop ((Invoke-DesktopFixtureProcess $next.Installer $installArgs) -eq 0) 'reinstall supports retained local data'
  Assert-Desktop ((Get-FileHash -LiteralPath (Join-Path $custom 'instances/record.txt')).Hash -eq $privateHash) 'reinstall does not replace retained custom archive'
  $outsideDirectory=Join-Path $fixture 'outside-data';[IO.Directory]::CreateDirectory($outsideDirectory)|Out-Null
@@ -152,7 +152,7 @@ try{
  New-Item -ItemType Junction -Path $junction -Target $outsideDirectory|Out-Null
  try{
   Assert-Desktop ((Invoke-DesktopFixtureProcess (Join-Path $app 'unins000.exe') @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/REMOVEDATA=1')) -ne 0) 'complete removal refuses a linked data directory'
-  Assert-Desktop ((Test-Path -LiteralPath (Join-Path $app 'MXH-VPS-Deploy.exe')) -and (Get-FileHash -LiteralPath $outsideRecord).Hash -eq $outsideRecordHash) 'blocked linked uninstall preserves app and external data'
+  Assert-Desktop ((Test-Path -LiteralPath (Join-Path $app 'May-VPS-Deploy.exe')) -and (Get-FileHash -LiteralPath $outsideRecord).Hash -eq $outsideRecordHash) 'blocked linked uninstall preserves app and external data'
  }finally{if(Test-Path -LiteralPath $junction){[IO.Directory]::Delete($junction)}}
  Assert-Desktop ((Invoke-DesktopFixtureProcess (Join-Path $app 'unins000.exe') @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/REMOVEDATA=1')) -eq 0) 'explicit delete-data uninstall succeeds'
  $watch=[Diagnostics.Stopwatch]::StartNew();while((Test-Path -LiteralPath $app) -and $watch.ElapsedMilliseconds -lt 15000){[Threading.Thread]::Sleep(50)}

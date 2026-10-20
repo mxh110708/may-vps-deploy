@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ProjectRoot, [string]$MxhRouteCorePath)
+param([Parameter(Mandatory)][string]$ProjectRoot, [string]$MayRouteCorePath)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -16,7 +16,7 @@ if ($originalHash -ne (Get-FileHash -LiteralPath $template -Algorithm SHA256).Ha
 
 $officialCore = Get-VpsBundledClientCore -ProjectRoot $ProjectRoot -Core 'sing-box'
 $cores = @($officialCore)
-if ($MxhRouteCorePath) { $cores += $MxhRouteCorePath }
+if ($MayRouteCorePath) { $cores += $MayRouteCorePath }
 foreach ($core in $cores) {
     $result = Invoke-MxhSingBoxCandidateCheck -ProjectRoot $ProjectRoot -CorePath $core -ConfigPath $template
     if ($result.ExitCode -ne 0) { throw "Client template compatibility failed: $($result.StdErr)" }
@@ -42,4 +42,4 @@ foreach ($core in $cores) {
     $result = Invoke-MxhSingBoxCandidateCheck -ProjectRoot $ProjectRoot -CorePath $core -ConfigPath $candidate.SingBox
     if ($result.ExitCode -ne 0) { throw "Generated configuration compatibility failed: $($result.StdErr)" }
 }
-Write-Host "Client compatibility passed: official core, Mihomo, five offline rules, generated pair; MXH Route core included=$([bool]$MxhRouteCorePath)"
+Write-Host "Client compatibility passed: official core, Mihomo, five offline rules, generated pair; May Route core included=$([bool]$MayRouteCorePath)"

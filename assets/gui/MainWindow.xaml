@@ -1,6 +1,6 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="MXH VPS Deploy" Width="1180" Height="820" MinWidth="960" MinHeight="680"
+        Title="May VPS Deploy" Width="1180" Height="820" MinWidth="960" MinHeight="680"
         WindowStartupLocation="CenterScreen" Background="#1e222a" Foreground="#e8ebef"
         FontSize="13" WindowStyle="None" ResizeMode="CanResize" UseLayoutRounding="True">
   <Window.Resources>
@@ -132,7 +132,7 @@
       <Border Background="#1d2026" BorderBrush="#343942" BorderThickness="0,0,1,0">
         <DockPanel Margin="14,26,14,16">
           <StackPanel DockPanel.Dock="Top" Margin="10,0,0,22">
-            <TextBlock x:Name="Brand" Text="MXH Deploy" FontSize="27" FontWeight="SemiBold"/>
+            <TextBlock x:Name="Brand" Text="May Deploy" FontSize="27" FontWeight="SemiBold"/>
             <TextBlock x:Name="VersionLabel" Text="0.7.0" Foreground="#828282" Margin="0,7,0,0"/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Margin="12,10,0,0">

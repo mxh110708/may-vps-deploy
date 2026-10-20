@@ -30,7 +30,7 @@ function Test-VpsGuiPlanPath {
         $instance=[IO.Path]::GetFullPath([string]$plan.Paths.InstanceDirectory).TrimEnd('\','/')
         $expected=Join-Path (Join-Path $InstanceRoot $plan.Provider) $plan.Instance
         if(-not $instance.Equals([IO.Path]::GetFullPath($expected),[StringComparison]::OrdinalIgnoreCase) -or
-            -not $archive.Equals((Join-Path $instance 'MXH-VPS-Deploy'),[StringComparison]::OrdinalIgnoreCase) -or
+            -not $archive.Equals((Join-Path $instance 'May-VPS-Deploy'),[StringComparison]::OrdinalIgnoreCase) -or
             -not [IO.Path]::GetFullPath([string]$plan.Paths.KeyDirectory).Equals((Join-Path $archive 'ssh'),[StringComparison]::OrdinalIgnoreCase)){return $false}
         return $archive.Equals((Split-Path -Parent $path).TrimEnd('\','/'),[StringComparison]::OrdinalIgnoreCase)
     } catch { return $false }

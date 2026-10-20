@@ -52,7 +52,7 @@ class RouteProbeTests(unittest.TestCase):
         self.assertTrue(self.run_probe(requests=requests)['Passed'])
         self.assertEqual(len(requests), 3)
         for request in requests:
-            self.assertEqual(request.get_header('User-agent'), 'MXH-VPS-Deploy/TunnelAccess')
+            self.assertEqual(request.get_header('User-agent'), 'May-VPS-Deploy/TunnelAccess')
             self.assertEqual(request.get_header('Accept'), 'application/json')
             self.assertIsNone(request.get_header('Authorization'))
             self.assertIsNone(request.get_header('Cookie'))

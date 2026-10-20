@@ -136,7 +136,7 @@ if action in ('snapshot', 'preflight'):
         regular(path)
         if path.exists():
             content = path.read_bytes()
-            if b'# Managed by MXH VPS Deploy.' not in content[:256]:
+            if b'# Managed by May VPS Deploy.' not in content[:256]:
                 raise SystemExit('Unmanaged network persistence file.')
             state['Files'][name] = {'Content': base64.b64encode(content).decode(), 'Mode': stat.S_IMODE(path.stat().st_mode)}
         else: state['Files'][name] = None
