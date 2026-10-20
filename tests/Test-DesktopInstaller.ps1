@@ -41,6 +41,15 @@ try{
   Assert-Desktop (-not(Test-Path -LiteralPath (Join-Path $app ([IO.Path]::GetFileName($first.KernelSourceArchive))))) 'full kernel source is not installed into every client application'
  }
  Assert-Desktop ((Get-VpsApplicationDistribution $app) -eq 'Installed') 'installer mode recognized'
+ $installationPath=Join-Path $app 'installation.json';$installationBytes=[IO.File]::ReadAllBytes($installationPath)
+ $legacyIdentity=Get-Content -Raw -LiteralPath $installationPath|ConvertFrom-Json -AsHashtable
+ $legacyIdentity.app_id='mxh-vps-deploy-desktop'
+ try{
+  $legacyIdentity|ConvertTo-Json|Set-Content -LiteralPath $installationPath -Encoding utf8
+  $managedExeHash=(Get-FileHash -LiteralPath (Join-Path $app 'May-VPS-Deploy.exe')).Hash
+  Assert-Desktop ((Invoke-DesktopFixtureProcess $next.Installer $installArgs) -ne 0) 'independent May installer refuses the previous product installation identity'
+  Assert-Desktop ((Get-FileHash -LiteralPath (Join-Path $app 'May-VPS-Deploy.exe')).Hash -eq $managedExeHash) 'rejected legacy-identity installation leaves managed application intact'
+ }finally{[IO.File]::WriteAllBytes($installationPath,$installationBytes)}
  $exeBytes=[IO.File]::ReadAllBytes((Join-Path $app 'May-VPS-Deploy.exe'));$pe=[BitConverter]::ToInt32($exeBytes,0x3c)
  Assert-Desktop ([BitConverter]::ToUInt16($exeBytes,$pe+4) -eq 0x8664 -and [BitConverter]::ToUInt16($exeBytes,$pe+24+68) -eq 2) 'x64 Windows GUI EXE, no console subsystem'
  $proof=Join-Path $app 'runtime-proof.json'
