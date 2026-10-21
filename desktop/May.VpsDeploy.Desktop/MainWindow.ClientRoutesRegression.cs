@@ -29,6 +29,13 @@ public sealed partial class MainWindow
             scheme = ClientSchemes.New(paths); scheme["Name"] = "第一轮合成配置设计"; designerStep = 1; SelectPage("clients");
             Require(Find<Button>(shell).Any(b => b.Tag as string == "ClientLinks.Import"), "节点页缺少分享链接导入入口。");
             var initial = ArchiveStore.Fingerprint(scheme);
+            var add = EditNode(null); var nodeForm = await WaitDialog();
+            var protocolChoice = Find<ComboBox>(nodeForm).Single(c => c.Header as string == "协议"); var purpose = Find<ComboBox>(nodeForm).Single(c => c.Header as string == "节点用途");
+            protocolChoice.SelectedIndex = protocolChoice.Items.Cast<ComboBoxItem>().ToList().FindIndex(c => c.Tag as string == "ShadowsocksLanding");
+            Require(((ComboBoxItem)purpose.SelectedItem).Tag as string == "landing", "新建 Shadowsocks 节点未默认选择落地用途。"); proof["new_ss_defaults_to_landing"] = true;
+            purpose.SelectedIndex = 0; protocolChoice.SelectedIndex = 0; protocolChoice.SelectedIndex = protocolChoice.Items.Cast<ComboBoxItem>().ToList().FindIndex(c => c.Tag as string == "ShadowsocksLanding");
+            Require(((ComboBoxItem)purpose.SelectedItem).Tag as string == "entry", "协议变更覆盖了用户明确选择的用途。"); proof["explicit_purpose_preserved"] = true;
+            Press(nodeForm, "CloseButton"); await add; Require(ArchiveStore.Fingerprint(scheme) == initial, "取消新建节点仍修改方案。"); proof["new_node_cancel_preserves_source"] = true;
             var links = string.Join('\n', new[]
             {
                 "anytls://synthetic-one@192.0.2.10:443?sni=example.com#EntryA",

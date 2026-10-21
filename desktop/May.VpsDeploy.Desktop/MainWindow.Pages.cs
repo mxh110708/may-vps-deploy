@@ -121,7 +121,19 @@ public sealed partial class MainWindow
             if (model.Text("Role") == "ShadowsocksLanding") { specifics.Children.Add(Field("Shadowsocks 方法", model, "Method")); specifics.Children.Add(password); }
             else { specifics.Children.Add(Field("SNI", model, "Sni")); if (model.Text("Role") == "RealityEntry") { specifics.Children.Add(uuid); specifics.Children.Add(Fields(Field("Reality 公钥", model, "PublicKey"), Field("short-id", model, "ShortId"))); } else { specifics.Children.Add(password); specifics.Children.Add(Field("ECH 客户端配置（未使用时留空）", model, "Ech")); } }
         }
-        role.SelectionChanged += (_, _) => Refresh(); kind.SelectionChanged += (_, _) => Refresh(); Refresh();
+        var explicitKind = false; var selectingKind = false;
+        kind.SelectionChanged += (_, _) => { if (!selectingKind) explicitKind = true; Refresh(); };
+        role.SelectionChanged += (_, _) =>
+        {
+            if (existing == null && !explicitKind)
+            {
+                var suggested = model.Text("Role") == "ShadowsocksLanding" ? "landing" : "entry";
+                selectingKind = true;
+                try { kind.SelectedItem = kind.Items.Cast<ComboBoxItem>().Single(item => item.Tag as string == suggested); }
+                finally { selectingKind = false; }
+            }
+            Refresh();
+        }; Refresh();
         var dialog = new ContentDialog { XamlRoot = shell.XamlRoot, RequestedTheme = ElementTheme.Dark, Title = existing == null ? "添加节点" : "编辑节点", Content = new ScrollViewer { Content = panel, MaxHeight = 500 }, PrimaryButtonText = "保存", CloseButtonText = "取消" };
         if (await ShowDialog(dialog) != ContentDialogResult.Primary) { password.Password = ""; uuid.Password = ""; return; }
         model["Uuid"] = uuid.Password.Trim(); uuid.Password = "";
