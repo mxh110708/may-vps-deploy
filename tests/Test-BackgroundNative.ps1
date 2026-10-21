@@ -13,7 +13,10 @@ $ProjectRoot=[IO.Path]::GetFullPath($ProjectRoot)
 $invoke = Join-Path $ProjectRoot 'scripts/Invoke-VpsBackgroundTest.ps1'
 $started = & (Join-Path $ProjectRoot 'scripts/Start-VpsBackgroundTest.ps1') -ApplicationDirectory $ApplicationDirectory -FixtureRoot $FixtureRoot -PublicAssetRoot $ProjectRoot -SyntheticFixture
 $session = $started.SessionManifest; $cases = [Collections.Generic.List[object]]::new()
-function Send([string]$command,[hashtable]$arguments=@{}) { & $invoke -SessionManifest $session -Command $command -Arguments $arguments }
+function Send([string]$command,[hashtable]$arguments=@{}) {
+    try { & $invoke -SessionManifest $session -Command $command -Arguments $arguments }
+    catch { throw ('Native command failed ('+$command+'): '+$_.Exception.Message) }
+}
 function Read-Ui {
     $ui=Send 'ui.read'
     $unguarded=@($ui.elements | Where-Object { $_.kind -eq 'ComboBox' -and -not $_.wheel_selection_blocked })

@@ -172,6 +172,19 @@ try{
 }catch{
  $fixtureFailure=$_
  Write-Host ('Installer lifecycle failure before cleanup: '+$_.Exception.Message)
+ try{
+  $nativeArtifact=Join-Path $fixture 'background-native/test-artifacts'
+  $flowPath=Join-Path $nativeArtifact 'native-flow.json'
+  if(Test-Path -LiteralPath $flowPath){
+   $flow=Get-Content -Raw -LiteralPath $flowPath|ConvertFrom-Json -AsHashtable
+   Write-Host ('Native flow failure: '+(@{state=$flow.state;safe_error=$flow['safe_error'];completed_checks=@($flow.cases).Count;last_checks=@($flow.cases|Select-Object -Last 5 -ExpandProperty name)}|ConvertTo-Json -Compress))
+  }
+  $commandsPath=Join-Path $nativeArtifact 'commands.jsonl'
+  if(Test-Path -LiteralPath $commandsPath){
+   $recent=@(Get-Content -LiteralPath $commandsPath -Tail 5|ForEach-Object{$_|ConvertFrom-Json}|Select-Object at,command,ok,error_code)
+   Write-Host ('Recent redacted commands: '+(ConvertTo-Json -InputObject $recent -Compress))
+  }
+ }catch{Write-Warning 'Native diagnostic summary unavailable; original failure preserved.'}
  throw
 }finally{
  $prefix=[IO.Path]::GetFullPath((Join-Path $ProjectRoot '.test-output')).TrimEnd('\')+'\'
