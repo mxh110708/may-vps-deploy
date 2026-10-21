@@ -87,8 +87,8 @@ class HttpServer6(http.server.ThreadingHTTPServer):
     address_family = socket.AF_INET6
 
 
-def socks_http(proxy_port, target_port, ipv6=False):
-    with socket.create_connection(('127.0.0.1', proxy_port), timeout=5) as sock:
+def socks_http(proxy_port, target_port, ipv6=False, timeout=5):
+    with socket.create_connection(('127.0.0.1', proxy_port), timeout=timeout) as sock:
         sock.sendall(b'\x05\x01\x00')
         assert sock.recv(2) == b'\x05\x00', 'SOCKS authentication failed'
         address = b'\x04' + socket.inet_pton(socket.AF_INET6, '::1') if ipv6 else b'\x01\x7f\x00\x00\x01'
@@ -103,6 +103,22 @@ def socks_http(proxy_port, target_port, ipv6=False):
                 break
             response += block
         assert b'MXH_LOOPBACK_OK' in response, f'TCP payload did not complete ({len(response)} response bytes)'
+
+
+def wait_proxy_ready(proxy_port, target_port, ipv6=False):
+    # Mihomo creates its listeners before provider loading, GC and OnRunning.
+    # A listening socket alone can accept SOCKS and then drop external traffic.
+    # Only this bounded, read-only fixture readiness probe may repeat; the actual
+    # TCP/UDP upgrade and rollback acceptance below still runs without retries.
+    deadline = time.monotonic() + 8
+    while True:
+        try:
+            socks_http(proxy_port, target_port, ipv6, timeout=1)
+            return
+        except (OSError, AssertionError) as error:
+            if time.monotonic() >= deadline:
+                raise AssertionError('Mihomo loopback data plane did not become ready') from error
+            time.sleep(.05)
 
 
 def fetch_asset(entry, assets):
@@ -244,6 +260,7 @@ def exercise_ss(binary, root, server, client, http_port, echo_port, mihomo=None,
             profile = write_json(root / 'mihomo-run.json', config)
             command([mihomo, '-t', '-d', root, '-f', profile])
             with running(mihomo, profile, root, mixed):
+                wait_proxy_ready(mixed, http_port, ipv6)
                 socks_http(mixed, http_port, ipv6)
 
 

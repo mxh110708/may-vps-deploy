@@ -26,4 +26,12 @@
     <Content Include="../../assets/gui/fonts/*.ttf" Link="Fonts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../assets/gui/fonts/*-OFL.txt" Link="Fonts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- WinUI's unpackaged build outputs must also be present in dotnet publish. -->
+  <Target Name="PublishApplicationXamlResources" AfterTargets="ComputeFilesToPublish">
+    <Error Condition="!Exists('$(TargetDir)App.xbf') Or !Exists('$(TargetDir)$(AssemblyName).pri')" Text="Compiled WinUI application resources are missing." />
+    <ItemGroup>
+      <ResolvedFileToPublish Include="$(TargetDir)App.xbf" RelativePath="App.xbf" CopyToPublishDirectory="PreserveNewest" />
+      <ResolvedFileToPublish Include="$(TargetDir)$(AssemblyName).pri" RelativePath="$(AssemblyName).pri" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 </Project>

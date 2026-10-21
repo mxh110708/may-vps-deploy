@@ -29,6 +29,7 @@ try{
  $installArgs=@('/SP-','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NOICONS',('/DIR='+$app))
  Assert-Desktop ((Invoke-DesktopFixtureProcess $first.Installer $installArgs) -eq 0) 'real installer installs to isolated directory with spaces and Chinese'
  Assert-Desktop (Test-Path -LiteralPath (Join-Path $app 'May-VPS-Deploy.exe')) 'native desktop EXE installed'
+ foreach($resource in @('App.xbf','May-VPS-Deploy.pri')){Assert-Desktop ((Get-Item -LiteralPath (Join-Path $app $resource)).Length -gt 0) ('installed compiled WinUI resource: '+$resource)}
  $kernelCatalog=Get-Content -Raw -LiteralPath (Join-Path $app 'config/kernel-catalog.json')|ConvertFrom-Json -AsHashtable
  $kernelFile=Join-Path $app 'assets/kernel/kernel.deb'
  Assert-Desktop ((Get-Item -LiteralPath $kernelFile).Length -eq $kernelCatalog.Prebuilt.Bytes -and (Get-FileHash -LiteralPath $kernelFile).Hash.ToLowerInvariant() -eq $kernelCatalog.Prebuilt.Sha256) 'installer preserves the exact fixed precompiled kernel'
