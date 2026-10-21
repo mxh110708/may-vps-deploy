@@ -63,6 +63,10 @@ def running(binary, config, root, listening_port):
                         raise AssertionError('core not ready: ' + log.read_text()[-2000:])
                     time.sleep(.05)
             yield
+        except BaseException:
+            output.flush()
+            print(f'Core runtime failure ({binary.name}, {config.name}):\n{log.read_text()[-4000:]}', flush=True)
+            raise
         finally:
             process.terminate()
             try:
@@ -98,7 +102,7 @@ def socks_http(proxy_port, target_port, ipv6=False):
             if not block:
                 break
             response += block
-        assert b'MXH_LOOPBACK_OK' in response, 'TCP payload did not complete'
+        assert b'MXH_LOOPBACK_OK' in response, f'TCP payload did not complete ({len(response)} response bytes)'
 
 
 def fetch_asset(entry, assets):
@@ -233,7 +237,7 @@ def exercise_ss(binary, root, server, client, http_port, echo_port, mihomo=None,
         if mihomo:
             mixed = port()
             outbound = client['outbounds'][-1]
-            config = {'mixed-port': mixed, 'bind-address': '127.0.0.1', 'mode': 'rule', 'log-level': 'warning', 'ipv6': True,
+            config = {'mixed-port': mixed, 'bind-address': '127.0.0.1', 'mode': 'rule', 'log-level': 'info', 'ipv6': True,
                       'proxies': [{'name': 'fixture', 'type': 'ss', 'server': '127.0.0.1', 'port': outbound['server_port'],
                                    'cipher': outbound['method'], 'password': outbound['password'], 'udp': True}],
                       'rules': ['MATCH,fixture']}
