@@ -2,11 +2,13 @@
 
 面向个人 Debian VPS 的中文部署与运维工具，由 Windows 控制端统一管理部署计划、远端操作、私有归档和客户端配置。
 
+v0.9.34 整合七轮配置与链路扩展：分享链接导入、来源刷新与差异预览、输出处理、连接图和按需诊断；Reality / AnyTLS 的服务器固定落地、TCP 目的地及多落地分流；新增按输出规则复制或保存分享列表。每个落地分别验收，无法完整表达的客户端链路和 ECH 参数不会被静默删除。详见[设计与实施索引](docs/FLYX-DESIGN-REVIEW-2026-10-20.zh-CN.md)、[第七轮分享导出](docs/CLIENT-SHARE-ROUND-7-2026-10-21.zh-CN.md)和[发行验证](docs/TESTING-0.9.34.zh-CN.md)。
+
 v0.9.31 将项目与应用统一更名为 May VPS Deploy，采用独立安装身份、私人归档目录和凭据加密格式。旧版由用户自行卸载；迁移前先备份，再导入新目录。GitHub 账号保持不变。详见[全新安装迁移说明](docs/BRAND-MIGRATION-2026-10-20.zh-CN.md)。
 
 v0.9.30 统一新方案的城市/湾区命名：LA 入口与 SF 湾区入口分别建组，SF 包含 San Jose。IPv4、IPv6 落地出口可分别保存节点名，避免重新提取时恢复旧名称；改名保留原连接与凭据。详见[命名约定与归档同步](docs/CITY-NAMING-2026-10-19.zh-CN.md)。
 
-正式版为 [v0.9.31](https://github.com/mxh110708/may-vps-deploy/releases/tag/v0.9.31)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+正式版为 [v0.9.34](https://github.com/mxh110708/may-vps-deploy/releases/tag/v0.9.34)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
 
 v0.9.28 将 BBR v3 改用 Google 官方 `google/bbr` v3 源码。固定版由 May 在开发机预编译，内核包、通用配置和校验清单随应用提供，小 VPS 只接收、验证和安装；不提供最新提交选择或 VPS 在线编译，固定包随应用版本更新。审阅展示真实基础版本、日期、提交及包 SHA256，不标作 Google 官方二进制或最新 LTS。旧版 XanMod 来源及其事务兼容处理已移除；默认仍沿用 VPS 原有内核。详见[网络调优流程](docs/NETWORK-TUNING.zh-CN.md)、[预编译维护](docs/GOOGLE-BBR-PREBUILT.zh-CN.md)及[安装启动验证](docs/GOOGLE-BBR-PREBUILT-2026-10-16.zh-CN.md)。下方 v0.9.16–v0.9.18 的内核发行、签名与 LTS 描述属于当时的第三方实现。
 
@@ -171,6 +173,18 @@ AnyTLS 和 Reality 本机 HTTPS 目标的准备步骤，见[证书与域名配�
 | 退役 | 分级清理受管组件，保留 SSH 和基础系统，不删除服务商实例 |
 
 ### 配置设计
+
+节点页支持批量分享链接预览导入（VLESS Reality + Vision、AnyTLS、Shadowsocks），连接页分别展示入口、落地和网站出口地址族，并可按具体路径执行可取消的轻量诊断。仍沿用生成、核心校验和审阅导出流程；详情见[第一轮配置设计扩展](docs/CLIENT-ROUTES-ROUND-1-2026-10-20.zh-CN.md)。
+
+第二轮增加可预览的输出筛选、显示名处理与排序、分客户端能力报告，以及可取消的手动订阅获取和刷新。来源更新保留稳定节点身份并阻止本地冲突覆盖；详见[第二轮输出与来源扩展](docs/CLIENT-OUTPUT-ROUND-2-2026-10-20.zh-CN.md)。
+
+第三轮在实例维护页增加服务器固定下一跳：先支持 AnyTLS 入站经 Shadowsocks / SS2022 落地出网，提供独立审阅、组件恢复点、配置漂移检查、实际出口与 UDP 验收，以及恢复原出口策略的移除操作。详见[第三轮服务器出站](docs/SERVER-OUTBOUND-ROUND-3-2026-10-21.zh-CN.md)。
+
+第四轮将固定下一跳扩展到 Xray Reality，覆盖其主备端口和双栈监听；增加来源变化、缺失与受管凭据变化提示，并检查升级、轮换和恢复时保留链路及其他组件。详见[第四轮 Reality 与链路维护](docs/REALITY-OUTBOUND-ROUND-4-2026-10-21.zh-CN.md)。
+
+第五轮增加有顺序的服务器 TCP 域名／CIDR 分流例外、直连／落地／阻断、匹配试算和组件草稿隔离；UDP 保持原固定落地。详见[第五轮目的地分流](docs/SERVER-DESTINATION-RULES-ROUND-5-2026-10-21.zh-CN.md)。
+
+第六轮增加服务器 TCP 多落地：默认落地外可添加最多 7 个独立落地，规则明确选择去向，每个附加落地分别校验 TLS 和预期出口，并纳入升级、轮换和恢复；UDP 继续使用默认落地。详见[第六轮多落地分流](docs/SERVER-MULTI-HOP-ROUND-6-2026-10-21.zh-CN.md)。
 
 从桌面 **配置设计 → 创建方案** 开始：点亮 sing-box 和/或 Clash，再添加节点、确认连接关系、生成、校验并审阅导出。两个目标独立开关，点亮两个就都生成；仅要求所选目标的来源和输出路径。命令行对应主菜单 **7**。
 

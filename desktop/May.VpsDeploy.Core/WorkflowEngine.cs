@@ -55,6 +55,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
                 case OperationKind.CheckComponentUpdate: await CheckComponentUpdate(context); break;
                 case OperationKind.InstallComponent: await InstallComponent(context); break;
                 case OperationKind.MeasureNetwork: await MeasureNetwork(context); break;
+                case OperationKind.ServerOutbound: await ConfigureServerOutbound(context); break;
                 case OperationKind.TuneNetwork: await TuneMeasuredNetwork(context); break;
                 default: await Maintain(context); break;
             }

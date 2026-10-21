@@ -4,6 +4,20 @@ namespace May.VpsDeploy.Core;
 
 public static class ClientSchemes
 {
+    public static void RenameNodeReferences(JsonObject scheme, string previous, string current)
+        => RemapNodeReferences(scheme, new Dictionary<string, string>(StringComparer.Ordinal) { [previous] = current });
+    public static void RemapNodeReferences(JsonObject scheme, IReadOnlyDictionary<string, string> names, IReadOnlySet<string>? removed = null)
+    {
+        var layout = scheme["Layout"]!;
+        void Replace(JsonObject target, string key)
+        {
+            if (target[key] is not JsonArray order) return;
+            target[key] = new JsonArray(order.Select(n => n!.ToString()).Where(n => removed?.Contains(n) != true || names.ContainsKey(n)).Select(n => (JsonNode?)JsonValue.Create(names.GetValueOrDefault(n, n))).ToArray());
+        }
+        Replace(layout.AsObject(), "default_exit_members");
+        foreach (var group in layout["business_groups"]!.AsArray().OfType<JsonObject>())
+        { var old = group.Text("default"); group["default"] = names.GetValueOrDefault(old, removed?.Contains(old) == true ? "" : old); Replace(group, "order"); }
+    }
     public static bool UpgradeLayout(JsonObject scheme)
     {
         if (scheme["Layout"] is not JsonObject layout || layout["business_groups"] is not JsonArray groups) throw new OperationException("方案缺少业务组布局。");
@@ -54,6 +68,12 @@ public static class ClientSchemes
     public static IEnumerable<(string Format, string Path)> SelectedTargets(JsonObject model, string clash, string sing) => Formats(model).Select(format => (format, format == "Clash" ? clash : sing));
     public static JsonObject Specification(JsonObject scheme)
     {
+        var effective = ClientOutputRules.RequireReady(scheme);
+        var spec = SpecificationRaw(effective); spec["processing_fingerprint"] = ClientOutputRules.Fingerprint(scheme);
+        spec["strict_removed_defaults"] = scheme.Flag("OutputRules.Enabled") || scheme["NodeSources"] is JsonArray { Count: > 0 }; return spec;
+    }
+    private static JsonObject SpecificationRaw(JsonObject scheme)
+    {
         var formats = Formats(scheme);
         var nodes = scheme["Nodes"]!.AsArray(); var layout = scheme["Layout"]!.AsObject();
         if (nodes.Count == 0 || nodes.Select(n => n!.Text("name")).Distinct().Count() != nodes.Count) throw new OperationException("请添加节点，名称不能重复。");
@@ -74,6 +94,7 @@ public static class ClientSchemes
         var business = new[] { exit, direct }.Concat(regions).Concat(landings).ToArray();
         foreach (var definition in layout["business_groups"]!.AsArray())
         {
+            if (definition!.Text("default") == "") throw new OperationException("业务组“" + definition.Text("name") + "”的默认出口已移除，请重新指定。");
             var first = business.Contains(definition!.Text("default")) ? definition.Text("default") : exit;
             var members = new[] { first }.Concat(definition.Strings("order").Where(business.Contains)).Concat(business);
             if (definition.Flag("include_block")) members = members.Append("BLOCK"); Group(definition.Text("name"), members);

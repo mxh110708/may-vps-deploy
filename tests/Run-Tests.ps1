@@ -1768,6 +1768,10 @@ if($pythonCommandForClient){
     if ($LASTEXITCODE -ne 0) { throw 'Tunnel public access probe regressions failed.' }
 }
 if($bash -and $pythonCommandForClient){
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_server_outbound.py') --bash $bash
+    if($LASTEXITCODE -ne 0){throw 'Server outbound routing guard tests failed.'}
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_server_hops.py') --bash $bash
+    if($LASTEXITCODE -ne 0){throw 'Server multi-hop probe guard tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_remote_transactions.py') --bash $bash
     if($LASTEXITCODE -ne 0){throw 'Remote transaction guard tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_scoped_rollback.py') --bash $bash

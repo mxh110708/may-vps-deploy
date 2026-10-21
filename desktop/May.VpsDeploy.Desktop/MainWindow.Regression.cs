@@ -87,6 +87,9 @@ public sealed partial class MainWindow
             scheme["Nodes"] = new JsonArray(new JsonObject { ["name"] = "未连接的落地", ["kind"] = "landing", ["transit_group"] = "无效入口" }); var fingerprint = ArchiveStore.Fingerprint(scheme); designerStep = 2; SelectPage("clients");
             Require(ArchiveStore.Fingerprint(scheme) == fingerprint && Find<TextBlock>(shell).Any(t => t.Text == "需要补全连接"), "显示连接页面时静默改写了落地关系。"); proof["connection_render_readonly"] = true; scheme = null;
             proof["save_path_picker"] = await SavePathPickerRegression();
+            proof["client_routes"] = await ClientRoutesRegression(outputDirectory);
+            proof["client_output"] = await ClientOutputRegression(outputDirectory);
+            proof["server_outbound"] = await ServerOutboundRegression(outputDirectory);
             deploymentForm.Remove("Roles"); deploymentForm["Role"] = "RealityEntry"; deploymentForm["Existing"] = false; SelectPage("deploy");
             Find<CheckBox>(shell).Single(b => b.Tag as string == "Purpose.AnyTlsEntry").IsChecked = true; await Task.Delay(80);
             Find<CheckBox>(shell).Single(b => b.Tag as string == "Purpose.ShadowsocksLanding").IsChecked = true; await Task.Delay(80);

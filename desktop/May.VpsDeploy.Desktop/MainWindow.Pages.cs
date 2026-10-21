@@ -64,6 +64,9 @@ public sealed partial class MainWindow
             var previous = index < 0 ? null : nodes[index];
             var node = new JsonObject { ["name"] = item.Node.Name, ["kind"] = item.Node.Role == "ShadowsocksLanding" ? "landing" : "entry", ["region_group"] = previous?.Text("region_group", "US-West-LA Entry") ?? "US-West-LA Entry", ["transit_group"] = previous?.Text("transit_group", item.Plan.Text("Shadowsocks.ClientTransitTag", "US-West-LA Entry")) ?? item.Plan.Text("Shadowsocks.ClientTransitTag", "US-West-LA Entry"), ["clash"] = item.Node.Clash.DeepClone(), ["sing_box"] = item.Node.SingBox.DeepClone(), ["ManagedOrigin"] = ManagedNodeSources.Origin(item.Relative, item.Node) };
             if (previous?["AuthorityName"] != null) node["AuthorityName"] = previous["AuthorityName"]!.DeepClone();
+            node["Id"] = previous?.Text("Id", Guid.NewGuid().ToString("N")) ?? Guid.NewGuid().ToString("N");
+            node["Egress"] = new JsonObject { ["Family"] = item.Node.EgressFamily, ["ExpectedAddress"] = ServerOutboundRouting.EgressAddress(item.Plan, item.Node.Role, item.Node.EgressFamily == "IPv6" ? item.Plan.Text("Shadowsocks.SecondaryIpv6Address") : item.Plan.Text("Server.IPv4")) };
+            if (ServerOutboundRouting.Roles.Contains(item.Node.Role) && item.Plan.At("ServerOutbound." + item.Node.Role) is JsonObject route) node["ServerRoute"] = new JsonObject { ["Name"] = route.Text("Name"), ["Endpoint"] = route.Text("Endpoint"), ["DestinationRules"] = route["DestinationRules"]?.DeepClone(), ["AdditionalHopCount"] = (route["AdditionalHops"] as JsonArray)?.Count ?? 0 };
             if (index < 0) nodes.Add(node); else nodes[index] = node;
         }
         DirtyScheme();
@@ -102,16 +105,23 @@ public sealed partial class MainWindow
         var echLines = existing?.At("sing_box.tls.ech.config") as JsonArray;
         var model = new JsonObject { ["Name"] = existing?.Text("name") ?? "", ["Role"] = Read("clash.type", "sing_box.type") switch { "ss" or "shadowsocks" => "ShadowsocksLanding", "anytls" => "AnyTlsEntry", _ => "RealityEntry" }, ["Address"] = Read("clash.server", "sing_box.server"), ["Port"] = existing?.Number("clash.port", existing.Number("sing_box.server_port", 443)) ?? 443, ["Region"] = existing?.Text("region_group", "US-West-LA Entry") ?? "US-West-LA Entry", ["Transit"] = existing?.Text("transit_group", "US-West-LA Entry") ?? "US-West-LA Entry", ["Sni"] = Read("clash.servername", "clash.sni", Read("sing_box.tls.server_name", "sing_box.tls.server_name")), ["Uuid"] = Read("clash.uuid", "sing_box.uuid"), ["PublicKey"] = Read("clash.reality-opts.public-key", "sing_box.tls.reality.public_key"), ["ShortId"] = Read("clash.reality-opts.short-id", "sing_box.tls.reality.short_id"), ["Ech"] = existing?.Text("clash.ech-opts.config", echLines == null ? "" : string.Join("", echLines.Select(l => l!.ToString()).Where(l => !l.StartsWith("-----")))) ?? "", ["Method"] = Read("clash.cipher", "sing_box.method", "2022-blake3-aes-128-gcm") };
         var password = SecretField("密码 / SS2022 组合密钥", Read("clash.password", "sing_box.password"));
+        model["Kind"] = existing?.Text("kind") ?? (model.Text("Role") == "ShadowsocksLanding" ? "landing" : "entry");
+        model["EgressFamily"] = existing == null ? "Unknown" : ClientTopology.EgressFamily(existing);
+        model["ExpectedAddress"] = existing?.Text("Egress.ExpectedAddress") ?? "";
         var uuid = SecretField("UUID", model.Text("Uuid"));
         var role = Choice("协议", model, "Role", DeploymentPlans.Roles[..3].Select(value => (value, RoleLabel(value)))); if (existing != null) role.IsEnabled = false;
-        var specifics = new StackPanel { Spacing = 16 }; var panel = Column(Fields(Field("节点名称", model, "Name"), role, Field("服务器地址", model, "Address"), Field("端口", model, "Port", numeric: true)), specifics); panel.MinWidth = 380;
+        var kind = Choice("节点用途", model, "Kind", [("entry", "入口"), ("landing", "经入口连接的落地")]);
+        var specifics = new StackPanel { Spacing = 16 }; var panel = Column(Fields(Field("节点名称", model, "Name"), role, Field("服务器地址", model, "Address"), Field("端口", model, "Port", numeric: true)), kind, specifics,
+            Fields(Choice("网站出口地址族（不确定时保持未知）", model, "EgressFamily", [("Unknown", "未知 · 诊断时观测"), ("IPv4", "IPv4"), ("IPv6", "IPv6")]), Field("预期网站出口 IP（可选，用于诊断核验）", model, "ExpectedAddress"))); panel.MinWidth = 380;
         void Refresh()
         {
             specifics.Children.Clear();
-            if (model.Text("Role") == "ShadowsocksLanding") { specifics.Children.Add(Fields(Choice("连接的入口组", model, "Transit", activeScheme["Layout"]!.Strings("region_groups").Select(r => (r, r))), Field("Shadowsocks 方法", model, "Method"))); specifics.Children.Add(password); }
-            else { specifics.Children.Add(Fields(Choice("入口地区", model, "Region", activeScheme["Layout"]!.Strings("region_groups").Select(r => (r, r))), Field("SNI", model, "Sni"))); if (model.Text("Role") == "RealityEntry") { specifics.Children.Add(uuid); specifics.Children.Add(Fields(Field("Reality 公钥", model, "PublicKey"), Field("short-id", model, "ShortId"))); } else { specifics.Children.Add(password); specifics.Children.Add(Field("ECH 客户端配置", model, "Ech")); } }
+            var isLanding = model.Text("Kind") == "landing";
+            specifics.Children.Add(Choice(isLanding ? "连接的入口组" : "入口地区", model, isLanding ? "Transit" : "Region", activeScheme["Layout"]!.Strings("region_groups").Select(r => (r, r))));
+            if (model.Text("Role") == "ShadowsocksLanding") { specifics.Children.Add(Field("Shadowsocks 方法", model, "Method")); specifics.Children.Add(password); }
+            else { specifics.Children.Add(Field("SNI", model, "Sni")); if (model.Text("Role") == "RealityEntry") { specifics.Children.Add(uuid); specifics.Children.Add(Fields(Field("Reality 公钥", model, "PublicKey"), Field("short-id", model, "ShortId"))); } else { specifics.Children.Add(password); specifics.Children.Add(Field("ECH 客户端配置（未使用时留空）", model, "Ech")); } }
         }
-        role.SelectionChanged += (_, _) => Refresh(); Refresh();
+        role.SelectionChanged += (_, _) => Refresh(); kind.SelectionChanged += (_, _) => Refresh(); Refresh();
         var dialog = new ContentDialog { XamlRoot = shell.XamlRoot, RequestedTheme = ElementTheme.Dark, Title = existing == null ? "添加节点" : "编辑节点", Content = new ScrollViewer { Content = panel, MaxHeight = 500 }, PrimaryButtonText = "保存", CloseButtonText = "取消" };
         if (await ShowDialog(dialog) != ContentDialogResult.Primary) { password.Password = ""; uuid.Password = ""; return; }
         model["Uuid"] = uuid.Password.Trim(); uuid.Password = "";
@@ -120,6 +130,7 @@ public sealed partial class MainWindow
         var fakePlan = new JsonObject { ["NodeName"] = model.Text("Name"), ["Role"] = model.Text("Role"), ["Server"] = new JsonObject { ["IPv4"] = model.Text("Address"), ["IPv6"] = "" }, ["Ports"] = new JsonObject { ["XrayPrimary"] = model.Number("Port"), ["AnyTlsPrimary"] = model.Number("Port"), ["LandingShadowsocks"] = model.Number("Port") }, ["Reality"] = new JsonObject { ["ServerName"] = model.Text("Sni") }, ["AnyTls"] = new JsonObject { ["ServerName"] = model.Text("Sni") }, ["Shadowsocks"] = new JsonObject { ["Method"] = model.Text("Method") } };
         var fakeSecrets = new JsonObject { ["Xray"] = new JsonObject { ["Uuid"] = model.Text("Uuid"), ["RealityClientKey"] = model.Text("PublicKey"), ["ShortId"] = model.Text("ShortId") }, ["AnyTls"] = new JsonObject { ["Password"] = password.Password, ["EchClientConfigPem"] = "-----BEGIN ECH CONFIGS-----\n" + model.Text("Ech") + "\n-----END ECH CONFIGS-----\n" }, ["Shadowsocks"] = new JsonObject { ["ServerKey"] = password.Password.Split(':')[0], ["PrimaryUserKey"] = password.Password.Contains(':') ? password.Password[(password.Password.IndexOf(':') + 1)..] : "" } };
         var pair = ClientProfiles.Nodes(fakePlan, fakeSecrets).First();
+        if (model.Text("Role") == "AnyTlsEntry" && model.Text("Ech") == "") { pair.Clash.Remove("ech-opts"); pair.SingBox["tls"]!.AsObject().Remove("ech"); }
         pair.Clash["name"] = model.Text("Name"); pair.SingBox["tag"] = model.Text("Name");
         if (model.Text("Role") == "ShadowsocksLanding") { pair.Clash["password"] = password.Password; pair.SingBox["password"] = password.Password; }
         // Preserve legitimate advanced node settings when editing the fields exposed by this form.
@@ -128,9 +139,19 @@ public sealed partial class MainWindow
         {
             foreach (var field in new[] { "name", "server", "port", "uuid", "servername", "sni", "password", "cipher", "reality-opts.public-key", "reality-opts.short-id", "ech-opts.config" }) if (pair.Clash.At(field) is JsonNode value) clash.Put(field, value.DeepClone());
             foreach (var field in new[] { "tag", "server", "server_port", "uuid", "password", "method", "tls.server_name", "tls.reality.public_key", "tls.reality.short_id", "tls.ech.config" }) if (pair.SingBox.At(field) is JsonNode value) sing.Put(field, value.DeepClone());
+            if (model.Text("Role") == "AnyTlsEntry" && model.Text("Ech") == "") { clash.Remove("ech-opts"); sing["tls"]!.AsObject().Remove("ech"); }
+            if (existing.Text("kind") == "landing" && model.Text("Kind") == "entry")
+            {
+                if (clash.Text("dialer-proxy") == existing.Text("transit_group")) clash.Remove("dialer-proxy");
+                if (sing.Text("detour") == existing.Text("transit_group")) sing.Remove("detour");
+            }
         }
-        var node = new JsonObject { ["name"] = model.Text("Name"), ["kind"] = model.Text("Role") == "ShadowsocksLanding" ? "landing" : "entry", ["region_group"] = model.Text("Region"), ["transit_group"] = model.Text("Transit"), ["clash"] = clash, ["sing_box"] = sing };
+        var node = new JsonObject { ["Id"] = existing?.Text("Id", Guid.NewGuid().ToString("N")) ?? Guid.NewGuid().ToString("N"), ["name"] = model.Text("Name"), ["kind"] = model.Text("Kind"), ["region_group"] = model.Text("Region"), ["transit_group"] = model.Text("Transit"), ["clash"] = clash, ["sing_box"] = sing,
+            ["Egress"] = new JsonObject { ["Family"] = model.Text("EgressFamily"), ["ExpectedAddress"] = model.Text("ExpectedAddress").Trim() } };
         if (existing?["AuthorityName"] != null) node["AuthorityName"] = existing["AuthorityName"]!.DeepClone();
+        if (existing?["Source"] != null) { node["Source"] = existing["Source"]!.DeepClone(); node["Source"]!["Modified"] = ClientNodeImport.ConnectionFingerprint(node) != node.Text("Source.Fingerprint"); }
+        if (existing?["ManagedOrigin"] is JsonObject origin && ClientNodeImport.ConnectionFingerprint(existing) == ClientNodeImport.ConnectionFingerprint(node)) node["ManagedOrigin"] = origin.DeepClone();
+        if (existing != null && existing.Text("name") != node.Text("name")) ClientSchemes.RenameNodeReferences(activeScheme, existing.Text("name"), node.Text("name"));
         if (index.HasValue) activeScheme["Nodes"]!.AsArray()[index.Value] = node; else activeScheme["Nodes"]!.AsArray().Add(node); password.Password = ""; fakeSecrets.Clear(); DirtyScheme();
     }
     private async Task EditBusinessGroups()

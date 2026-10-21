@@ -21,7 +21,8 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
             kernelCatalog = BbrKernels.Catalog(store.Paths);
             if (kernelCatalog.Text("Id") != snapshot.Options.Text("CatalogId") || kernelCatalog.Text("Sha256") != snapshot.Options.Text("CatalogSha256") || kernelCatalog.Text("Commit") != snapshot.Options.Text("SourceCommit")) throw new OperationException("源码候选与待审阅目标不一致，请重新选择版本。");
         }
-        return new(snapshot, Fingerprint(snapshot), planHash, OperationPolicy.Summary(snapshot, kernelCatalog));
+        var summary = snapshot.Kind == OperationKind.ServerOutbound ? ServerOutboundRouting.Prepare(store, snapshot).Summary : OperationPolicy.Summary(snapshot, kernelCatalog);
+        return new(snapshot, Fingerprint(snapshot), planHash, summary);
     }
     public static string Fingerprint(OperationRequest request) => ArchiveStore.Fingerprint(new JsonObject
     {
@@ -38,6 +39,13 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
             var measurement = NetworkTuning.ReadReport(directory, id); files["NetworkPeer"] = NetworkTuning.PeerArchiveFingerprint(store, measurement["Options"]!.AsObject());
         }
         if (request.Kind == OperationKind.MeasureNetwork) files["NetworkPeer"] = NetworkTuning.PeerArchiveFingerprint(store, request.Options);
+        if (request.Kind == OperationKind.ServerOutbound)
+        {
+            files["ServerOutboundConfig"] = ClientSchemes.SourceFingerprint(SafePath.Resolve(directory, ServerOutboundRouting.ConfigRelative(request.Options.Text("Protocol"))));
+            if (request.Options.Text("Action") == "Apply") files["ServerOutboundSource"] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, request.Options.Text("SchemeId")));
+            foreach (var hop in ServerOutboundRouting.HopReferences(request.Options["AdditionalHops"]).OfType<JsonObject>()) files["ServerOutboundSource:" + hop.Text("Id")] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, hop.Text("SchemeId")));
+            foreach (var asset in new[] { "server-outbound-read.sh", "server-outbound-apply.sh", "server-hop-probe.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve("assets/remote/" + asset));
+        }
         if (request.Kind == OperationKind.BbrKernel)
         {
             foreach (var name in new[] { "config/kernel-catalog.json", "scripts/kernel-runtime.py", "scripts/kernel-engine.py", "scripts/bbr-runtime.py", "assets/kernel/commit.json", "assets/kernel/Makefile", "assets/kernel/tcp_bbr.c", "assets/remote/kernel-audit.sh", "assets/remote/kernel-prepare.sh", "assets/remote/kernel-status.sh", "assets/remote/kernel-boot.sh", "assets/remote/kernel-confirm.sh", "assets/remote/kernel-rollback.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
@@ -93,6 +101,7 @@ public static class OperationPolicy
     public static void Validate(OperationRequest request)
     {
         if (!Enum.IsDefined(request.Kind)) throw new OperationException("未知任务类型。");
+        if (request.Kind == OperationKind.ServerOutbound) ServerOutboundRouting.ValidateOptions(request.Options);
         if (request.Kind == OperationKind.BbrKernel) BbrKernels.Validate(request.Options);
         if (request.Kind == OperationKind.CheckComponentUpdate) ComponentUpdates.ValidateQuery(request.Options);
         if (request.Kind == OperationKind.Upgrade || request.Kind == OperationKind.Komari && request.Options.Text("Action") == "Upgrade") ComponentUpdates.ValidateOptions(request);
@@ -132,6 +141,7 @@ public static class OperationPolicy
     }
     public static string TargetLabel(OperationRequest request) => request.Kind switch
     {
+        OperationKind.ServerOutbound => ServerOutboundRouting.Label(request.Options.Text("Protocol")) + " · 服务器固定下一跳",
         OperationKind.CheckComponentUpdate => ComponentUpdates.Label(request.Options.Text("Component")) + " · 查询官方最新稳定版",
         OperationKind.InstallComponent => "追加安装 · " + ComponentInstallations.SelectionLabel(request.Options),
         OperationKind.TunnelAccess => "Cloudflare Tunnel · 公开访问验证",

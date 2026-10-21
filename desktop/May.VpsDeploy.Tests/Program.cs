@@ -9,6 +9,14 @@ else if (args.Contains("--deployment-only")) await new BoundaryTests(repository)
 else if (args.Contains("--background-only")) await new BoundaryTests(repository).RunBackgroundTests();
 else if (args.Contains("--network-only")) await new BoundaryTests(repository).RunNetworkTests();
 else if (args.Contains("--ssh-only")) await new BoundaryTests(repository).RunSshTests();
+else if (args.Contains("--client-routes-only")) await new BoundaryTests(repository).RunClientRouteTests();
+else if (args.Contains("--client-output-only")) await new BoundaryTests(repository).RunClientOutputTests();
+else if (args.Contains("--server-outbound-only")) await new BoundaryTests(repository).RunServerOutboundTests();
+else if (args.Contains("--reality-outbound-only")) await new BoundaryTests(repository).RunRealityOutboundTests();
+else if (args.Contains("--server-rules-only")) await new BoundaryTests(repository).RunServerDestinationTests();
+else if (args.Contains("--server-hops-only")) await new BoundaryTests(repository).RunServerHopTests();
+else if (args.Contains("--hop-probe-only")) await new BoundaryTests(repository).RunHopProbeTests();
+else if (args.Contains("--client-share-only")) new BoundaryTests(repository).RunClientShareTests();
 else await new BoundaryTests(repository).Run();
 
 internal sealed partial class BoundaryTests(string repository)
@@ -33,6 +41,14 @@ internal sealed partial class BoundaryTests(string repository)
         CloudflareCredentialExperience(f);
         ClientLayoutUpgradeExperience(f);
         CityNamingExperience(f);
+        await ClientRouteExperience(f);
+        using (var outputs = new Fixture(repository)) { await ClientOutputExperience(outputs); ClientSubscriptionExperience(outputs); }
+        await SubscriptionDownloadExperience();
+        using (var serverRoutes = new Fixture(repository)) { await ServerOutboundExperience(serverRoutes); await ServerOutboundLoopback(serverRoutes); }
+        using (var realityRoutes = new Fixture(repository)) { await RealityOutboundExperience(realityRoutes); await RealityOutboundLoopback(realityRoutes); }
+        using (var destinationRules = new Fixture(repository)) { await ServerDestinationExperience(destinationRules); await ServerOutboundLoopback(destinationRules, true); await RealityOutboundLoopback(destinationRules, true); }
+        using (var hops = new Fixture(repository)) { await ServerHopExperience(hops); await ServerOutboundLoopback(hops, withHops: true); await RealityOutboundLoopback(hops, withHops: true); await ServerHopProbeRuntime(hops); }
+        using (var shares = new Fixture(repository)) ClientShareExperience(shares);
         await MonitoringArchiveExperience(f);
         await ComponentUpdateExperience(f);
         await RecoveryExperience(f);

@@ -60,7 +60,7 @@ public sealed class ProtocolValidation(IValidationAssets assets, IExternalToolRu
                     if (http.StatusCode != HttpStatusCode.NoContent) throw new OperationException("协议 HTTPS 验收未返回预期结果。");
                     httpsPassed = true; stage = "出口地址";
                     var egress = (await client.GetStringAsync(node.EgressFamily == "IPv6" ? "https://api64.ipify.org" : "https://api.ipify.org", cancellationToken)).Trim();
-                    var expected = node.EgressFamily == "IPv6" ? plan.Text("Shadowsocks.SecondaryIpv6Address") : plan.Text("Server.IPv4");
+                    var expected = ServerOutboundRouting.EgressAddress(plan, node.Role, node.EgressFamily == "IPv6" ? plan.Text("Shadowsocks.SecondaryIpv6Address") : plan.Text("Server.IPv4"));
                     if (!IPAddress.TryParse(egress, out var address) || address.ToString() != IPAddress.Parse(expected).ToString()) throw new OperationException("协议出口与计划不一致，未计为通过。");
                     egressPassed = true; stage = "UDP DNS";
                     await SocksUdpProbe(port, node.EgressFamily == "IPv6", cancellationToken);

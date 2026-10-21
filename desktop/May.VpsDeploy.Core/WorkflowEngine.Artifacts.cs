@@ -54,6 +54,11 @@ public sealed partial class WorkflowEngine
     }
     private void CleanupUninstalledProtocol(Context c, string role)
     {
+        if (ServerOutboundRouting.Roles.Contains(role))
+        {
+            RestoreRoleChild(c.Plan, new JsonObject(), "ServerOutbound", role);
+            RestoreRoleChild(c.State, new JsonObject(), "ServerOutboundValidation", role);
+        }
         c.Secrets.Remove(role == "RealityEntry" ? "Xray" : role == "AnyTlsEntry" ? "AnyTls" : "Shadowsocks");
         if (c.State["ComponentUpgrades"] is JsonObject upgrades) upgrades.Remove(role);
         if (c.State["InstalledProgramVersions"] is JsonObject programs) programs.Remove(role);

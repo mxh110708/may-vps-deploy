@@ -42,6 +42,8 @@ jobs:
             bash -n "$file"
           done
           python3 tests/test_remote_transactions.py --bash /bin/bash
+          python3 tests/test_server_outbound.py --bash /bin/bash
+          python3 tests/test_server_hops.py --bash /bin/bash
           python3 tests/test_komari_lifecycle.py --bash /bin/bash
           python3 tests/test_health_audit.py
           python3 tests/test_network_runtime.py

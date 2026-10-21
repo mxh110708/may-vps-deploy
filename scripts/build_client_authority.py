@@ -113,7 +113,7 @@ def replace_named(items: list[dict[str, Any]], key: str, replacements: list[dict
     return existing + copy.deepcopy(replacements)
 
 
-def update_node_references(document: dict[str, Any], removed: set[str], renamed: dict[str, str], client: str) -> None:
+def update_node_references(document: dict[str, Any], removed: set[str], renamed: dict[str, str], client: str, strict_defaults: bool = False) -> None:
     # Preserve custom groups, while removing/renaming their references to nodes
     # explicitly owned by this editor. Unrelated nodes and settings stay intact.
     groups = document.get("proxy-groups" if client == "clash" else "outbounds") or []
@@ -128,6 +128,8 @@ def update_node_references(document: dict[str, Any], removed: set[str], renamed:
             fail("removing nodes would empty an existing group; edit its members first")
         if "default" in group:
             value = str(group["default"])
+            if strict_defaults and value in removed and value not in renamed:
+                fail("ClientOutputDefaultRemoved: choose the retained group default before generating")
             group["default"] = renamed.get(value, value) if value not in removed or value in renamed else group[key][0]
     def rename(value: Any) -> None:
         if isinstance(value, dict):
@@ -361,12 +363,12 @@ def main() -> None:
         clash_nodes = [copy.deepcopy(node["clash"]) for node in nodes]
         clash["proxies"] = replace_named(list(clash.get("proxies") or []), "name", clash_nodes, remove_nodes)
         apply_clash_groups(clash, groups, order, remove_groups)
-        update_node_references(clash, remove_nodes, rename_nodes, "clash")
+        update_node_references(clash, remove_nodes, rename_nodes, "clash", bool(spec.get("strict_removed_defaults")))
     if "SingBox" in formats:
         sing_nodes = [copy.deepcopy(node["sing_box"]) for node in nodes]
         sing["outbounds"] = replace_named(list(sing.get("outbounds") or []), "tag", sing_nodes, remove_nodes)
         apply_sing_groups(sing, groups, order, remove_groups)
-        update_node_references(sing, remove_nodes, rename_nodes, "sing_box")
+        update_node_references(sing, remove_nodes, rename_nodes, "sing_box", bool(spec.get("strict_removed_defaults")))
     if spec.get("source_mode") == "GenericTemplate":
         if "Clash" in formats:
             ordered_google_group(clash["proxy-groups"], "name", {})

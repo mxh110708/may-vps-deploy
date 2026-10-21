@@ -39,6 +39,7 @@ public sealed partial class MainWindow
     private async Task<bool> ReviewOperation(ReviewedOperation review)
     {
         var request = review.Request;
+        if (request.Kind == OperationKind.ServerOutbound) return await ShowDialog(OperationDialog("审阅服务器固定下一跳", DialogScroll(Column(Text(request.InstanceRelativePath.Replace("/May-VPS-Deploy", ""), 17), Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
         if (request.Kind == OperationKind.InstallComponent) return await ShowDialog(OperationDialog("审阅追加安装计划", InstallationReview(request), "开始安装")) == ContentDialogResult.Primary;
         if (request.Kind is OperationKind.Deploy or OperationKind.ConnectExisting or OperationKind.Resume or OperationKind.ResumeImport)
         {

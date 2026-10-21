@@ -113,7 +113,10 @@ public sealed partial class MainWindow
     private void DesignerNodes()
     {
         var nodes = scheme!["Nodes"]!.AsArray();
-        page.Children.Add(Trailing(SectionHeading("添加连接节点", Symbol.Link, "拖动左侧手柄调整顺序；也可使用上下按钮。保存方案和导出的配置沿用此顺序。"), Row(Action("添加受管节点", AddManagedNodes), Action("手动添加", () => EditNode(null)))));
+        page.Children.Add(SectionHeading("添加连接节点", Symbol.Link, "拖动左侧手柄调整顺序；也可使用上下按钮。保存方案和导出的配置沿用此顺序。"));
+        var import = Action("导入分享链接", ImportClientLinks); import.Tag = "ClientLinks.Import";
+        page.Children.Add(Row(Action("添加受管节点", AddManagedNodes), Action("手动添加", () => EditNode(null)), import));
+        var subscription = Action("添加订阅来源", AddClientSubscription); subscription.Tag = "ClientSources.Add"; page.Children.Add(subscription); DesignerClientSources();
         if (nodes.Count == 0) { page.Children.Add(Card(Column(Text("还没有节点", 18), Text("先添加至少一个入口节点。使用落地时，再添加落地节点并选择它连接的入口组。", 14, true)))); return; }
         var rows = new List<UIElement>();
         CancelNodeReorder(); nodeDropRows.Clear(); nodeDragSession = Guid.NewGuid().ToString("N");
@@ -122,25 +125,19 @@ public sealed partial class MainWindow
             var index = i; var node = nodes[i]!;
             var up = Action("↑", () => { if (index > 0 && ClientSchemes.MoveNode(scheme!, index, index - 1)) RefreshNodeOrder(); return Task.CompletedTask; }); AutomationProperties.SetName(up, "上移节点"); up.IsEnabled = i > 0;
             var down = Action("↓", () => { if (index < nodes.Count - 1 && ClientSchemes.MoveNode(scheme!, index, index + 2)) RefreshNodeOrder(); return Task.CompletedTask; }); AutomationProperties.SetName(down, "下移节点"); down.IsEnabled = i < nodes.Count - 1;
-            rows.Add(ReorderableNodeRow(scheme!, nodes, index, Row(up, down, Action("编辑", () => EditNode(index)), Action("移除", () => { nodes.RemoveAt(index); DirtyScheme(); return Task.CompletedTask; }))));
+            var actions = Row(up, down, Action("编辑", () => EditNode(index)), Action("移除", () => RemoveClientNode(index)));
+            if (node.Text("Source.Kind") == "Subscription") actions.Children.Add(Action("转为手动", () => DetachClientSourceNode(node.AsObject())));
+            rows.Add(ReorderableNodeRow(scheme!, nodes, index, actions));
         }
         page.Children.Add(SettingsGroup(rows.ToArray()));
     }
     private void DesignerConnections()
     {
         var nodes = scheme!["Nodes"]!.AsArray(); var regions = scheme["Layout"]!.Strings("region_groups").Where(r => nodes.Any(n => n!.Text("kind") == "entry" && n.Text("region_group") == r)).ToArray();
-        page.Children.Add(SectionHeading("连接关系", Symbol.Link, "入口组汇聚入口节点，落地通过所选入口组连接。"));
+        page.Children.Add(SectionHeading("连接关系", Symbol.Link, "以下为方案中的候选路径；客户端决定实际选择。连接地址族与网站出口地址族分别标注。"));
+        if (scheme.Flag("OutputRules.Enabled")) page.Children.Add(Text("此处展示源节点关系；导出时另应用筛选、命名和排序，最终节点及顺序请查看生成预览。", 14, true));
         if (regions.Length == 0) page.Children.Add(Card(Column(Text("先添加入口节点", 18), Action("返回节点", () => { designerStep = 1; Navigate("clients"); return Task.CompletedTask; }, true))));
-        foreach (var region in regions)
-        {
-            var entries = Column(nodes.Where(n => n!.Text("kind") == "entry" && n.Text("region_group") == region).Select(n => (UIElement)Text(n!.Text("name"))).ToArray());
-            var landings = new StackPanel { Spacing = 10 };
-            foreach (var node in nodes.OfType<JsonObject>().Where(n => n.Text("kind") == "landing" && n.Text("transit_group") == region)) landings.Children.Add(Text(node.Text("name")));
-            if (landings.Children.Count == 0) landings.Children.Add(Text("直接使用入口出口", 14, true));
-            var graph = new Grid { ColumnSpacing = 20, RowSpacing = 12 }; graph.ColumnDefinitions.Add(new()); graph.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); graph.ColumnDefinitions.Add(new());
-            graph.Children.Add(Column(Text("入口节点", 14, true), entries)); var arrow = Text("→", 22); arrow.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(arrow, 1); graph.Children.Add(arrow); var right = Column(Text("落地 / 出口", 14, true), landings); Grid.SetColumn(right, 2); graph.Children.Add(right);
-            page.Children.Add(Card(Column(Text(region, 18), graph)));
-        }
+        DesignerTopology();
         var unconnected = nodes.OfType<JsonObject>().Where(n => n.Text("kind") == "landing" && !regions.Contains(n.Text("transit_group"))).Select(n => n.Text("name")).ToArray();
         if (unconnected.Length != 0) page.Children.Add(Card(Column(Text("需要补全连接", 18), Text(string.Join("、", unconnected) + " 尚未连接到有效入口组，请在下方调整连接。", 14, true))));
         var connections = new List<UIElement>();
@@ -161,7 +158,13 @@ public sealed partial class MainWindow
         if (!HasOutput(selected)) { page.Children.Add(Text("请先在目标页点亮需要生成的配置。", 14, true)); return; }
         page.Children.Add(Card(SectionHeading("生成与校验", Symbol.Document, ClientSchemes.OutputLabel(selected) + " · " + selected["Nodes"]!.AsArray().Count + " 个节点 · " + (validated ? "已通过核心校验" : selected["Candidate"] == null ? "尚未生成" : selected.Text("Candidate.ValidationStatus") == "Failed" ? "校验未通过" : "待校验"))));
         page.Children.Add(Text("操作顺序：生成配置 → 校验配置 → 通过后审阅并导出。", 16));
-        var generate = Action("生成配置", async () => { try { await RunBackground("正在生成配置", async token => await workbench.BuildAsync(selected, token)); RememberScheme(); } finally { Navigate("clients"); } Show("配置已生成，方案已保存。", InfoBarSeverity.Success); }, selected["Candidate"] == null); generate.IsEnabled = selected["Nodes"]!.AsArray().Count > 0;
+        var rules = Action("筛选与命名", EditClientOutputRules); rules.Tag = "ClientOutput.Rules";
+        var previewButton = Action("预览与能力报告", PreviewClientOutput); previewButton.Tag = "ClientOutput.Preview";
+        var share = Action("分享节点链接", () => ShareClientLinks(selected)); share.Tag = "ClientShare.Open";
+        var output = ClientOutputRules.Preview(selected);
+        page.Children.Add(Card(Column(Text("输出处理 · " + (selected.Flag("OutputRules.Enabled") ? "已启用" : "沿用源节点"), 17), Row(rules, previewButton, share))));
+        foreach (var issue in output.Issues.Where(i => i.Severity == "Error")) page.Children.Add(Text(issue.Message, 14));
+        var generate = Action("生成配置", async () => { try { await RunBackground("正在生成配置", async token => await workbench.BuildAsync(selected, token)); RememberScheme(); } finally { Navigate("clients"); } Show("配置已生成，方案已保存。", InfoBarSeverity.Success); }, selected["Candidate"] == null); generate.IsEnabled = selected["Nodes"]!.AsArray().Count > 0 && output.Ready;
         var validate = Action("校验配置", async () => { try { await RunBackground("正在校验配置", async token => await workbench.ValidateAsync(selected, token)); RememberScheme(); } finally { Navigate("clients"); } Show("所选客户端的核心校验通过。", InfoBarSeverity.Success); }, selected["Candidate"] != null && !validated); validate.IsEnabled = selected["Candidate"] != null;
         page.Children.Add(Row(generate, validate)); page.Children.Add(GroupLabel("导出位置"));
         var hint = Text(ClientSchemes.ExportHint(selected), 14); hint.Tag = "ExportPrerequisiteHint";

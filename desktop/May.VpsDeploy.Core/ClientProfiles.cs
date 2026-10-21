@@ -5,7 +5,7 @@ namespace May.VpsDeploy.Core;
 
 public static class ClientProfiles
 {
-    public sealed record NodePair(string Name, string Role, string Family, JsonObject Clash, JsonObject SingBox, string EgressFamily = "IPv4", bool IsBackup = false)
+    public sealed record NodePair(string Name, string Role, string Family, JsonObject Clash, JsonObject SingBox, string EgressFamily = "IPv4", bool IsBackup = false, string ServerRouteFingerprint = "")
     {
         public string DisplayName => IsBackup ? Name[..^7] + " · 备用入口" : Name;
     }
@@ -48,7 +48,7 @@ public static class ClientProfiles
                             clash["type"] = "ss"; clash["cipher"] = plan.Text("Shadowsocks.Method"); clash["password"] = password;
                             sing["type"] = "shadowsocks"; sing["method"] = plan.Text("Shadowsocks.Method"); sing["password"] = password;
                         }
-                        yield return new(nodeName, role, family, clash, sing, egress, role == "RealityEntry" && port != plan.Number("Ports.XrayPrimary"));
+                        yield return new(nodeName, role, family, clash, sing, ServerOutboundRouting.EgressFamily(plan, role, egress), role == "RealityEntry" && port != plan.Number("Ports.XrayPrimary"), ServerOutboundRouting.Roles.Contains(role) && plan.At("ServerOutbound." + role) is JsonObject serverRoute ? ArchiveStore.Fingerprint(serverRoute) : "");
                     }
                 }
             }

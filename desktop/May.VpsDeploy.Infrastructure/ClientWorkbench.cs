@@ -55,10 +55,10 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
             scheme["AuthorityNodes"] = new JsonArray(original.Select(n => (JsonNode?)JsonValue.Create(n!.Text("name"))).ToArray());
             foreach (var node in scheme["Nodes"]!.AsArray().OfType<JsonObject>()) if (scheme.Strings("AuthorityNodes").Contains(node.Text("name")) && node["AuthorityName"] == null) node["AuthorityName"] = node.Text("name");
         }
-        var formats = ClientSchemes.Formats(scheme); var specification = ClientSchemes.Specification(scheme); var sources = new JsonObject();
+        var formats = ClientSchemes.Formats(scheme); var specification = ClientSchemes.Specification(scheme); ClientCapabilities.RequireReady(new JsonObject { ["OutputClients"] = scheme.Text("OutputClients", "Both"), ["Nodes"] = specification["manual_nodes"]!.DeepClone() }); var sources = new JsonObject();
         foreach (var format in formats) { var source = scheme.Text(format); if (source == "") throw new OperationException("所选客户端缺少来源文件。"); var fingerprint = ClientSchemes.SourceFingerprint(source); if (scheme["SourceFingerprints"] is JsonObject recorded && recorded.Text(format) != "" && recorded.Text(format) != fingerprint) throw new OperationException("来源在读取后发生变化，请重新读取。"); sources[source] = fingerprint; }
         if (scheme["Sources"] is JsonObject originalSources) foreach (var item in originalSources) { if (ClientSchemes.SourceFingerprint(item.Key) != item.Value!.ToString()) throw new OperationException("节点来源发生变化，请重新读取。"); sources[item.Key] = item.Value.DeepClone(); }
-        var origins = new JsonArray(scheme["Nodes"]!.AsArray().Where(n => n!["ManagedOrigin"] != null).Select(n => n!["ManagedOrigin"]!.DeepClone()).ToArray());
+        var origins = new JsonArray(specification["manual_nodes"]!.AsArray().Where(n => n!["ManagedOrigin"] != null).Select(n => n!["ManagedOrigin"]!.DeepClone()).ToArray());
         ManagedNodeSources.Verify(store, origins);
         var directory = store.Paths.Resolve("private/client-candidates/" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
         ArchiveStore.WriteJson(SafePath.Resolve(directory, "candidate-owner.json"), new JsonObject { ["SchemeId"] = scheme.Text("Id") });
@@ -66,6 +66,7 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
         var args = new List<string> { store.Paths.Resolve("scripts/build_client_authority.py"), "--spec", specFile, "--output", directory };
         foreach (var format in formats) args.AddRange([format == "Clash" ? "--clash" : "--sing-box", scheme.Text(format)]);
         var result = await tools.RunAsync(python, args, null, TimeSpan.FromSeconds(60), cancellationToken);
+        if (result.ExitCode != 0 && result.Error.TrimStart().StartsWith("ClientOutputDefaultRemoved:", StringComparison.Ordinal)) throw new OperationException("输出处理会移除保留的自定义组的显式默认节点，请先调整该组默认值后再生成。", code: "ClientOutputDefaultRemoved");
         result.RequireSuccess("候选生成失败，请检查节点、连接关系与分组。");
         var candidate = new JsonObject { ["SchemeId"] = scheme.Text("Id"), ["OutputClients"] = scheme.Text("OutputClients", "Both"), ["Sources"] = sources, ["SpecFingerprint"] = ArchiveStore.Fingerprint(specification), ["ValidationStatus"] = "Pending", ["Targets"] = new JsonObject() };
         candidate["ManagedSources"] = origins;

@@ -69,6 +69,14 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
     public JsonObject AgentConfiguration { get; set; } = new() { ["endpoint"] = "https://monitor.example.com", ["token"] = "synthetic-agent-token" };
     public JsonObject TunnelAccessAudit { get; set; } = new() { ["Passed"] = true, ["ConnectorReady"] = true, ["LocalVersion"] = "1.5.1", ["PublicVersion"] = "1.5.1", ["Code"] = "" };
     public JsonObject NetworkAudit { get; set; } = NetworkTestData.Observation();
+    public Dictionary<string, byte[]> ProtocolConfigs { get; } = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, byte[]> protocolConfigBackup = new(StringComparer.Ordinal);
+    public Dictionary<string, byte[]> RestoreProtocolConfigs { get; } = new(StringComparer.Ordinal);
+    public bool CorruptRouteOnUpgrade { get; set; }
+    public bool LoseOutboundApplyAcknowledgement { get; set; }
+    public bool LoseOutboundCommitAcknowledgement { get; set; }
+    public bool HopProbeFailure { get; set; }
+    public bool HopProbeIncomplete { get; set; }
     public static JsonObject HealthService(bool installed, bool enabled = false, bool active = false, bool supported = true) => new() { ["Installed"] = installed, ["Enabled"] = enabled, ["Active"] = active, ["SupportedLayout"] = supported, ["ProcessMatchesBinary"] = active ? JsonValue.Create(true) : null };
     public Task<IRemoteSession> OpenAsync(SshEndpoint endpoint, IUserInteraction interaction, CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); Endpoints.Add(endpoint); return Task.FromResult<IRemoteSession>(this); }
     public Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken cancellationToken) => Task.FromResult(new CommandResult(0, ArchiveStore.Digest(Encoding.UTF8.GetBytes("fixture-archive")) + "  file", ""));
@@ -85,6 +93,43 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
         {
             var match = System.Text.RegularExpressions.Regex.Match(payload, "export VPS_PARAM_" + name + "=.+?'([A-Za-z0-9+/=]*)' ");
             return match.Success ? Encoding.UTF8.GetString(Convert.FromBase64String(match.Groups[1].Value)) : "";
+        }
+        if (ProtocolConfigs.Count > 0)
+        {
+            var protocol = Parameter("ROLE");
+            if (asset is "server-outbound-read.sh" or "maintenance-protocol-config-read.sh")
+            {
+                var bytes = ProtocolConfigs[protocol];
+                return Task.FromResult(new CommandResult(0, Marker("SERVER_CONFIG", Encoding.UTF8.GetString(bytes)) + Marker("SERVER_CONFIG_SHA256", ArchiveStore.Digest(bytes)) + (asset == "server-outbound-read.sh" ? "VPSDEPLOY_SERVER_OUTBOUND_READ\n" : ""), ""));
+            }
+            if (asset == "server-hop-probe.sh")
+            {
+                if (HopProbeFailure) return Task.FromResult(new CommandResult(1, "", "synthetic hop probe failed"));
+                var requests = JsonNode.Parse(Parameter("PROBES_JSON"))!.AsArray();
+                var items = new JsonArray(requests.OfType<JsonObject>().Select(r => (JsonNode?)new JsonObject { ["Id"] = r.Text("Id"), ["Status"] = "Passed", ["Egress"] = r.Text("ExpectedAddress"), ["From"] = "EntryServer", ["Network"] = "TCP" }).ToArray());
+                if (HopProbeIncomplete && items.Count > 0) items.RemoveAt(0);
+                return Task.FromResult(new CommandResult(0, Marker("HOP_VALIDATION", new JsonObject { ["Status"] = "Passed", ["Items"] = items }.ToJsonString()) + "VPSDEPLOY_SERVER_HOPS_PASSED\n", ""));
+            }
+            if (asset == "protocol-migration-arm-rollback.sh")
+            {
+                protocolConfigBackup.Clear();
+                foreach (var item in ProtocolConfigs.Where(item => ArmedComponents.Split(',').Contains(item.Key) || ArmedComponents.Split(',').Contains("Protocols"))) protocolConfigBackup[item.Key] = item.Value.ToArray();
+                StatusTaskId = Parameter("CONTROL_TASK_ID"); StatusPhase = "Armed";
+            }
+            if (asset is "server-outbound-apply.sh" or "maintenance-protocol-config-apply.sh")
+            {
+                if (ArchiveStore.Digest(ProtocolConfigs[protocol]) != Parameter("EXPECTED_CONFIG_SHA256")) return Task.FromResult(new CommandResult(1, "", "configuration changed"));
+                ProtocolConfigs[protocol] = Encoding.UTF8.GetBytes(Parameter("CONFIG_JSON"));
+                if (asset == "server-outbound-apply.sh" && LoseOutboundApplyAcknowledgement) throw new IOException("synthetic lost outbound acknowledgement");
+                return Task.FromResult(new CommandResult(0, asset == "server-outbound-apply.sh" ? "VPSDEPLOY_SERVER_OUTBOUND_APPLIED\n" : "VPSDEPLOY_CREDENTIAL_CONFIG_APPLIED\n", ""));
+            }
+            if (asset == "proxy-core-upgrade.sh" && CorruptRouteOnUpgrade)
+            {
+                var config = JsonNode.Parse(ProtocolConfigs[protocol])!.AsObject(); config["outbounds"]!.AsArray().RemoveAt(config["outbounds"]!.AsArray().Count - 1); ProtocolConfigs[protocol] = Encoding.UTF8.GetBytes(config.ToJsonString());
+            }
+            if (asset == "maintenance-restore-apply.sh") foreach (var item in RestoreProtocolConfigs) ProtocolConfigs[item.Key] = item.Value.ToArray();
+            if (asset == "protocol-migration-trigger-rollback.sh") { foreach (var item in protocolConfigBackup) ProtocolConfigs[item.Key] = item.Value.ToArray(); StatusPhase = "RolledBack"; }
+            if (asset == "maintenance-transaction-commit.sh") { StatusPhase = "Committed"; if (LoseOutboundCommitAcknowledgement) throw new IOException("synthetic lost commit acknowledgement"); }
         }
         if (asset == "maintenance-komari.sh") return Task.FromResult(new CommandResult(0, Parameter("ACTION") == "Status" ? string.Join('\n', new[] { "komari-agent.service", "komari.service", "cloudflared.service" }.Select(service => service + "=" + (MonitoringPresent ? "true,true,true" : "false,false,false"))) : "VPSDEPLOY_KOMARI_LIFECYCLE_OK\n" + (Parameter("ACTION") == "ControllerRestore" ? Marker("KOMARI_RESTORED_VERSION", RestoredControllerVersion) + Marker("KOMARI_RESTORED_SHA256", new string('b', 64)) : Parameter("ACTION") == "ControllerBackup" ? Marker("KOMARI_BACKUP", "/root/komari-controller-20000101-000000.tar.gz") : ""), ""));
         if (asset == "firewall-preflight.sh") return Task.FromResult(new CommandResult(0, "VPSDEPLOY_FIREWALL_SCOPE_OK\n", ""));
@@ -148,7 +193,11 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
         if (asset == "maintenance-transaction-status.sh" && Parameter("ACTION") == "VerifyUnowned") return Task.FromResult(new CommandResult(VerifyUnownedAllowed ? 0 : 1, VerifyUnownedAllowed ? "VPSDEPLOY_UNOWNED_TRANSACTION_CLEAR\n" : "", ""));
         var output = asset switch { "audit.sh" => Marker("OS_ID", "debian") + Marker("OS_VERSION", "13") + Marker("ARCH", "x86_64") + Marker("MEMORY_KIB", "1048576") + Marker("EXISTING_SERVICES", "") + Marker("NFT_LINES", "0"), "maintenance-health-audit.sh" => Marker("HEALTH_AUDIT", "{\"SchemaVersion\":1}"), "protocol-migration-arm-rollback.sh" => Marker("BACKUP_DIR", Backup), "network-tuning.sh" => Marker("BACKUP_DIR", "/root/fixture-network"), "maintenance-transaction-commit.sh" => "VPSDEPLOY_MAINTENANCE_COMMITTED\n", "maintenance-transaction-status.sh" => Marker("TRANSACTION_BACKUP", StatusBackup) + Marker("TRANSACTION_PHASE", StatusPhase) + Marker("CONTROL_TASK_ID", StatusTaskId), "protocol-migration-trigger-rollback.sh" => "VPSDEPLOY_MIGRATION_ROLLBACK_OK\n", _ => "" }; return Task.FromResult(new CommandResult(0, output, ""));
     }
-    public Task<byte[]> ReadFileAsync(string absolutePath, CancellationToken cancellationToken) => Task.FromResult(Encoding.UTF8.GetBytes(absolutePath == "/etc/komari-agent/config.json" ? AgentConfiguration.ToJsonString() : absolutePath.EndsWith("/network-state.json", StringComparison.Ordinal) ? "{\"Version\":2}" : absolutePath.EndsWith("/firewall-state.json", StringComparison.Ordinal) ? "{\"Version\":1}" : "{}"));
+    public Task<byte[]> ReadFileAsync(string absolutePath, CancellationToken cancellationToken)
+    {
+        var role = absolutePath switch { "/usr/local/etc/xray/config.json" => "RealityEntry", "/etc/sing-box-anytls/config.json" => "AnyTlsEntry", "/etc/sing-box/config.json" => "ShadowsocksLanding", _ => "" };
+        return Task.FromResult(ProtocolConfigs.TryGetValue(role, out var bytes) ? bytes.ToArray() : Encoding.UTF8.GetBytes(absolutePath == "/etc/komari-agent/config.json" ? AgentConfiguration.ToJsonString() : absolutePath.EndsWith("/network-state.json", StringComparison.Ordinal) ? "{\"Version\":2}" : absolutePath.EndsWith("/firewall-state.json", StringComparison.Ordinal) ? "{\"Version\":1}" : "{}"));
+    }
     public Task DownloadAsync(string absolutePath, string destination, CancellationToken cancellationToken) { Directory.CreateDirectory(Path.GetDirectoryName(destination)!); File.WriteAllText(destination, "fixture-archive"); return Task.CompletedTask; }
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

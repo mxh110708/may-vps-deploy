@@ -4,12 +4,22 @@ namespace May.VpsDeploy.Core;
 
 public static class OperationSteps
 {
-    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate;
+    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate or OperationKind.ServerOutbound;
     public static IReadOnlyList<PlannedTaskStep> Create(OperationRequest request, JsonObject plan)
     {
         var steps = new List<PlannedTaskStep>();
         if (request.Kind == OperationKind.CheckComponentUpdate) return [new("component-release-check", "查询并核对官方稳定版", "锁定具体发行资产与摘要，只查询版本，不安装软件。")];
         void Add(string id, string title, string description) => steps.Add(new(id, title, description));
+        if (request.Kind == OperationKind.ServerOutbound)
+        {
+            var target = ServerOutboundRouting.Label(request.Options.Text("Protocol"));
+            Add("outbound-preflight", "核对入站与实际配置", "核对管理连接、运行中的 " + target + " 服务和审阅时的配置摘要。");
+            Add("outbound-backup", "建立组件恢复点", "只备份 " + target + "，启用限时回滚保护。");
+            Add("outbound-apply", "应用固定下一跳", "校验实际核心支持后，只替换 " + target + " 配置并重启此服务。");
+            Add("outbound-validation", "核验实际代理出口", "独立检查 HTTPS、预期出口地址和 UDP；未完成不提交。");
+            Add("outbound-archive", "归档配置与验收", "保留下一跳身份及本次验证证据。");
+            Add("outbound-commit", "确认完成", "核对事务身份并解除限时回滚保护。"); return steps;
+        }
         if (request.Kind == OperationKind.BbrKernel)
         {
             var action = request.Options.Text("Action");

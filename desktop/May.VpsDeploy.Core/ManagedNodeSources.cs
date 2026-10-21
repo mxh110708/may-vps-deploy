@@ -9,7 +9,9 @@ public static class ManagedNodeSources
     {
         var clash = node.Clash.DeepClone().AsObject(); clash.Remove("name");
         var sing = node.SingBox.DeepClone().AsObject(); sing.Remove("tag");
-        return ArchiveStore.Fingerprint(new JsonObject { ["Clash"] = clash, ["SingBox"] = sing });
+        var identity = new JsonObject { ["Clash"] = clash, ["SingBox"] = sing };
+        if (node.ServerRouteFingerprint != "") identity["ServerRoute"] = node.ServerRouteFingerprint;
+        return ArchiveStore.Fingerprint(identity);
     }
     public static JsonObject Origin(string instance, ClientProfiles.NodePair node) => new()
     {

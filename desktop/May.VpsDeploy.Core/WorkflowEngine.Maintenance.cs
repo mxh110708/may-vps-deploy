@@ -150,9 +150,9 @@ public sealed partial class WorkflowEngine
         }
         if (components.Contains("Protocols"))
         {
-            foreach (var key in new[] { "Role", "Roles", "ActiveEntry", "Reality", "AnyTls", "Shadowsocks", "ProtocolInventory", "TrustedTls" }) Restore(c.Plan, oldPlan, key);
+            foreach (var key in new[] { "Role", "Roles", "ActiveEntry", "Reality", "AnyTls", "Shadowsocks", "ProtocolInventory", "TrustedTls", "ServerOutbound" }) Restore(c.Plan, oldPlan, key);
             foreach (var key in new[] { "Xray", "AnyTls", "Shadowsocks" }) Restore(c.Secrets, oldSecrets, key);
-            foreach (var key in new[] { "ProtocolInventory", "ProtocolValidation", "XrayVersion", "SingBoxVersion", "AnyTls" }) Restore(c.State, oldState, key);
+            foreach (var key in new[] { "ProtocolInventory", "ProtocolValidation", "XrayVersion", "SingBoxVersion", "AnyTls", "ServerOutboundValidation" }) Restore(c.State, oldState, key);
             foreach (var key in new[] { "XrayPrimary", "XrayBackup", "AnyTlsPrimary", "LandingShadowsocks" }) c.Plan.Put("Ports." + key, oldPlan.At("Ports." + key)?.DeepClone());
             if (c.Pending?["ArtifactOriginal"] == null) ExportProfiles(c);
         }
@@ -165,6 +165,11 @@ public sealed partial class WorkflowEngine
         {
             var section = role == "RealityEntry" ? "Reality" : role == "AnyTlsEntry" ? "AnyTls" : "Shadowsocks";
             Restore(c.Plan, oldPlan, section); Restore(c.Secrets, oldSecrets, role == "RealityEntry" ? "Xray" : section);
+            if (ServerOutboundRouting.Roles.Contains(role))
+            {
+                RestoreRoleChild(c.Plan, oldPlan, "ServerOutbound", role);
+                RestoreRoleChild(c.State, oldState, "ServerOutboundValidation", role);
+            }
             foreach (var key in new[] { "Role", "Roles", "ActiveEntry" }) Restore(c.Plan, oldPlan, key);
             foreach (var port in role == "RealityEntry" ? new[] { "XrayPrimary", "XrayBackup" } : role == "AnyTlsEntry" ? new[] { "AnyTlsPrimary" } : new[] { "LandingShadowsocks" }) c.Plan.Put("Ports." + port, oldPlan.At("Ports." + port)?.DeepClone());
             Restore(c.Plan, oldPlan, "ProtocolInventory"); Restore(c.State, oldState, "ProtocolInventory");
@@ -234,6 +239,7 @@ public sealed partial class WorkflowEngine
             foreach (var role in DeploymentPlans.Roles[..3]) if (inventory.Flag(role + ".Installed") != c.Plan.Flag("ProtocolInventory." + role + ".Installed", c.Plan.Text("Role") == role) || inventory.Flag(role + ".Enabled") != Enabled(c.Plan, role)) throw new OperationException("远端协议状态与归档不一致，请先只读核对漂移，未自动覆盖。");
         }
         var scope = option.Text("Scope", "Protocol");
+        if (kind is OperationKind.RotateCredentials or OperationKind.Upgrade && scope == "Protocol") await VerifyCurrentServerOutbound(c, option.Text("Protocol"));
         if (kind == OperationKind.Komari)
         {
             var status = await c.Run("maintenance-komari.sh", new() { ["ACTION"] = "Status" }, timeout: 60);

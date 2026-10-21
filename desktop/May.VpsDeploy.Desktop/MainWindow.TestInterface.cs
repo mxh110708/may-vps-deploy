@@ -140,6 +140,10 @@ public sealed partial class MainWindow
                 UIElement target = activeTestDialog == null ? shell : Find<Border>(activeTestDialog).Where(b => b.ActualWidth >= 250 && b.ActualHeight > 100).OrderByDescending(b => b.ActualWidth * b.ActualHeight).FirstOrDefault() ?? (UIElement)activeTestDialog;
                 await Capture(testSession.Artifact(name), target); return new() { ["artifact"] = name, ["dialog"] = activeTestDialog != null };
             }
+            case "suite.client-routes":
+            case "suite.client-output":
+            case "suite.server-outbound":
+            case "suite.client-share":
             case "suite.run":
             {
                 if (taskCancellation != null || activeTestDialog != null || testSuiteState == "running") throw new OperationException("当前状态不能开始界面回归。");
@@ -150,7 +154,7 @@ public sealed partial class MainWindow
                     try
                     {
                         var directory = Path.GetDirectoryName(testSession.Artifact("suite.json"))!;
-                        var result = new JsonObject { ["deployment"] = await DeploymentRegression(directory), ["maintenance"] = await MaintenanceRegression(directory), ["additions"] = await AdditionsRegression(directory), ["window_placement"] = await WindowPlacementRegression(directory) };
+                        var result = command == "suite.client-routes" ? new JsonObject { ["client_routes"] = await ClientRoutesRegression(directory) } : command == "suite.client-output" ? new JsonObject { ["client_output"] = await ClientOutputRegression(directory) } : command == "suite.server-outbound" ? new JsonObject { ["server_outbound"] = await ServerOutboundRegression(directory) } : command == "suite.client-share" ? new JsonObject { ["client_share"] = await ClientShareRegression(directory) } : new JsonObject { ["deployment"] = await DeploymentRegression(directory), ["maintenance"] = await MaintenanceRegression(directory), ["additions"] = await AdditionsRegression(directory), ["window_placement"] = await WindowPlacementRegression(directory), ["client_routes"] = await ClientRoutesRegression(directory), ["client_output"] = await ClientOutputRegression(directory), ["server_outbound"] = await ServerOutboundRegression(directory), ["client_share"] = await ClientShareRegression(directory) };
                         if (testActivations != 0 || testForegroundSamples != 0) throw new OperationException("界面回归获得前台焦点。");
                         testSuiteResult = result; testSuiteState = "passed";
                     }
@@ -214,7 +218,7 @@ public sealed partial class MainWindow
             var item = new JsonObject { ["id"] = TestId(element), ["kind"] = element is ComboBox ? nameof(ComboBox) : element.GetType().Name, ["name"] = TestName(element), ["enabled"] = element is not Control control || control.IsEnabled };
             switch (element)
             {
-                case TextBox text: item["value"] = text.Text; break;
+                case TextBox text: item["value"] = text.Tag as string == "ClientLinks.Input" ? text.Text.Length == 0 ? "" : "[节点链接已填写]" : text.Text; break;
                 case PasswordBox password: item["filled"] = password.Password.Length > 0; break;
                 case CheckBox check: item["checked"] = check.IsChecked; break;
                 case ToggleButton toggle: item["checked"] = toggle.IsChecked; break;

@@ -198,13 +198,15 @@ public sealed partial class WorkflowEngine
         return new() { ["TCP_PORTS"] = string.Join(',', tcp.Distinct()), ["RESTRICTED_PORT"] = ss ? plan.Text("Ports.LandingShadowsocks") : "", ["ALLOWED_IPV4S"] = ss ? string.Join(',', plan.Strings("Shadowsocks.TrustedEntryIPv4s")) : "", ["ALLOWED_IPV6S"] = ss ? string.Join(',', plan.Strings("Shadowsocks.TrustedEntryIPv6s")) : "" };
     }
     private static bool Enabled(JsonObject plan, string role) => plan.At("ProtocolInventory." + role) == null ? DeploymentPlans.InitiallyEnabled(plan, role) : plan.Flag("ProtocolInventory." + role + ".Enabled");
-    private async Task ArchiveConfigs(Context c)
+    private async Task ArchiveConfigs(Context c, string? onlyRole = null)
     {
         await using var session = await c.Session();
         foreach (var (role, remote, name) in new[] { ("RealityEntry", "/usr/local/etc/xray/config.json", "xray-config.private.json"), ("AnyTlsEntry", "/etc/sing-box-anytls/config.json", "sing-box-anytls-config.private.json"), ("ShadowsocksLanding", "/etc/sing-box/config.json", "sing-box-config.private.json") })
         {
+            if (onlyRole != null && role != onlyRole) continue;
             if (!Enabled(c.Plan, role) && !c.Plan.Flag("ProtocolInventory." + role + ".Installed")) continue;
             var bytes = await session.ReadFileAsync(remote, c.Cancellation); var hash = ArchiveStore.Digest(bytes);
+            if (c.Plan.At("ServerOutbound." + role) != null) ServerOutboundRouting.VerifyManaged(role, JsonNode.Parse(bytes)!.AsObject(), c.Plan);
             ExpectArtifact(c, "server-configs/" + name, hash); ArchiveStore.AtomicWrite(c.File("server-configs/" + name), bytes); c.State.Put("ServerConfigHashes." + role, JsonValue.Create(hash));
         }
     }
@@ -212,6 +214,8 @@ public sealed partial class WorkflowEngine
     {
         var result = await validation.ValidateAsync(c.Plan, c.Secrets, c.File("client-validation"), user, new InlineProgress<string>(m => c.Report("协议验收", m)), c.Cancellation);
         ArchiveStore.WriteJson(c.File("protocol-validation.dotnet.json"), result); c.State["ProtocolValidation"] = result;
+        RequireMaintainedRouteValidation(c, result);
+        foreach (var role in ServerOutboundRouting.Roles.Where(role => Enabled(c.Plan, role) && (c.Request.Kind == OperationKind.Restore || c.Request.Options.Text("Protocol") == role))) await ValidateAdditionalHops(c, role);
         c.Warnings |= result.Text("Status") is not ("Passed" or "NoEnabledProtocols");
     }
     private async Task ValidateInitialProtocols(Context c)

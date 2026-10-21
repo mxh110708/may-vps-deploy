@@ -17,6 +17,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
     private readonly ArchiveStore store;
     private readonly TaskCoordinator coordinator;
     private readonly ClientWorkbench workbench;
+    private readonly ClientRouteDiagnostics clientDiagnostics;
     private readonly Dictionary<string, Button> navigation = new();
     private readonly Grid shell = new();
     private readonly Dictionary<Button, UIElement> disclosures = new();
@@ -47,6 +48,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
         IRemoteSessionFactory remote = new SshSessionFactory(store); if (session != null) remote = session.Restrict(remote);
         coordinator = new(store, new WorkflowEngine(store, remote, new ManagedKeys(new WindowsManagedKeyAccess()), this, new ProtocolValidation(assets, tools, store), new NetworkMeasurement(assets, tools)));
         workbench = new(store, tools, assets, paths.Resolve("runtime/python/python.exe"));
+        clientDiagnostics = new(assets, tools);
         var preference = paths.Resolve("private/desktop-settings.json"); settings = File.Exists(preference) ? ArchiveStore.ReadJson(preference) : new JsonObject { ["AutoCheckUpdates"] = false, ["UpdateProxy"] = "http://127.0.0.1:2080" };
         fonts = new(paths);
         DesktopTypography.Load(settings); DesktopTypography.Mark(heading, TypeRole.Title, 27); DesktopTypography.Mark(caption, TypeRole.Note, 13); DesktopTypography.Mark(taskText, TypeRole.Note, 13);
@@ -184,6 +186,12 @@ public sealed partial class MainWindow : Window, IUserInteraction
                 SettingRow("追加代理协议", "在此实例安装尚未安装的协议，保留已有服务", Symbol.Add, Action("添加协议", () => ChooseInstallation(plan))),
                 SettingRow("代理核心", "升级此 VPS 上的 Xray 或 sing-box；审阅时显示对象与版本", Symbol.Download, Action("升级核心", () => OperationSheet(OperationKind.Upgrade, plan))),
                 SettingRow("协议凭据", "轮换正在运行的协议凭据", Symbol.Permissions, Action("凭据轮换", () => OperationSheet(OperationKind.RotateCredentials, plan)))));
+            foreach (var role in ServerOutboundRouting.Roles.Where(role => plan.Flag("ProtocolInventory." + role + ".Installed", DeploymentPlans.Uses(plan, role))))
+            {
+                var route = plan.At("ServerOutbound." + role) as JsonObject;
+                var description = route == null ? "指定 Shadowsocks 落地，执行前审阅并备份" : route.Text("Name") + " · " + route.Text("EgressFamily") + "\n" + ServerOutboundRouting.SourcesSummary(store, route);
+                details.Children.Add(SettingsGroup(SettingRow(ServerOutboundRouting.Label(role) + " · 固定下一跳", description, Symbol.Forward, Action("配置出站", () => ServerOutboundSheet(relative, plan, role)))));
+            }
             var health = InstanceState(relative)["HealthReport"] as JsonObject;
             if (health?["Checks"] is JsonArray checks)
             {
