@@ -177,7 +177,11 @@ try{
   $flowPath=Join-Path $nativeArtifact 'native-flow.json'
   if(Test-Path -LiteralPath $flowPath){
    $flow=Get-Content -Raw -LiteralPath $flowPath|ConvertFrom-Json -AsHashtable
-   Write-Host ('Native flow failure: '+(@{state=$flow.state;safe_error=$flow['safe_error'];completed_checks=@($flow.cases).Count;last_checks=@($flow.cases|Select-Object -Last 5 -ExpandProperty name)}|ConvertTo-Json -Compress))
+   Write-Host ('Native flow failure: '+(@{state=$flow.state;safe_error=$flow['safe_error'];process_alive=$flow['process_alive'];completed_checks=@($flow.cases).Count;last_checks=@($flow.cases|Select-Object -Last 5 -ExpandProperty name)}|ConvertTo-Json -Compress))
+  }
+  foreach($name in @('suite.json','unhandled.json')){
+   $diagnosticPath=Join-Path $nativeArtifact $name
+   if(Test-Path -LiteralPath $diagnosticPath){Write-Host ($name+': '+(Get-Content -Raw -LiteralPath $diagnosticPath|ConvertFrom-Json|ConvertTo-Json -Depth 12 -Compress))}
   }
   $commandsPath=Join-Path $nativeArtifact 'commands.jsonl'
   if(Test-Path -LiteralPath $commandsPath){

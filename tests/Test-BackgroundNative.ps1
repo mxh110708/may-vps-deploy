@@ -203,6 +203,6 @@ try {
     'PASS: native UI command flow, dialogs, independent storage, no foreground activation.'
 } catch {
     try { Send 'ui.capture' @{name='failure.png'} | Out-Null } catch { }
-    @{schema_version=1;state='failed';safe_error=$_.Exception.Message;cases=$cases} | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $FixtureRoot 'test-artifacts/native-flow.json') -Encoding utf8
+    @{schema_version=1;state='failed';safe_error=$_.Exception.Message;cases=$cases;process_alive=[bool](Get-Process -Id $started.ProcessId -ErrorAction SilentlyContinue)} | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $FixtureRoot 'test-artifacts/native-flow.json') -Encoding utf8
     throw
 } finally { try { Send 'session.stop' | Out-Null } catch { } }

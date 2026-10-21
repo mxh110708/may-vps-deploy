@@ -20,7 +20,15 @@ public sealed partial class MainWindow
     private readonly Dictionary<FrameworkElement, string> testIds = new();
     private int nextTestId;
     private string testSuiteState = "idle";
+    private string testSuitePhase = "";
     private JsonObject? testSuiteResult;
+
+    internal void RecordTestFailure(Exception error)
+    {
+        if (testSession == null) return;
+        try { ArchiveStore.WriteJson(testSession.Artifact("unhandled.json"), new JsonObject { ["error_type"] = error.GetType().FullName, ["hresult"] = error.HResult.ToString("x8"), ["stack"] = error.StackTrace, ["suite_phase"] = testSuitePhase }); }
+        catch { /* Do not replace the original exception or change application failure handling. */ }
+    }
 
     private void StartTestSession()
     {
@@ -148,22 +156,33 @@ public sealed partial class MainWindow
             {
                 if (taskCancellation != null || activeTestDialog != null || testSuiteState == "running") throw new OperationException("当前状态不能开始界面回归。");
                 if (!File.Exists(paths.Resolve("qa-ui-review.fixture.json")) || !ArchiveStore.ReadJson(paths.Resolve("qa-ui-review.fixture.json")).Flag("synthetic_only")) throw new OperationException("界面回归只允许在合成归档中运行。");
-                testSuiteState = "running"; testSuiteResult = null;
+                testSuiteState = "running"; testSuiteResult = null; testSuitePhase = "";
                 DispatcherQueue.TryEnqueue(async () =>
                 {
+                    var directory = Path.GetDirectoryName(testSession.Artifact("suite.json"))!;
+                    void Checkpoint() => ArchiveStore.WriteJson(testSession.Artifact("suite.json"), new JsonObject { ["state"] = testSuiteState, ["phase"] = testSuitePhase, ["result"] = testSuiteResult?.DeepClone(), ["window"] = BackgroundProof() });
                     try
                     {
-                        var directory = Path.GetDirectoryName(testSession.Artifact("suite.json"))!;
-                        var result = command == "suite.client-routes" ? new JsonObject { ["client_routes"] = await ClientRoutesRegression(directory) } : command == "suite.client-output" ? new JsonObject { ["client_output"] = await ClientOutputRegression(directory) } : command == "suite.server-outbound" ? new JsonObject { ["server_outbound"] = await ServerOutboundRegression(directory) } : command == "suite.client-share" ? new JsonObject { ["client_share"] = await ClientShareRegression(directory) } : new JsonObject { ["deployment"] = await DeploymentRegression(directory), ["maintenance"] = await MaintenanceRegression(directory), ["additions"] = await AdditionsRegression(directory), ["window_placement"] = await WindowPlacementRegression(directory), ["client_routes"] = await ClientRoutesRegression(directory), ["client_output"] = await ClientOutputRegression(directory), ["server_outbound"] = await ServerOutboundRegression(directory), ["client_share"] = await ClientShareRegression(directory) };
+                        var result = new JsonObject();
+                        async Task Run(string name, Func<string, Task<JsonObject>> run)
+                        {
+                            testSuitePhase = name; testSuiteResult = result.DeepClone().AsObject(); Checkpoint();
+                            result[name] = await run(directory); testSuiteResult = result.DeepClone().AsObject(); Checkpoint();
+                        }
+                        if (command == "suite.run") { await Run("deployment", DeploymentRegression); await Run("maintenance", MaintenanceRegression); await Run("additions", AdditionsRegression); await Run("window_placement", WindowPlacementRegression); }
+                        if (command is "suite.run" or "suite.client-routes") await Run("client_routes", ClientRoutesRegression);
+                        if (command is "suite.run" or "suite.client-output") await Run("client_output", ClientOutputRegression);
+                        if (command is "suite.run" or "suite.server-outbound") await Run("server_outbound", ServerOutboundRegression);
+                        if (command is "suite.run" or "suite.client-share") await Run("client_share", ClientShareRegression);
                         if (testActivations != 0 || testForegroundSamples != 0) throw new OperationException("界面回归获得前台焦点。");
                         testSuiteResult = result; testSuiteState = "passed";
                     }
                     catch (Exception error) { testSuiteState = "failed"; testSuiteResult = new() { ["error"] = error.GetType().Name, ["safe_message"] = error is OperationException safe ? safe.Message : "原生界面回归失败。" }; }
-                    ArchiveStore.WriteJson(testSession.Artifact("suite.json"), new JsonObject { ["state"] = testSuiteState, ["result"] = testSuiteResult?.DeepClone(), ["window"] = BackgroundProof() });
+                    Checkpoint();
                     SelectPage("overview");
                 }); return new() { ["state"] = testSuiteState };
             }
-            case "suite.status": return new() { ["state"] = testSuiteState, ["result"] = testSuiteResult?.DeepClone() };
+            case "suite.status": return new() { ["state"] = testSuiteState, ["phase"] = testSuitePhase, ["result"] = testSuiteResult?.DeepClone() };
             case "session.stop":
             {
                 if (testSuiteState == "running") throw new OperationException("请等待原生界面回归结束后停止会话。");

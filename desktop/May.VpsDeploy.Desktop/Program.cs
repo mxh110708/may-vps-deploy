@@ -49,7 +49,7 @@ public sealed partial class DesktopApplication : Application
     public DesktopApplication(string[] arguments)
     {
         this.arguments = arguments;
-        UnhandledException += (_, error) => Program.Trace(arguments, "Unhandled: " + error.Exception);
+        UnhandledException += (_, error) => { Program.Trace(arguments, "Unhandled: " + error.Exception); window?.RecordTestFailure(error.Exception); };
         Program.Trace(arguments, "App ctor"); InitializeComponent(); Program.Trace(arguments, "App resources");
     }
     private MainWindow? window;
