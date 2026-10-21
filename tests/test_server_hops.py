@@ -86,7 +86,7 @@ class ProbeBoundaries(unittest.TestCase):
                 target = '/' + target[0].lower() + target[2:]
             source = ASSET.replace('/usr/local', target + '/usr/local')
             script = path / 'fixture.sh'
-            script.write_text(source, encoding='utf-8', newline='\n')
+            script.write_bytes(source.encode('utf-8'))
             for role in ('AnyTlsEntry', 'RealityEntry', 'Other'):
                 result = subprocess.run([BASH, str(script)], env=dict(os.environ, VPS_PARAM_ROLE=role, VPS_PARAM_PROBES_JSON='[]'), capture_output=True, timeout=10)
                 self.assertNotEqual(result.returncode, 0)

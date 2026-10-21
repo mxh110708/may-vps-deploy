@@ -37,13 +37,13 @@ class ServerOutboundScripts(unittest.TestCase):
         self.config.write_bytes(self.original)
         binary = self.root / ('usr/local/bin/xray' if is_reality else 'usr/local/bin/sing-box-anytls')
         binary.parent.mkdir(parents=True)
-        binary.write_text('''#!/usr/bin/env bash
+        binary.write_bytes('''#!/usr/bin/env bash
 set -euo pipefail
 touch "$TEST_ROOT/core-checked"
 if [[ "${TEST_INVALID:-false}" == true ]]; then echo 'sensitive-native-output' >&2; exit 1; fi
 python3 -m json.tool "${@: -1}" >/dev/null
 if [[ "${TEST_DRIFT:-false}" == true ]]; then printf 'external edit' > "$TEST_CONFIG"; fi
-''', encoding='utf-8', newline='\n')
+'''.encode('utf-8'))
         binary.chmod(0o755)
         self.env = dict(os.environ, TEST_ROOT=shell_path(self.root), TEST_NATIVE_ROOT=self.root.as_posix(), TEST_CONFIG=shell_path(self.config), TEST_CORE=shell_path(binary), TEST_SERVICE=self.service,
                         VPS_PARAM_ROLE=self.role, TEST_CONFIG_FLAG='-config' if is_reality else '-c',
