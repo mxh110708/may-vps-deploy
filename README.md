@@ -2,6 +2,8 @@
 
 面向个人 Debian VPS 的中文部署与运维工具，由 Windows 控制端统一管理部署计划、远端操作、私有归档和客户端配置。
 
+待发布修复：Hugging Face Hub 和文件下载 CDN 从 AI Services 调整为 Academic Research，两套模板与通用生成逻辑同步；现有用户自定义权威来源仍保持显式修改边界。已用实际数据集链接完成有限读取验证，见[分类修复记录](docs/HUGGINGFACE-RESEARCH-ROUTING-2026-10-22.zh-CN.md)。
+
 v0.9.34 整合七轮配置与链路扩展：分享链接导入、来源刷新与差异预览、输出处理、连接图和按需诊断；Reality / AnyTLS 的服务器固定落地、TCP 目的地及多落地分流；新增按输出规则复制或保存分享列表。每个落地分别验收，无法完整表达的客户端链路和 ECH 参数不会被静默删除。详见[设计与实施索引](docs/FLYX-DESIGN-REVIEW-2026-10-20.zh-CN.md)、[第七轮分享导出](docs/CLIENT-SHARE-ROUND-7-2026-10-21.zh-CN.md)和[发行验证](docs/TESTING-0.9.34.zh-CN.md)。
 
 v0.9.31 将项目与应用统一更名为 May VPS Deploy，采用独立安装身份、私人归档目录和凭据加密格式。旧版由用户自行卸载；迁移前先备份，再导入新目录。GitHub 账号保持不变。详见[全新安装迁移说明](docs/BRAND-MIGRATION-2026-10-20.zh-CN.md)。

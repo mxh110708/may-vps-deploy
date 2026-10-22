@@ -204,6 +204,8 @@ rules:
 - DOMAIN,xn--flw351e,Direct Route
 - DOMAIN,xn--qcka1pmc,Direct Route
 - DOMAIN,youtube,Direct Route
+- DOMAIN-SUFFIX,huggingface.co,Academic Research
+- DOMAIN-SUFFIX,hf.co,Academic Research
 - DOMAIN,ai.google.dev,AI Services
 - DOMAIN,alkalicore-pa.clients6.google.com,AI Services
 - DOMAIN,alkalimakersuite-pa.clients6.google.com,AI Services
@@ -273,8 +275,6 @@ rules:
 - DOMAIN-SUFFIX,anthropic.com,AI Services
 - DOMAIN-SUFFIX,claude.ai,AI Services
 - DOMAIN-SUFFIX,perplexity.ai,AI Services
-- DOMAIN-SUFFIX,huggingface.co,AI Services
-- DOMAIN-SUFFIX,hf.co,AI Services
 - DOMAIN-SUFFIX,github.com,Developer Tools
 - DOMAIN-SUFFIX,githubusercontent.com,Developer Tools
 - DOMAIN-SUFFIX,npmjs.org,Developer Tools

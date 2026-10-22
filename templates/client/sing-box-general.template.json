@@ -58,6 +58,17 @@
         "server": "dns-direct"
       },
       {
+        "domain_suffix": [
+          "huggingface.co",
+          "hf.co"
+        ],
+        "query_type": [
+          "A"
+        ],
+        "action": "route",
+        "server": "dns-business-fakeip"
+      },
+      {
         "domain": [
           "ai.google.dev",
           "alkalicore-pa.clients6.google.com",
@@ -118,9 +129,7 @@
           "oaiusercontent.com",
           "anthropic.com",
           "claude.ai",
-          "perplexity.ai",
-          "huggingface.co",
-          "hf.co"
+          "perplexity.ai"
         ],
         "query_type": [
           "A"
@@ -1298,6 +1307,14 @@
         "outbound": "Direct Route"
       },
       {
+        "domain_suffix": [
+          "huggingface.co",
+          "hf.co"
+        ],
+        "action": "route",
+        "outbound": "Academic Research"
+      },
+      {
         "domain": [
           "ai.google.dev",
           "alkalicore-pa.clients6.google.com",
@@ -1386,9 +1403,7 @@
           "oaiusercontent.com",
           "anthropic.com",
           "claude.ai",
-          "perplexity.ai",
-          "huggingface.co",
-          "hf.co"
+          "perplexity.ai"
         ],
         "action": "route",
         "outbound": "AI Services"
