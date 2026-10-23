@@ -1,7 +1,5 @@
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Automation.Peers;
-using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
 using May.VpsDeploy.Core;
 
@@ -13,47 +11,15 @@ public sealed partial class MainWindow
     {
         if (!File.Exists(paths.Resolve("qa-ui-review.fixture.json")) || !ArchiveStore.ReadJson(paths.Resolve("qa-ui-review.fixture.json")).Flag("synthetic_only")) throw new OperationException("转发界面回归只允许合成工作区。");
         static void Require(bool value, string message) { if (!value) throw new OperationException(message); }
-        async Task Press(ContentDialog dialog, string name)
-        {
-            var clicked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            void OnClick(ContentDialog sender, ContentDialogButtonClickEventArgs args) => clicked.TrySetResult();
-            if (name == "PrimaryButton") dialog.PrimaryButtonClick += OnClick; else dialog.CloseButtonClick += OnClick;
-            try
-            {
-                var button = Find<Button>(dialog).Single(b => b.Name == name);
-                ((IInvokeProvider)(FrameworkElementAutomationPeer.CreatePeerForElement(button) ?? new ButtonAutomationPeer(button)).GetPattern(PatternInterface.Invoke)).Invoke();
-                await clicked.Task.WaitAsync(TimeSpan.FromSeconds(3));
-            }
-            finally { if (name == "PrimaryButton") dialog.PrimaryButtonClick -= OnClick; else dialog.CloseButtonClick -= OnClick; }
-        }
-        async Task Invoke(ContentDialog dialog, string tag)
-        {
-            var button = Find<Button>(dialog).Single(b => b.Tag as string == tag);
-            var clicked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            void OnClick(object sender, RoutedEventArgs args) => clicked.TrySetResult();
-            button.Click += OnClick;
-            try
-            {
-                ((IInvokeProvider)(FrameworkElementAutomationPeer.CreatePeerForElement(button) ?? new ButtonAutomationPeer(button)).GetPattern(PatternInterface.Invoke)).Invoke();
-                await clicked.Task.WaitAsync(TimeSpan.FromSeconds(3));
-            }
-            finally { button.Click -= OnClick; }
-        }
+        Task Press(ContentDialog dialog, string name) => RegressionPress(dialog, name);
+        Task Invoke(ContentDialog dialog, string tag) => RegressionInvoke(Find<Button>(dialog).Single(b => b.Tag as string == tag));
         async Task<ContentDialog> Dialog(ContentDialog? old = null)
         {
             for (var i = 0; i < 100; i++) { await Task.Delay(25); if (activeTestDialog != null && activeTestDialog != old) { await Task.Delay(70); return activeTestDialog; } }
             throw new OperationException("未收到 UDP 转发对话框。");
         }
         static TextBox Input(ContentDialog dialog, string tag) => Find<TextBox>(dialog).Single(c => c.Tag as string == tag);
-        static async Task Fill(TextBox input, string value)
-        {
-            if (input.Text == value) return;
-            var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            void OnChange(object sender, TextChangedEventArgs args) => changed.TrySetResult();
-            input.TextChanged += OnChange;
-            try { input.Text = value; await changed.Task.WaitAsync(TimeSpan.FromSeconds(3)); }
-            finally { input.TextChanged -= OnChange; }
-        }
+        static Task Fill(TextBox input, string value) => RegressionFill(input, value);
         async Task Rejected(ContentDialog dialog, string expected, string message)
         {
             var error = Find<TextBlock>(dialog).Single(t => t.Tag as string == "UdpForward.Error");
@@ -85,24 +51,24 @@ public sealed partial class MainWindow
             ArchiveStore.WriteJson(SafePath.Resolve(output, "udp-forward-review.json"), new JsonObject { ["Title"] = review.Title?.ToString(), ["Text"] = new JsonArray(Find<TextBlock>(review).Select(t => (JsonNode?)JsonValue.Create(t.Text)).ToArray()) });
             Require(Find<TextBlock>(review).Any(t => t.Text == "审阅 UDP 转发变更") && Find<TextBlock>(review).Any(t => t.Text.Contains("198.51.100.0/24") && t.Text.Contains("55001") && t.Text.Contains("清空原会话")), "最终审阅缺少规范来源或中断范围。");
             await Press(review, "CloseButton"); await pending; Require(ClientSchemes.SourceFingerprint(file) == initial && new TaskHistory(store).Read().Count == history, "取消审阅仍启动转发任务。");
-            pending = UdpForwardSheet(relative, plan); form = await Dialog(); Find<ComboBox>(form).Single(c => c.Tag as string == "UdpForward.Action").SelectedIndex = 1; await Press(form, "PrimaryButton"); await Task.Delay(80);
+            pending = UdpForwardSheet(relative, plan); form = await Dialog(); await RegressionSelect(Find<ComboBox>(form).Single(c => c.Tag as string == "UdpForward.Action"), 1); await Press(form, "PrimaryButton"); await Task.Delay(80);
             Require(activeTestDialog == form && Find<TextBlock>(form).Any(t => t.Text.Contains("尚未配置")), "空实例检查未明确阻止。"); await Press(form, "CloseButton"); await pending;
             var rule = UdpForwarding.NewRule(); rule["ListenPort"] = 55001; rule["TargetAddress"] = "192.0.2.20"; rule["TargetPort"] = 22; rule["AllowedSources"] = new JsonArray("198.51.100.0/24"); rule["Validation"] = new JsonObject { ["Type"] = "Echo" };
             var saved = UdpForwarding.Empty(); saved["Rules"]!.AsArray().Add(rule); plan["UdpForwarding"] = saved; state["UdpForwarding"] = new JsonObject { ["RemoteHash"] = new string('a', 64) };
             ArchiveStore.WriteJson(file, plan); ArchiveStore.WriteJson(SafePath.Resolve(directory, "deployment-state.json"), state); var savedHash = ClientSchemes.SourceFingerprint(file);
             pending = UdpForwardSheet(relative, plan); form = await Dialog(); Require(Input(form, "UdpForward.Port.0").Text == "55001" && Find<ComboBox>(form).Single(c => c.Tag as string == "UdpForward.Validation.0").SelectedIndex == 1, "已保存规则未正确回填。");
-            Find<ComboBox>(form).Single(c => c.Tag as string == "UdpForward.Action").SelectedIndex = 2; await Press(form, "PrimaryButton"); review = await Dialog(form);
+            await RegressionSelect(Find<ComboBox>(form).Single(c => c.Tag as string == "UdpForward.Action"), 2); await Press(form, "PrimaryButton"); review = await Dialog(form);
             Require(Find<TextBlock>(review).Any(t => t.Text.Contains("移除全部受管 UDP 转发")), "移除审阅未明确组件范围。"); await Press(review, "CloseButton"); await pending;
             Require(ClientSchemes.SourceFingerprint(file) == savedHash && taskCancellation == null && new TaskHistory(store).Read().Count == history, "移除审阅取消仍改变配置。");
             proxyScheme = ClientSchemes.New(paths); proxyScheme["Name"] = "UDP 专项合成来源";
             ClientNodeImport.Apply(proxyScheme, ClientNodeImport.Preview("ss://aes-128-gcm:synthetic-ui-udp-secret@192.0.2.20:8443#UDP-Proxy-Fixture", proxyScheme, proxyScheme["Layout"]!.Strings("region_groups")[0])); workbench.Save(proxyScheme);
             var proxyPlan = plan.DeepClone().AsObject(); proxyPlan.Remove("UdpForwarding"); pending = UdpForwardSheet(relative, proxyPlan); form = await Dialog(); await Invoke(form, "UdpForward.Add");
-            Find<ComboBox>(form).Single(c => c.Tag as string == "UdpForward.Validation.0").SelectedIndex = 2; await Task.Delay(80);
+            await RegressionSelect(Find<ComboBox>(form).Single(c => c.Tag as string == "UdpForward.Validation.0"), 2); await Task.Delay(80);
             Require(Input(form, "UdpForward.Resolver.0").Text == "1.1.1.1" && Input(form, "UdpForward.ResolverPort.0").Text == "53" && Input(form, "UdpForward.Query.0").Text == "example.com", "UDP 代理 DNS 默认值未显示。");
             await Fill(Input(form, "UdpForward.Port.0"), "55104"); await Fill(Input(form, "UdpForward.Sources.0"), "198.51.100.88/24");
             await Press(form, "PrimaryButton"); await Rejected(form, "UDP 代理来源", "未选来源仍进入 UDP 代理审阅。");
             var sourceChoice = Find<ComboBox>(form).Single(c => c.Tag as string == "UdpForward.Proxy.0");
-            sourceChoice.SelectedIndex = sourceChoice.Items.Cast<ComboBoxItem>().ToList().FindIndex(item => item.Content?.ToString()?.Contains("UDP-Proxy-Fixture") == true); await Task.Delay(50);
+            await RegressionSelect(sourceChoice, sourceChoice.Items.Cast<ComboBoxItem>().ToList().FindIndex(item => item.Content?.ToString()?.Contains("UDP-Proxy-Fixture") == true)); await Task.Delay(50);
             Require(Input(form, "UdpForward.Target.0").Text == "192.0.2.20" && Input(form, "UdpForward.TargetPort.0").Text == "8443", "UDP 代理来源没有填入真实目标。");
             var controls = Find<TextBox>(form).Select(t => t.Text).Concat(Find<TextBlock>(form).Select(t => t.Text)); Require(!controls.Any(t => t.Contains("synthetic-ui-udp-secret")), "UDP 代理凭据进入普通控件。");
             await Fill(Input(form, "UdpForward.Resolver.0"), "224.0.0.1"); await Press(form, "PrimaryButton"); await Rejected(form, "单播", "非法出口 DNS 未留在表单。"); await Fill(Input(form, "UdpForward.Resolver.0"), "1.1.1.1");

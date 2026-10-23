@@ -13,7 +13,7 @@ public sealed partial class MainWindow
         var rules = configuration["Rules"]!.AsArray(); var model = new JsonObject { ["Action"] = "Apply" };
         var operation = Choice("操作", model, "Action", [("Apply", "保存转发规则"), ("Check", "只读检查已保存转发"), ("Remove", "移除全部受管 TCP 转发")]); operation.Tag = "TcpForward.Action";
         var candidates = workbench.List().SelectMany(s => (s["Nodes"] as JsonArray)?.OfType<JsonObject>().Where(n => n["sing_box"] is JsonObject native && native.Text("type") is "vless" or "anytls" or "shadowsocks" && native.Text("detour") == "").Select(n => (Scheme: s, Node: n)) ?? []).ToArray();
-        var rows = new StackPanel { Spacing = 20 }; var error = Text("", 13, true); Button? add = null;
+        var rows = new StackPanel { Spacing = 20 }; var error = Text("", 13, true); error.Tag = "TcpForward.Error"; Button? add = null;
         void Refresh()
         {
             rows.Children.Clear();
