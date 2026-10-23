@@ -13,7 +13,7 @@ public sealed partial class MainWindow
         var config = (plan["UdpForwarding"] as JsonObject)?.DeepClone().AsObject() ?? UdpForwarding.Empty();
         var rules = config["Rules"]!.AsArray(); var model = new JsonObject { ["Action"] = "Apply" };
         var operation = Choice("操作", model, "Action", [("Apply", "保存 UDP 转发规则"), ("Check", "只读检查已保存转发"), ("Remove", "移除全部受管 UDP 转发")]); operation.Tag = "UdpForward.Action";
-        var rows = new StackPanel { Spacing = 20 }; var error = Text("", 13, true); Button? add = null;
+        var rows = new StackPanel { Spacing = 20 }; var error = Text("", 13, true); error.Tag = "UdpForward.Error"; Button? add = null;
         void Refresh()
         {
             rows.Children.Clear();
