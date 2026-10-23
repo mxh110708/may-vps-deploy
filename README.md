@@ -2,7 +2,7 @@
 
 面向个人 Debian VPS 的中文部署与运维工具，由 Windows 控制端统一管理部署计划、远端操作、私有归档和客户端配置。
 
-待发布修复：Hugging Face Hub 和文件下载 CDN 从 AI Services 调整为 Academic Research，两套模板与通用生成逻辑同步；现有用户自定义权威来源仍保持显式修改边界。已用实际数据集链接完成有限读取验证，见[分类修复记录](docs/HUGGINGFACE-RESEARCH-ROUTING-2026-10-22.zh-CN.md)。
+v0.9.35 补齐校园、学术数据库及全文下载链路的业务分类与 DNS，Scholar 等研究平台和 ML 开发工具不再按厂商或 AI 主题粗略归组；国内校园入口明确直连，两种真实核心已完成隔离分流验证。见[分类审查](docs/ACADEMIC-ROUTING-AUDIT-2026-10-23.zh-CN.md)、[此前 Hugging Face 修复](docs/HUGGINGFACE-RESEARCH-ROUTING-2026-10-22.zh-CN.md)及[发行范围](docs/TESTING-0.9.35.zh-CN.md)。ExistingAuthority 仍保持显式修改边界。
 
 v0.9.34 整合七轮配置与链路扩展：分享链接导入、来源刷新与差异预览、输出处理、连接图和按需诊断；Reality / AnyTLS 的服务器固定落地、TCP 目的地及多落地分流；新增按输出规则复制或保存分享列表。每个落地分别验收，无法完整表达的客户端链路和 ECH 参数不会被静默删除。详见[设计与实施索引](docs/FLYX-DESIGN-REVIEW-2026-10-20.zh-CN.md)、[第七轮分享导出](docs/CLIENT-SHARE-ROUND-7-2026-10-21.zh-CN.md)和[发行验证](docs/TESTING-0.9.34.zh-CN.md)。
 
@@ -10,7 +10,7 @@ v0.9.31 将项目与应用统一更名为 May VPS Deploy，采用独立安装身
 
 v0.9.30 统一新方案的城市/湾区命名：LA 入口与 SF 湾区入口分别建组，SF 包含 San Jose。IPv4、IPv6 落地出口可分别保存节点名，避免重新提取时恢复旧名称；改名保留原连接与凭据。详见[命名约定与归档同步](docs/CITY-NAMING-2026-10-19.zh-CN.md)。
 
-正式版为 [v0.9.34](https://github.com/mxh110708/may-vps-deploy/releases/tag/v0.9.34)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+正式版为 [v0.9.35](https://github.com/mxh110708/may-vps-deploy/releases/tag/v0.9.35)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
 
 v0.9.28 将 BBR v3 改用 Google 官方 `google/bbr` v3 源码。固定版由 May 在开发机预编译，内核包、通用配置和校验清单随应用提供，小 VPS 只接收、验证和安装；不提供最新提交选择或 VPS 在线编译，固定包随应用版本更新。审阅展示真实基础版本、日期、提交及包 SHA256，不标作 Google 官方二进制或最新 LTS。旧版 XanMod 来源及其事务兼容处理已移除；默认仍沿用 VPS 原有内核。详见[网络调优流程](docs/NETWORK-TUNING.zh-CN.md)、[预编译维护](docs/GOOGLE-BBR-PREBUILT.zh-CN.md)及[安装启动验证](docs/GOOGLE-BBR-PREBUILT-2026-10-16.zh-CN.md)。下方 v0.9.16–v0.9.18 的内核发行、签名与 LTS 描述属于当时的第三方实现。
 

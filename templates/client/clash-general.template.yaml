@@ -53,6 +53,16 @@ dns:
   - xn--flw351e
   - xn--qcka1pmc
   - youtube
+  - +.edu.cn
+  - +.ac.cn
+  - +.cnki.net
+  - +.cnki.cn
+  - +.cnki.com.cn
+  - +.wanfangdata.com.cn
+  - +.cqvip.com
+  - +.duxiu.com
+  - +.chaoxing.com
+  - +.superlib.net
   respect-rules: true
   default-nameserver:
   - 223.5.5.5
@@ -112,6 +122,27 @@ dns:
     youtube:
     - 223.5.5.5
     - 119.29.29.29
+    +.edu.cn:
+    - system
+    +.ac.cn:
+    - system
+    +.cnki.net:
+    - system
+    +.cnki.cn:
+    - system
+    +.cnki.com.cn:
+    - system
+    +.wanfangdata.com.cn:
+    - system
+    +.cqvip.com:
+    - system
+    +.duxiu.com:
+    - system
+    +.chaoxing.com:
+    - system
+    +.superlib.net:
+    - system
+  direct-nameserver-follow-policy: true
 proxies: []
 proxy-groups:
 - name: US-West-LA Entry
@@ -204,8 +235,169 @@ rules:
 - DOMAIN,xn--flw351e,Direct Route
 - DOMAIN,xn--qcka1pmc,Direct Route
 - DOMAIN,youtube,Direct Route
+- DOMAIN-SUFFIX,edu.cn,DIRECT
+- DOMAIN-SUFFIX,ac.cn,DIRECT
+- DOMAIN-SUFFIX,cnki.net,DIRECT
+- DOMAIN-SUFFIX,cnki.cn,DIRECT
+- DOMAIN-SUFFIX,cnki.com.cn,DIRECT
+- DOMAIN-SUFFIX,wanfangdata.com.cn,DIRECT
+- DOMAIN-SUFFIX,cqvip.com,DIRECT
+- DOMAIN-SUFFIX,duxiu.com,DIRECT
+- DOMAIN-SUFFIX,chaoxing.com,DIRECT
+- DOMAIN-SUFFIX,superlib.net,DIRECT
 - DOMAIN-SUFFIX,huggingface.co,Academic Research
 - DOMAIN-SUFFIX,hf.co,Academic Research
+- DOMAIN-SUFFIX,hf.space,Academic Research
+- DOMAIN-SUFFIX,kaggle.com,Academic Research
+- DOMAIN-SUFFIX,kaggle.io,Academic Research
+- DOMAIN-SUFFIX,kaggle.net,Academic Research
+- DOMAIN-SUFFIX,kaggleusercontent.com,Academic Research
+- DOMAIN-SUFFIX,colab.research.google.com,Academic Research
+- DOMAIN-SUFFIX,colab.google,Academic Research
+- DOMAIN-SUFFIX,scholar.googleusercontent.com,Academic Research
+- DOMAIN-SUFFIX,deepmind.com,Academic Research
+- DOMAIN-SUFFIX,deepmind.google,Academic Research
+- DOMAIN-SUFFIX,research.google,Academic Research
+- DOMAIN-SUFFIX,research.google.com,Academic Research
+- DOMAIN-SUFFIX,sciencedirect.com,Academic Research
+- DOMAIN-SUFFIX,sciencedirectassets.com,Academic Research
+- DOMAIN-SUFFIX,elsevier.com,Academic Research
+- DOMAIN-SUFFIX,elsevier.io,Academic Research
+- DOMAIN-SUFFIX,els-cdn.com,Academic Research
+- DOMAIN-SUFFIX,elsevier-ae.com,Academic Research
+- DOMAIN-SUFFIX,elseviercdn.cn,Academic Research
+- DOMAIN-SUFFIX,scopus.com,Academic Research
+- DOMAIN-SUFFIX,engineeringvillage.com,Academic Research
+- DOMAIN-SUFFIX,embase.com,Academic Research
+- DOMAIN-SUFFIX,reaxys.com,Academic Research
+- DOMAIN-SUFFIX,clinicalkey.com,Academic Research
+- DOMAIN-SUFFIX,knovel.com,Academic Research
+- DOMAIN-SUFFIX,scival.com,Academic Research
+- DOMAIN-SUFFIX,webofscience.com,Academic Research
+- DOMAIN-SUFFIX,webofknowledge.com,Academic Research
+- DOMAIN-SUFFIX,isiknowledge.com,Academic Research
+- DOMAIN-SUFFIX,clarivate.com,Academic Research
+- DOMAIN-SUFFIX,webofscience.clarivate.cn,Academic Research
+- DOMAIN-SUFFIX,springer.com,Academic Research
+- DOMAIN-SUFFIX,springerlink.com,Academic Research
+- DOMAIN-SUFFIX,springernature.com,Academic Research
+- DOMAIN-SUFFIX,nature.com,Academic Research
+- DOMAIN-SUFFIX,biomedcentral.com,Academic Research
+- DOMAIN-SUFFIX,wiley.com,Academic Research
+- DOMAIN-SUFFIX,wiley-vch.de,Academic Research
+- DOMAIN-SUFFIX,tandfonline.com,Academic Research
+- DOMAIN-SUFFIX,taylorfrancis.com,Academic Research
+- DOMAIN-SUFFIX,taylorandfrancis.com,Academic Research
+- DOMAIN-SUFFIX,tandf.co.uk,Academic Research
+- DOMAIN-SUFFIX,ieee.org,Academic Research
+- DOMAIN-SUFFIX,acm.org,Academic Research
+- DOMAIN-SUFFIX,theiet.org,Academic Research
+- DOMAIN-SUFFIX,ietdl.org,Academic Research
+- DOMAIN-SUFFIX,acs.org,Academic Research
+- DOMAIN-SUFFIX,rsc.org,Academic Research
+- DOMAIN-SUFFIX,aip.org,Academic Research
+- DOMAIN-SUFFIX,aps.org,Academic Research
+- DOMAIN-SUFFIX,iop.org,Academic Research
+- DOMAIN-SUFFIX,siam.org,Academic Research
+- DOMAIN-SUFFIX,asme.org,Academic Research
+- DOMAIN-SUFFIX,ascelibrary.org,Academic Research
+- DOMAIN-SUFFIX,astm.org,Academic Research
+- DOMAIN-SUFFIX,spiedigitallibrary.org,Academic Research
+- DOMAIN-SUFFIX,optica.org,Academic Research
+- DOMAIN-SUFFIX,osapublishing.org,Academic Research
+- DOMAIN-SUFFIX,scitation.org,Academic Research
+- DOMAIN-SUFFIX,informs.org,Academic Research
+- DOMAIN-SUFFIX,oup.com,Academic Research
+- DOMAIN-SUFFIX,cambridge.org,Academic Research
+- DOMAIN-SUFFIX,sagepub.com,Academic Research
+- DOMAIN-SUFFIX,jstor.org,Academic Research
+- DOMAIN-SUFFIX,proquest.com,Academic Research
+- DOMAIN-SUFFIX,ebsco.com,Academic Research
+- DOMAIN-SUFFIX,ebscohost.com,Academic Research
+- DOMAIN-SUFFIX,ebscohost.cloud,Academic Research
+- DOMAIN-SUFFIX,ebsco.io,Academic Research
+- DOMAIN-SUFFIX,ebscohost.io,Academic Research
+- DOMAIN-SUFFIX,ebsco-content.com,Academic Research
+- DOMAIN-SUFFIX,ebsco.zone,Academic Research
+- DOMAIN-SUFFIX,ebsco.babelscape.com,Academic Research
+- DOMAIN-SUFFIX,epnet.com,Academic Research
+- DOMAIN-SUFFIX,dynamed.com,Academic Research
+- DOMAIN-SUFFIX,gale.com,Academic Research
+- DOMAIN-SUFFIX,galegroup.com,Academic Research
+- DOMAIN-SUFFIX,ggsrv.com,Academic Research
+- DOMAIN-SUFFIX,emerald.com,Academic Research
+- DOMAIN-SUFFIX,degruyter.com,Academic Research
+- DOMAIN-SUFFIX,brill.com,Academic Research
+- DOMAIN-SUFFIX,annualreviews.org,Academic Research
+- DOMAIN-SUFFIX,worldscientific.com,Academic Research
+- DOMAIN-SUFFIX,karger.com,Academic Research
+- DOMAIN-SUFFIX,ovid.com,Academic Research
+- DOMAIN-SUFFIX,cochranelibrary.com,Academic Research
+- DOMAIN-SUFFIX,science.org,Academic Research
+- DOMAIN-SUFFIX,sciencemag.org,Academic Research
+- DOMAIN-SUFFIX,aaas.org,Academic Research
+- DOMAIN-SUFFIX,cell.com,Academic Research
+- DOMAIN-SUFFIX,thelancet.com,Academic Research
+- DOMAIN-SUFFIX,nejm.org,Academic Research
+- DOMAIN-SUFFIX,bmj.com,Academic Research
+- DOMAIN-SUFFIX,jamanetwork.com,Academic Research
+- DOMAIN-SUFFIX,arxiv.org,Academic Research
+- DOMAIN-SUFFIX,biorxiv.org,Academic Research
+- DOMAIN-SUFFIX,medrxiv.org,Academic Research
+- DOMAIN-SUFFIX,ncbi.nlm.nih.gov,Academic Research
+- DOMAIN-SUFFIX,europepmc.org,Academic Research
+- DOMAIN-SUFFIX,plos.org,Academic Research
+- DOMAIN-SUFFIX,mdpi.com,Academic Research
+- DOMAIN-SUFFIX,frontiersin.org,Academic Research
+- DOMAIN-SUFFIX,peerj.com,Academic Research
+- DOMAIN-SUFFIX,elifesciences.org,Academic Research
+- DOMAIN-SUFFIX,doaj.org,Academic Research
+- DOMAIN-SUFFIX,semanticscholar.org,Academic Research
+- DOMAIN-SUFFIX,openalex.org,Academic Research
+- DOMAIN-SUFFIX,dblp.org,Academic Research
+- DOMAIN-SUFFIX,openreview.net,Academic Research
+- DOMAIN-SUFFIX,aclweb.org,Academic Research
+- DOMAIN-SUFFIX,aclanthology.org,Academic Research
+- DOMAIN-SUFFIX,jmlr.org,Academic Research
+- DOMAIN-SUFFIX,inspirehep.net,Academic Research
+- DOMAIN-SUFFIX,researchgate.net,Academic Research
+- DOMAIN-SUFFIX,ssrn.com,Academic Research
+- DOMAIN-SUFFIX,osf.io,Academic Research
+- DOMAIN-SUFFIX,zenodo.org,Academic Research
+- DOMAIN-SUFFIX,figshare.com,Academic Research
+- DOMAIN-SUFFIX,datadryad.org,Academic Research
+- DOMAIN-SUFFIX,dataverse.harvard.edu,Academic Research
+- DOMAIN-SUFFIX,crossref.org,Academic Research
+- DOMAIN-SUFFIX,doi.org,Academic Research
+- DOMAIN-SUFFIX,orcid.org,Academic Research
+- DOMAIN-SUFFIX,mendeley.com,Academic Research
+- DOMAIN-SUFFIX,zotero.org,Academic Research
+- DOMAIN-SUFFIX,overleaf.com,Academic Research
+- DOMAIN-SUFFIX,openathens.net,Academic Research
+- DOMAIN-SUFFIX,openathens.org,Academic Research
+- DOMAIN-SUFFIX,oclc.org,Academic Research
+- DOMAIN-SUFFIX,worldcat.org,Academic Research
+- DOMAIN-SUFFIX,exlibrisgroup.com,Academic Research
+- DOMAIN-SUFFIX,serialssolutions.com,Academic Research
+- DOMAIN-SUFFIX,silverchair-cdn.com,Academic Research
+- DOMAIN-SUFFIX,literatumonline.com,Academic Research
+- DOMAIN-SUFFIX,scholar.google.com,Academic Research
+- DOMAIN-SUFFIX,scholar.google.com.hk,Academic Research
+- DOMAIN-SUFFIX,scholar.google.com.sg,Academic Research
+- DOMAIN-SUFFIX,scholar.google.com.tw,Academic Research
+- DOMAIN-SUFFIX,scholar.google.com.au,Academic Research
+- DOMAIN-SUFFIX,scholar.google.co.jp,Academic Research
+- DOMAIN-SUFFIX,scholar.google.co.uk,Academic Research
+- DOMAIN-SUFFIX,scholar.google.co.in,Academic Research
+- DOMAIN-SUFFIX,scholar.google.ca,Academic Research
+- DOMAIN-SUFFIX,scholar.google.de,Academic Research
+- DOMAIN-SUFFIX,scholar.google.fr,Academic Research
+- DOMAIN-SUFFIX,scholar.google.cn,Academic Research
+- DOMAIN-SUFFIX,scholar.google.com.cn,Academic Research
+- DOMAIN-SUFFIX,openxla.org,Developer Tools
+- DOMAIN-SUFFIX,tensorflow.org,Developer Tools
+- DOMAIN-SUFFIX,pytorch.org,Developer Tools
+- DOMAIN-SUFFIX,keras.io,Developer Tools
 - DOMAIN,ai.google.dev,AI Services
 - DOMAIN,alkalicore-pa.clients6.google.com,AI Services
 - DOMAIN,alkalimakersuite-pa.clients6.google.com,AI Services
@@ -229,9 +421,6 @@ rules:
 - DOMAIN-SUFFIX,antigravity.google,AI Services
 - DOMAIN-SUFFIX,api.ai,AI Services
 - DOMAIN-SUFFIX,bard.google.com,AI Services
-- DOMAIN-SUFFIX,colab.research.google.com,AI Services
-- DOMAIN-SUFFIX,deepmind.com,AI Services
-- DOMAIN-SUFFIX,deepmind.google,AI Services
 - DOMAIN-SUFFIX,developerprofiles-pa.googleapis.com,AI Services
 - DOMAIN-SUFFIX,flow.google,AI Services
 - DOMAIN-SUFFIX,flow.google.com,AI Services
@@ -257,7 +446,6 @@ rules:
 - DOMAIN-SUFFIX,robinfrontend-pa.googleapis.com,AI Services
 - DOMAIN-SUFFIX,stitch.withgoogle.com,AI Services
 - DOMAIN-SUFFIX,vids.google.com,AI Services
-- DOMAIN-SUFFIX,openxla.org,Google Services
 - GEOSITE,category-ads-all,Ad Block
 - GEOSITE,private,Direct Route
 - IP-CIDR,127.0.0.0/8,Direct Route,no-resolve
@@ -281,10 +469,6 @@ rules:
 - DOMAIN-SUFFIX,pypi.org,Developer Tools
 - DOMAIN-SUFFIX,docker.com,Developer Tools
 - DOMAIN-SUFFIX,docker.io,Developer Tools
-- DOMAIN-SUFFIX,arxiv.org,Academic Research
-- DOMAIN-SUFFIX,ieee.org,Academic Research
-- DOMAIN-SUFFIX,springer.com,Academic Research
-- DOMAIN-SUFFIX,nature.com,Academic Research
 - DOMAIN-SUFFIX,bing.com,Microsoft Global
 - DOMAIN-SUFFIX,bing.net,Microsoft Global
 - DOMAIN-SUFFIX,bingapis.com,Microsoft Global
@@ -830,10 +1014,6 @@ rules:
 - DOMAIN-SUFFIX,itasoftware.com,Google Services
 - DOMAIN-SUFFIX,j2objc.org,Google Services
 - DOMAIN-SUFFIX,jibemobile.com,Google Services
-- DOMAIN-SUFFIX,kaggle.com,Google Services
-- DOMAIN-SUFFIX,kaggle.io,Google Services
-- DOMAIN-SUFFIX,kaggle.net,Google Services
-- DOMAIN-SUFFIX,kaggleusercontent.com,Google Services
 - DOMAIN-SUFFIX,keyhole.com,Google Services
 - DOMAIN-SUFFIX,keytransparency.com,Google Services
 - DOMAIN-SUFFIX,keytransparency.foo,Google Services
@@ -911,7 +1091,6 @@ rules:
 - DOMAIN-SUFFIX,stxmosquitoproject.org,Google Services
 - DOMAIN-SUFFIX,synergyse.com,Google Services
 - DOMAIN-SUFFIX,tenor.com,Google Services
-- DOMAIN-SUFFIX,tensorflow.org,Google Services
 - DOMAIN-SUFFIX,tfhub.dev,Google Services
 - DOMAIN-SUFFIX,thecleversense.com,Google Services
 - DOMAIN-SUFFIX,thegooglestore.com,Google Services
