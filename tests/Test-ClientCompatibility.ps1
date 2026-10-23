@@ -42,10 +42,4 @@ foreach ($core in $cores) {
     $result = Invoke-MxhSingBoxCandidateCheck -ProjectRoot $ProjectRoot -CorePath $core -ConfigPath $candidate.SingBox
     if ($result.ExitCode -ne 0) { throw "Generated configuration compatibility failed: $($result.StdErr)" }
 }
-$academicPython = Get-Command python -ErrorAction Stop
-$academicResult = Invoke-VpsProcess -FilePath $academicPython.Source -ArgumentList @(
-    (Join-Path $ProjectRoot 'tests/academic-routing-native.py'), '--sing-box', $officialCore, '--mihomo', $mihomo
-) -TimeoutSeconds 60
-if ($academicResult.ExitCode -ne 0) { throw "Actual academic routing checks failed: $($academicResult.StdErr) $($academicResult.StdOut)" }
-Write-Host $academicResult.StdOut.Trim()
-Write-Host "Client compatibility passed: official core, Mihomo, five offline rules, generated pair, actual academic routing; May Route core included=$([bool]$MayRouteCorePath)"
+Write-Host "Client compatibility passed: official core, Mihomo, five offline rules, generated pair; May Route core included=$([bool]$MayRouteCorePath)"

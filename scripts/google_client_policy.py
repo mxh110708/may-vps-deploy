@@ -10,11 +10,82 @@ import json
 from pathlib import Path
 from typing import Any
 
-from academic_client_policy import apply_academic_clash, apply_academic_sing
-
 FIELDS = ("domain", "domain_suffix", "domain_keyword", "domain_regex")
 TYPES = dict(zip(FIELDS, ("DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "DOMAIN-REGEX")))
 AI, GOOGLE = "AI Services", "Google Services"
+RESEARCH = "Academic Research"
+HUGGING_FACE_SUFFIXES = ("huggingface.co", "hf.co")
+
+
+def hugging_face_name(name: str) -> bool:
+    return any(name == suffix or name.endswith("." + suffix) for suffix in HUGGING_FACE_SUFFIXES)
+
+
+def apply_hugging_face_clash(document: dict[str, Any]) -> None:
+    """Hub files and redirects share one research selector; never match all S3/CDN traffic."""
+    if not any(g.get("name") == RESEARCH for g in document.get("proxy-groups", [])):
+        raise ValueError("Hugging Face policy requires Academic Research")
+    kept = []
+    for rule in document.get("rules", []):
+        parts = str(rule).split(",")
+        if len(parts) == 3 and parts[0] in ("DOMAIN", "DOMAIN-SUFFIX") and parts[2] in (AI, RESEARCH) and hugging_face_name(parts[1]):
+            continue
+        kept.append(rule)
+    index = next((i for i, r in enumerate(kept) if str(r).split(",")[-1] in (AI, RESEARCH, "Ad Block") or str(r).startswith(("GEOSITE,cn,", "MATCH,"))), len(kept))
+    kept[index:index] = [f"DOMAIN-SUFFIX,{suffix},{RESEARCH}" for suffix in HUGGING_FACE_SUFFIXES]
+    document["rules"] = kept
+
+
+def _without_hugging_face(rule: dict[str, Any]) -> dict[str, Any] | None:
+    result = copy.deepcopy(rule)
+    if result.get("type", "default") != "default" or result.get("invert"):
+        return result
+    removed = False
+    for field in ("domain", "domain_suffix"):
+        values = result.get(field)
+        if values is None:
+            continue
+        entries = [values] if isinstance(values, str) else values
+        remaining = [d for d in entries if not hugging_face_name(d)]
+        if len(remaining) != len(entries):
+            removed = True
+            if remaining:
+                result[field] = remaining
+            else:
+                result.pop(field)
+    # Keep unrelated IP, rule-set and other matchers in a combined business rule.
+    if removed and not any(result.get(field) for field in (*FIELDS, "ip_cidr", "ip_is_private", "rule_set")):
+        return None
+    return result
+
+
+def apply_hugging_face_sing(document: dict[str, Any]) -> None:
+    if not any(g.get("tag") == RESEARCH for g in document.get("outbounds", [])):
+        raise ValueError("Hugging Face policy requires Academic Research")
+    route = document.setdefault("route", {})
+    kept = []
+    for rule in route.get("rules", []):
+        value = _without_hugging_face(rule) if rule.get("outbound") in (AI, RESEARCH) else copy.deepcopy(rule)
+        if value is not None:
+            kept.append(value)
+    index = next((i for i, r in enumerate(kept) if r.get("outbound") in (AI, RESEARCH, "Ad Block", "Catch-All") or "geosite-cn" in r.get("rule_set", [])), len(kept))
+    kept.insert(index, {"domain_suffix": list(HUGGING_FACE_SUFFIXES), "action": "route", "outbound": RESEARCH})
+    route["rules"] = kept
+    dns = document.setdefault("dns", {})
+    servers = dns.setdefault("servers", [])
+    fake = next((s["tag"] for s in servers if s.get("type") == "fakeip" and s.get("tag") == "dns-business-fakeip"), None)
+    fake = fake or next((s["tag"] for s in servers if s.get("type") == "fakeip"), "dns-business-fakeip")
+    if not any(s.get("tag") == fake for s in servers):
+        servers.append({"type": "fakeip", "tag": fake, "inet4_range": "198.18.0.0/15", "inet6_range": "fc00::/18"})
+    fake_tags = {s.get("tag") for s in servers if s.get("type") == "fakeip"}
+    dns_rules = []
+    for rule in dns.get("rules", []):
+        value = _without_hugging_face(rule) if rule.get("server") in fake_tags else copy.deepcopy(rule)
+        if value is not None:
+            dns_rules.append(value)
+    index = next((i for i, r in enumerate(dns_rules) if r.get("server") in fake_tags or r.get("clash_mode") == "Global"), len(dns_rules))
+    dns_rules.insert(index, {"domain_suffix": list(HUGGING_FACE_SUFFIXES), "query_type": ["A"], "action": "route", "server": fake})
+    dns["rules"] = dns_rules
 
 
 def load_policy() -> dict[str, Any]:
@@ -79,7 +150,7 @@ def apply_clash(document: dict[str, Any], policy: dict[str, Any]) -> None:
     policy_map = dns.setdefault("nameserver-policy", {})
     for name in private:
         policy_map[name] = copy.deepcopy(dns.get("direct-nameserver", dns.get("default-nameserver", [])))
-    apply_academic_clash(document)
+    apply_hugging_face_clash(document)
 
 
 def apply_sing(document: dict[str, Any], policy: dict[str, Any]) -> None:
@@ -137,4 +208,4 @@ def apply_sing(document: dict[str, Any], policy: dict[str, Any]) -> None:
     priority.insert(0, private_rule)
     original[index:index] = priority
     dns["rules"] = original
-    apply_academic_sing(document)
+    apply_hugging_face_sing(document)

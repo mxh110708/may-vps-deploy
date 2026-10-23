@@ -13,8 +13,7 @@ from ruamel.yaml import YAML
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from google_client_policy import apply_clash, apply_sing, load_policy
-from academic_client_policy import apply_academic_clash, apply_academic_sing
+from google_client_policy import apply_clash, apply_sing, load_policy, apply_hugging_face_clash, apply_hugging_face_sing
 
 
 def domain_match(rule, name):
@@ -50,7 +49,7 @@ class GoogleClientPolicyTests(unittest.TestCase):
         cases = {"gemini.google.com": "AI Services", "generativelanguage.googleapis.com": "AI Services", "aiplatform.googleapis.com": "Google Services", "ai.google.dev": "AI Services",
                  "notebooklm.google.com": "AI Services", "jules.google": "AI Services", "www.google.com": "Google Services", "www.google.co.jp": "Google Services",
                  "mail.google.com": "Google Services", "storage.googleapis.com": "Google Services", "youtube.com": "Google Services", "googlevideo.com": "Google Services",
-                 "ytimg.com": "Google Services", "openxla.org": "Developer Tools", "google": "Direct Route", "chrome": "Direct Route", "youtube": "Direct Route",
+                 "ytimg.com": "Google Services", "openxla.org": "Google Services", "google": "Direct Route", "chrome": "Direct Route", "youtube": "Direct Route",
                  "netflix.com": "Streaming Media", "huggingface.co": "Academic Research", "arxiv.org": "Academic Research", "google.com.evil.example": "Catch-All"}
         for name, target in cases.items():
             with self.subTest(name=name):
@@ -58,7 +57,7 @@ class GoogleClientPolicyTests(unittest.TestCase):
                 self.assertEqual(sing_target(self.sing, name), target)
         # A retained OpenX advertising keyword must not hide the ML project.
         c = copy.deepcopy(self.clash); c["rules"].insert(0, "DOMAIN-KEYWORD,openx,Ad Block"); apply_clash(c, self.policy)
-        self.assertEqual(clash_target(c, "openxla.org"), "Developer Tools")
+        self.assertEqual(clash_target(c, "openxla.org"), "Google Services")
         self.assertEqual(clash_target(c, "openx.net"), "Ad Block")
 
     def test_all_public_domain_matchers(self):
@@ -67,11 +66,6 @@ class GoogleClientPolicyTests(unittest.TestCase):
                 for value in matches.get(field, []):
                     for name in [value] + (["policy-test." + value] if field == "domain_suffix" else []):
                         expected = "Direct Route" if name in self.policy["private_bare_names"] else target
-                        academic = ("colab.research.google.com", "colab.google", "kaggle.com", "kaggle.io", "kaggle.net", "kaggleusercontent.com", "deepmind.com", "deepmind.google", "research.google", "research.google.com")
-                        if any(name == domain or name.endswith("." + domain) for domain in academic):
-                            expected = "Academic Research"
-                        if any(name == domain or name.endswith("." + domain) for domain in ("openxla.org", "tensorflow.org", "pytorch.org", "keras.io")):
-                            expected = "Developer Tools"
                         with self.subTest(name=name):
                             self.assertEqual(clash_target(self.clash, name), expected)
                             self.assertEqual(sing_target(self.sing, name), expected)
@@ -105,13 +99,13 @@ class GoogleClientPolicyTests(unittest.TestCase):
         before_c = copy.deepcopy(c["proxy-groups"]); before_s = copy.deepcopy(s["outbounds"])
         s["route"]["rules"].append({"domain_suffix": ["hf.co", "other-ai.example"], "ip_cidr": ["192.0.2.0/24"], "action": "route", "outbound": "AI Services"})
         s["route"]["rules"].append({"domain_suffix": ["hf.co"], "network": "tcp", "port": [443], "action": "route", "outbound": "AI Services"})
-        apply_academic_clash(c); apply_academic_sing(s)
+        apply_hugging_face_clash(c); apply_hugging_face_sing(s)
         self.assertEqual(c["proxy-groups"], before_c); self.assertEqual(s["outbounds"], before_s)
         self.assertTrue(any(r.get("domain_suffix") == ["other-ai.example"] and r.get("ip_cidr") == ["192.0.2.0/24"] for r in s["route"]["rules"]))
         self.assertFalse(any(r.get("outbound") == "AI Services" and "hf.co" in r.get("domain_suffix", []) for r in s["route"]["rules"]))
         self.assertFalse(any(r.get("outbound") == "AI Services" and r.get("network") == "tcp" and r.get("port") == [443] for r in s["route"]["rules"]))
         once_c, once_s = copy.deepcopy(c), copy.deepcopy(s)
-        apply_academic_clash(c); apply_academic_sing(s)
+        apply_hugging_face_clash(c); apply_hugging_face_sing(s)
         self.assertEqual(c, once_c); self.assertEqual(s, once_s)
 
     def test_hugging_face_patch_reuses_an_existing_fakeip_server(self):
@@ -121,7 +115,7 @@ class GoogleClientPolicyTests(unittest.TestCase):
         for rule in s["dns"]["rules"]:
             if rule.get("server") == "dns-business-fakeip": rule["server"] = "owner-fakeip"
         servers = copy.deepcopy(s["dns"]["servers"])
-        apply_academic_sing(s)
+        apply_hugging_face_sing(s)
         self.assertEqual(s["dns"]["servers"], servers)
         rule = next(r for r in s["dns"]["rules"] if domain_match(r, "us.aws.cdn.hf.co"))
         self.assertEqual(rule["server"], "owner-fakeip")
