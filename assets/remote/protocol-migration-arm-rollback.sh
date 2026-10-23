@@ -33,9 +33,11 @@ components="${VPS_PARAM_COMPONENTS:-Protocols,Network,Firewall}"
 IFS=',' read -r -a component_list <<<"$components"
 ((${#component_list[@]} > 0))
 for component in "${component_list[@]}"; do
-  case "$component" in Protocols|RealityEntry|AnyTlsEntry|ShadowsocksLanding|TrustedTls|Network|Firewall|KomariAgent|KomariController|Cloudflared) ;; *) echo 'Unsupported transaction component.' >&2; exit 1 ;; esac
+  case "$component" in Protocols|RealityEntry|AnyTlsEntry|ShadowsocksLanding|TrustedTls|Network|Firewall|KomariAgent|KomariController|Cloudflared|TcpForwarding|UdpForwarding) ;; *) echo 'Unsupported transaction component.' >&2; exit 1 ;; esac
 done
 scope_has(){ [[ ",$components," == *",$1,"* ]]; }
+if scope_has TcpForwarding; then python3 -c "$VPS_TCP_FORWARD_PROGRAM" verify "${VPS_PARAM_TCP_FORWARD_EXPECTED_HASH:?}"; fi
+if scope_has UdpForwarding; then python3 -c "$VPS_UDP_FORWARD_PROGRAM" verify "${VPS_PARAM_UDP_FORWARD_EXPECTED_HASH:?}"; fi
 printf '%s\n' "$components" > "$backup_dir/components"
 printf '%s\n' "$backup_dir" > "$owner"
 chmod 0600 "$owner"
@@ -56,6 +58,16 @@ if scope_has Network && [[ "${VPS_PARAM_NETWORK_SNAPSHOT:-false}" == true ]]; th
 fi
 printf '%s\n' "$VPS_PARAM_SOURCE_ROLE" > "$backup_dir/source-role"
 printf '%s\n' "$VPS_PARAM_TARGET_ROLE" > "$backup_dir/target-role"
+if scope_has TcpForwarding; then
+  python3 -c "$VPS_TCP_FORWARD_PROGRAM" snapshot "$backup_dir"
+  printf '%s' "$VPS_TCP_FORWARD_PROGRAM" > "$backup_dir/tcp-forwarding.py"
+  (cd "$backup_dir" && sha256sum tcp-forwarding.py > tcp-forward-program.sha256)
+fi
+if scope_has UdpForwarding; then
+  python3 -c "$VPS_UDP_FORWARD_PROGRAM" snapshot "$backup_dir"
+  printf '%s' "$VPS_UDP_FORWARD_PROGRAM" > "$backup_dir/udp-forwarding.py"
+  (cd "$backup_dir" && sha256sum udp-forwarding.py > udp-forward-program.sha256)
+fi
 
 service_snapshot() {
   local role="$1" service="$2" binary="$3" config="$4"
@@ -107,6 +119,20 @@ if [[ "$quiesce_controller" == true ]]; then
 fi
 
 candidate_paths=()
+if scope_has UdpForwarding; then
+  udp_forwarding_paths="$(python3 -c "$VPS_UDP_FORWARD_PROGRAM" paths)"
+  if [[ -n "$udp_forwarding_paths" ]]; then
+    mapfile -t udp_forwarding_path_list <<<"$udp_forwarding_paths"
+    candidate_paths+=("${udp_forwarding_path_list[@]}")
+  fi
+fi
+if scope_has TcpForwarding; then
+  forwarding_paths="$(python3 -c "$VPS_TCP_FORWARD_PROGRAM" paths)"
+  if [[ -n "$forwarding_paths" ]]; then
+    mapfile -t forwarding_path_list <<<"$forwarding_paths"
+    candidate_paths+=("${forwarding_path_list[@]}")
+  fi
+fi
 if scope_has Protocols; then candidate_paths+=(
   usr/local/bin/xray usr/local/etc/xray usr/local/share/xray
   etc/systemd/system/xray.service etc/systemd/system/xray@.service etc/systemd/system/xray.service.d
@@ -169,6 +195,16 @@ if [[ "${2:-}" == '--transaction' ]]; then
   [[ ! -f "$backup_dir/transaction-committed" ]] || exit 0
   [[ "$(cat /var/lib/may-vps-deploy/transaction.owner)" == "$backup_dir" ]]
 fi
+if scope_has TcpForwarding; then
+  [[ -f "$backup_dir/tcp-forwarding.py" && ! -L "$backup_dir/tcp-forwarding.py" ]]
+  (cd "$backup_dir" && sha256sum -c tcp-forward-program.sha256 >/dev/null)
+  python3 "$backup_dir/tcp-forwarding.py" rollback-check "$backup_dir"
+fi
+if scope_has UdpForwarding; then
+  [[ -f "$backup_dir/udp-forwarding.py" && ! -L "$backup_dir/udp-forwarding.py" ]]
+  (cd "$backup_dir" && sha256sum -c udp-forward-program.sha256 >/dev/null)
+  python3 "$backup_dir/udp-forwarding.py" rollback-check "$backup_dir"
+fi
 if scope_has Firewall && [[ -f "$backup_dir/nftables.conf" ]]; then
   [[ -f "$backup_dir/firewall-state.json" ]] || { echo 'Legacy firewall snapshot needs explicit ownership review.' >&2; exit 1; }
   # shellcheck disable=SC1091
@@ -205,6 +241,12 @@ cleanup_role() {
   esac
 }
 
+if scope_has TcpForwarding; then
+  python3 "$backup_dir/tcp-forwarding.py" rollback-prepare "$backup_dir"
+fi
+if scope_has UdpForwarding; then
+  python3 "$backup_dir/udp-forwarding.py" rollback-prepare "$backup_dir"
+fi
 for role in RealityEntry AnyTlsEntry ShadowsocksLanding; do
   if ! scope_has Protocols && ! scope_has "$role"; then continue; fi
   case "$role" in RealityEntry) service=xray.service ;; AnyTlsEntry) service=sing-box-anytls.service ;; ShadowsocksLanding) service=sing-box.service ;; esac
@@ -348,6 +390,8 @@ restore_aux() {
 if scope_has KomariAgent; then restore_aux KomariAgent komari-agent.service; fi
 if scope_has KomariController; then restore_aux KomariController komari.service; fi
 if scope_has Cloudflared; then restore_aux Cloudflared cloudflared.service; fi
+if scope_has TcpForwarding; then python3 "$backup_dir/tcp-forwarding.py" rollback-complete "$backup_dir"; fi
+if scope_has UdpForwarding; then python3 "$backup_dir/udp-forwarding.py" rollback-complete "$backup_dir"; fi
 date -u +%FT%TZ > "$backup_dir/rollback-executed"
 if [[ "${2:-}" == '--transaction' ]]; then
   rm -f /var/lib/may-vps-deploy/transaction.owner

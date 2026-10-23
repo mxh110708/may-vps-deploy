@@ -107,6 +107,8 @@ public static class ComponentInstallations
         }
         var ports = ListeningPorts(plan, component);
         var occupied = DeploymentPlans.Roles[..3].Where(role => ProtocolInstalled(current, role)).SelectMany(role => ListeningPorts(current, role)).Concat(new[] { current.Number("Ports.SshPrimary"), current.Number("Ports.SshRescue"), current.Number("Server.BootstrapSshPort"), state.Number("CurrentManagementPort"), current.Number("KomariController.Port"), current.Number("Cloudflared.MetricsPort"), current.Text("Reality.TargetMode") == "LocalOwnedTls" ? current.Number("Reality.LocalHttpsPort") : 0 });
+        occupied = occupied.Concat(TcpForwarding.Rules(current["TcpForwarding"] as JsonObject).Select(r => r.Number("ListenPort")));
+        if (component == "ShadowsocksLanding") occupied = occupied.Concat(UdpForwarding.Rules(current["UdpForwarding"] as JsonObject).Select(r => r.Number("ListenPort")));
         if (ports.Any(port => port is < 1 or > 65535 || occupied.Contains(port)) || ports.Distinct().Count() != ports.Length) throw new OperationException("新组件端口无效或与既有入口冲突，请选择独立端口。", code: "InstallationPortConflict");
         if (DeploymentPlans.Roles[..3].Contains(component))
         {

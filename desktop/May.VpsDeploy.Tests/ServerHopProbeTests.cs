@@ -71,7 +71,19 @@ with socket.socket() as listener:
             var target = Process.Start(targetStart)!; children.Add(target); var targetReady = await target.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5), stop.Token); serverLogs.Add(target.StandardOutput.ReadToEndAsync()); serverLogs.Add(target.StandardError.ReadToEndAsync()); Check(targetReady == "READY", "synthetic TLS target did not start");
             using (var directHandler = new HttpClientHandler { UseProxy = false, ServerCertificateCustomValidationCallback = (_, cert, _, _) => cert?.Thumbprint == certificate.Thumbprint })
             using (var direct = new HttpClient(directHandler) { Timeout = TimeSpan.FromSeconds(5) }) Check(await direct.GetStringAsync("https://127.0.0.1:" + tlsPort, stop.Token) == "198.51.100.21", "synthetic TLS egress target unavailable before proxy acceptance");
-            for (var i = 0; i < 60; i++) { try { using var ready = new TcpClient(); await ready.ConnectAsync(IPAddress.Loopback, landingPort, stop.Token); break; } catch (SocketException) { await Task.Delay(50, stop.Token); } }
+            var landingReady = false;
+            for (var i = 0; i < 60 && !process.HasExited; i++)
+            {
+                using var attempt = CancellationTokenSource.CreateLinkedTokenSource(stop.Token); attempt.CancelAfter(TimeSpan.FromMilliseconds(500));
+                try { using var ready = new TcpClient(); await ready.ConnectAsync(IPAddress.Loopback, landingPort, attempt.Token); landingReady = true; break; }
+                catch (SocketException) { await Task.Delay(50, stop.Token); }
+                catch (OperationCanceledException) when (!stop.IsCancellationRequested) { }
+            }
+            if (!landingReady)
+            {
+                if (!process.HasExited) process.Kill(true); await process.WaitForExitAsync();
+                throw new Exception("Synthetic Shadowsocks listener did not start: " + (await landingError).Replace(password, "[synthetic-secret]", StringComparison.Ordinal));
+            }
             var asset = File.ReadAllText(Path.Combine(repository, "assets/remote/server-hop-probe.sh")).Replace("\r\n", "\n");
             var source = asset.Split("<<'PY'\n", StringSplitOptions.None)[1]; source = source[..source.LastIndexOf("\nPY", StringComparison.Ordinal)];
             source = source.Replace("PROBE_HOST_V4 = 'api.ipify.org'", "PROBE_HOST_V4 = 'localhost'").Replace("PROBE_PORT = 443", "PROBE_PORT = " + tlsPort);

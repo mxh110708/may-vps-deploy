@@ -46,7 +46,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
         this.paths = paths; launchArguments = arguments; testSession = session; store = new(paths, new WindowsSecretProtector());
         var assets = new ValidationAssets(paths, "windows-amd64"); var tools = new ExternalToolRunner();
         IRemoteSessionFactory remote = new SshSessionFactory(store); if (session != null) remote = session.Restrict(remote);
-        coordinator = new(store, new WorkflowEngine(store, remote, new ManagedKeys(new WindowsManagedKeyAccess()), this, new ProtocolValidation(assets, tools, store), new NetworkMeasurement(assets, tools)));
+        coordinator = new(store, new WorkflowEngine(store, remote, new ManagedKeys(new WindowsManagedKeyAccess()), this, new ProtocolValidation(assets, tools, store), new NetworkMeasurement(assets, tools), new TcpForwardValidation(store, new ClientRouteDiagnostics(assets, tools)), new UdpForwardValidation(store, assets, tools)));
         workbench = new(store, tools, assets, paths.Resolve("runtime/python/python.exe"));
         clientDiagnostics = new(assets, tools);
         var preference = paths.Resolve("private/desktop-settings.json"); settings = File.Exists(preference) ? ArchiveStore.ReadJson(preference) : new JsonObject { ["AutoCheckUpdates"] = false, ["UpdateProxy"] = "http://127.0.0.1:2080" };
@@ -180,6 +180,10 @@ public sealed partial class MainWindow : Window, IUserInteraction
             if (status.Managed && !status.NeedsRecovery)
             {
             details.Children.Add(GroupLabel("日常维护"));
+            var forwarding = TcpForwarding.Rules(plan["TcpForwarding"] as JsonObject).ToArray();
+            details.Children.Add(SettingsGroup(SettingRow("独立 TCP 端口转发", forwarding.Length == 0 ? "按需激活、来源白名单与实际转发验收" : forwarding.Count(r => r.Flag("Enabled")) + " 条已启用 · " + forwarding.Length + " 条已保存；实际状态需核对", Symbol.Forward, Action("管理转发", () => TcpForwardSheet(relative, plan)))));
+            var udpForwarding = UdpForwarding.Rules(plan["UdpForwarding"] as JsonObject).ToArray();
+            details.Children.Add(SettingsGroup(SettingRow("独立 UDP 端口转发", udpForwarding.Length == 0 ? "独立会话、来源白名单与真实 UDP 往返验收" : udpForwarding.Count(r => r.Flag("Enabled")) + " 条已启用 · " + udpForwarding.Length + " 条已保存；实际状态需核对", Symbol.Forward, Action("管理 UDP 转发", () => UdpForwardSheet(relative, plan)))));
             details.Children.Add(SettingsGroup(
                 SettingRow("健康检查", "读取服务、监听与管理入口的当前状态", Symbol.Sync, Action("检查", () => Submit(new(OperationKind.HealthAudit, selectedInstance, new())))),
                 SettingRow("代理协议", "管理已安装协议的启用、停用、切换与卸载", Symbol.Setting, Action("协议管理", () => OperationSheet(OperationKind.ProtocolState, plan))),

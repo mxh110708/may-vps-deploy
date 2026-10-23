@@ -289,6 +289,18 @@ nft(){ [[ "$1" != -f ]] || { ! grep -q 'flush ruleset' "$2" || return 90; }; }
             dropped = live.replace(' tcp dport 8443 accept', ' drop\n tcp dport 8443 accept')
             with self.assertRaisesRegex(SystemExit, 'runtime has drifted'): self.firewall('check', root, dropped, parameters=parameters)
 
+    def test_managed_firewall_tracks_udp_forward_ports_separately(self):
+        with tempfile.TemporaryDirectory(dir=ROOT/'.tmp') as folder:
+            root = Path(folder)
+            source = 'table inet filter {\n chain input {\n type filter hook input priority 0; policy drop;\n iifname "lo" accept\n ct state invalid drop\n ct state established,related accept\n tcp dport { 22,443 } accept\n udp dport { 55002,55003 } accept\n udp sport 67 udp dport 68 accept\n udp sport 547 udp dport 546 accept\n ip protocol icmp accept\n ip6 nexthdr ipv6-icmp accept\n }\n chain forward {\n type filter hook forward priority 0; policy drop;\n }\n chain output {\n type filter hook output priority 0; policy accept;\n }\n}\n'
+            (root/'nftables.conf').write_text(source)
+            parameters = {'VPS_PARAM_TCP_PORTS': '22,443', 'VPS_PARAM_UDP_PORTS': '55002,55003', 'VPS_PARAM_RESTRICTED_PORT': ''}
+            self.firewall('check', root, source, parameters=parameters)
+            with self.assertRaises(SystemExit):
+                self.firewall('check', root, source, parameters=dict(parameters, VPS_PARAM_UDP_PORTS='55002'))
+            with self.assertRaises(SystemExit):
+                self.firewall('check', root, source.replace('55003', '55004'), parameters=parameters)
+
     def test_basic_network_applies_only_selected_keys(self):
         if not BASH: self.skipTest('Bash unavailable')
         with tempfile.TemporaryDirectory(dir=ROOT/'.tmp') as folder:

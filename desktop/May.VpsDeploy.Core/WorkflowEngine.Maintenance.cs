@@ -15,6 +15,14 @@ public sealed partial class WorkflowEngine
         if (Regex.IsMatch(agentUpgrade.Text("Sha256"), "^[a-f0-9]{64}$") && Regex.IsMatch(agentUpgrade.Text("Version"), @"^[0-9]+\.[0-9]+\.[0-9]+$")) releases[agentUpgrade.Text("Sha256")] = agentUpgrade.Text("Version");
         var r = await c.Run("maintenance-health-audit.sh", new() { ["AGENT_RELEASES_JSON"] = releases.ToJsonString() }, timeout: 300);
         var audit = JsonNode.Parse(RemoteAssets.Marker(r.Output, "HEALTH_AUDIT"))!.AsObject();
+        foreach (var (component, asset, marker) in new[] { ("TcpForwarding", "tcp-forward-read.sh", "TCP_FORWARD"), ("UdpForwarding", "udp-forward-read.sh", "UDP_FORWARD") })
+        {
+            if (c.Plan[component] == null) continue;
+            var matched = false;
+            try { var forward = await c.Run(asset, marker: marker + "_READ"); var current = JsonNode.Parse(RemoteAssets.Marker(forward.Output, marker + "_STATE"))!; matched = current.Text("Hash") == c.State.Text(component + ".RemoteHash") && current["Configuration"] != null && ArchiveStore.Fingerprint(current["Configuration"]!) == ArchiveStore.Fingerprint(c.Plan[component]!); }
+            catch (Exception error) when (error is OperationException or IOException or System.Text.Json.JsonException) { }
+            audit[component] = new JsonObject { ["MatchesArchive"] = matched, ["Scope"] = "ConfigurationSocketsWhitelist" };
+        }
         ArchiveStore.WriteJson(c.File("health-audits/" + c.Id + ".json"), audit);
         c.State["HealthReport"] = HealthReports.Build(c.Plan, c.State, audit);
         c.Warnings |= c.State.Text("HealthReport.Status") != "Passed";
@@ -53,6 +61,8 @@ public sealed partial class WorkflowEngine
         store.WriteSecret(SafePath.Resolve(backup, "secrets.dotnet.private.json"), c.Secrets); c.Save();
         var role = DeploymentPlans.Roles.Contains(c.Plan.Text("Role")) ? c.Plan.Text("Role") : "MonitorOnly";
         var parameters = new Dictionary<string, string> { ["SOURCE_ROLE"] = role, ["TARGET_ROLE"] = role, ["TIMEOUT_MINUTES"] = c.Request.Kind == OperationKind.InstallComponent ? "60" : "20", ["QUIESCE_KOMARI_CONTROLLER"] = Bool(components.Contains("KomariController")), ["COMPONENTS"] = string.Join(',', components), ["CONTROL_TASK_ID"] = c.Id, ["NETWORK_SNAPSHOT"] = Bool(c.Request.Kind == OperationKind.TuneNetwork) };
+        if (components.Contains("TcpForwarding")) parameters["TCP_FORWARD_EXPECTED_HASH"] = c.State.Text("TcpForwarding.RemoteHash", "Absent");
+        if (components.Contains("UdpForwarding")) parameters["UDP_FORWARD_EXPECTED_HASH"] = c.State.Text("UdpForwarding.RemoteHash", "Absent");
         if (components.Contains("Firewall")) foreach (var field in FirewallParameters(c.Plan, true)) parameters[field.Key] = field.Value;
         var result = await c.Run("protocol-migration-arm-rollback.sh", parameters, true, 600);
         c.Pending["RemoteBackup"] = RemoteAssets.Marker(result.Output, "BACKUP_DIR"); c.Pending["Phase"] = "Armed"; c.Save();
@@ -158,6 +168,8 @@ public sealed partial class WorkflowEngine
         }
         if (components.Contains("Network")) { Restore(c.Plan, oldPlan, "NetworkTuning"); Restore(c.State, oldState, "NetworkTuning"); }
         if (components.Contains("Firewall")) Restore(c.Plan, oldPlan, "Firewall");
+        if (components.Contains("TcpForwarding")) { Restore(c.Plan, oldPlan, "TcpForwarding"); Restore(c.State, oldState, "TcpForwarding"); }
+        if (components.Contains("UdpForwarding")) { Restore(c.Plan, oldPlan, "UdpForwarding"); Restore(c.State, oldState, "UdpForwarding"); }
         if (components.Contains("KomariAgent")) { Restore(c.Plan, oldPlan, "Komari"); Restore(c.Secrets, oldSecrets, "KomariAgent"); Restore(c.State, oldState, "KomariInstalled"); }
         if (components.Contains("KomariController")) Restore(c.State, oldState, "KomariController");
         if (components.Contains("Cloudflared")) { Restore(c.State, oldState, "Cloudflared"); Restore(c.Secrets, oldSecrets, "Cloudflared"); }
@@ -278,6 +290,8 @@ public sealed partial class WorkflowEngine
     }
     private static void ValidateMaintenance(Context c)
     {
+        if (c.Request.Kind == OperationKind.Decommission && c.Plan["TcpForwarding"] != null) throw new OperationException("请先在独立 TCP 转发中移除受管转发组件，再退役此实例。", code: "ForwardingStillInstalled");
+        if (c.Request.Kind == OperationKind.Decommission && c.Plan["UdpForwarding"] != null) throw new OperationException("请先在独立 UDP 转发中移除受管转发组件，再退役此实例。", code: "ForwardingStillInstalled");
         var options = c.Request.Options; var role = options.Text("Protocol");
         if (c.Request.Kind is OperationKind.ProtocolState or OperationKind.RotateCredentials || c.Request.Kind == OperationKind.Upgrade && options.Text("Scope") == "Protocol")
         {
@@ -497,8 +511,13 @@ public sealed partial class WorkflowEngine
             foreach (var role in DeploymentPlans.Roles[..3]) if (ComponentInstallations.ProtocolInstalled(c.Plan, role) != ComponentInstallations.ProtocolInstalled(oldPlan, role) || Enabled(c.Plan, role) != Enabled(oldPlan, role)) throw new OperationException("配置恢复需要相同的协议安装与启用状态，请选择完整协议恢复。");
             foreach (var field in new[] { "Reality.XrayVersion", "AnyTls.SingBoxVersion", "Shadowsocks.SingBoxVersion", "Ports.XrayPrimary", "Ports.XrayBackup", "Ports.AnyTlsPrimary", "Ports.LandingShadowsocks" }) if (c.Plan.Text(field) != oldPlan.Text(field)) throw new OperationException("当前程序版本或监听端口与配置归档不兼容。");
         }
-        if (c.Plan.Text("Firewall.Mode") != "PreserveExisting" && !FirewallParameters(c.Plan, true).OrderBy(p => p.Key).SequenceEqual(FirewallParameters(oldPlan, true).OrderBy(p => p.Key))) throw new OperationException("协议恢复点需要的监听或可信入口与当前防火墙不同。此次范围保留防火墙，请先切换到兼容的协议状态，未开始恢复。");
+        var firewallPlan = oldPlan.DeepClone().AsObject();
+        if (c.Plan["TcpForwarding"] != null) firewallPlan["TcpForwarding"] = c.Plan["TcpForwarding"]!.DeepClone(); else firewallPlan.Remove("TcpForwarding");
+        if (c.Plan["UdpForwarding"] != null) firewallPlan["UdpForwarding"] = c.Plan["UdpForwarding"]!.DeepClone(); else firewallPlan.Remove("UdpForwarding");
+        if (c.Plan.Text("Firewall.Mode") != "PreserveExisting" && !FirewallParameters(c.Plan, true).OrderBy(p => p.Key).SequenceEqual(FirewallParameters(firewallPlan, true).OrderBy(p => p.Key))) throw new OperationException("协议恢复点需要的监听或可信入口与当前防火墙不同。此次范围保留防火墙，请先切换到兼容的协议状态，未开始恢复。");
         var reserved = new List<int> { c.Plan.Number("Ports.SshPrimary"), c.Plan.Number("Ports.SshRescue") };
+        reserved.AddRange(TcpForwarding.Rules(c.Plan["TcpForwarding"] as JsonObject).Select(r => r.Number("ListenPort")));
+        if (Enabled(oldPlan, "ShadowsocksLanding") && UdpForwarding.Rules(c.Plan["UdpForwarding"] as JsonObject).Any(r => r.Number("ListenPort") == oldPlan.Number("Ports.LandingShadowsocks"))) throw new OperationException("协议恢复点与当前 UDP 转发端口冲突，未开始恢复。");
         if (c.State.Flag("KomariController.Installed") || c.State.Flag("MonitoringInventory.KomariController.Installed")) reserved.Add(c.Plan.Number("KomariController.Port", 25774));
         if (c.State.Flag("Cloudflared.Installed") || c.State.Flag("MonitoringInventory.Cloudflared.Installed")) reserved.Add(c.Plan.Number("Cloudflared.MetricsPort", 20241));
         if (DeploymentPlans.Roles[..3].Where(role => Enabled(oldPlan, role)).SelectMany(role => ComponentInstallations.ListeningPorts(oldPlan, role)).Any(reserved.Contains)) throw new OperationException("协议恢复点监听端口与当前管理或监控入口冲突，未开始恢复。");

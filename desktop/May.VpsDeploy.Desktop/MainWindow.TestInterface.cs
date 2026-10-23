@@ -152,6 +152,8 @@ public sealed partial class MainWindow
             case "suite.client-output":
             case "suite.server-outbound":
             case "suite.client-share":
+            case "suite.tcp-forward":
+            case "suite.udp-forward":
             case "suite.run":
             {
                 if (taskCancellation != null || activeTestDialog != null || testSuiteState == "running") throw new OperationException("当前状态不能开始界面回归。");
@@ -174,10 +176,12 @@ public sealed partial class MainWindow
                         if (command is "suite.run" or "suite.client-output") await Run("client_output", ClientOutputRegression);
                         if (command is "suite.run" or "suite.server-outbound") await Run("server_outbound", ServerOutboundRegression);
                         if (command is "suite.run" or "suite.client-share") await Run("client_share", ClientShareRegression);
+                        if (command is "suite.run" or "suite.tcp-forward") await Run("tcp_forward", TcpForwardRegression);
+                        if (command is "suite.run" or "suite.udp-forward") await Run("udp_forward", UdpForwardRegression);
                         if (testActivations != 0 || testForegroundSamples != 0) throw new OperationException("界面回归获得前台焦点。");
                         testSuiteResult = result; testSuiteState = "passed";
                     }
-                    catch (Exception error) { testSuiteState = "failed"; testSuiteResult = new() { ["error"] = error.GetType().Name, ["safe_message"] = error is OperationException safe ? safe.Message : "原生界面回归失败。" }; }
+                    catch (Exception error) { RecordTestFailure(error); testSuiteState = "failed"; testSuiteResult = new() { ["error"] = error.GetType().Name, ["safe_message"] = error is OperationException safe ? safe.Message : "原生界面回归失败。" }; }
                     Checkpoint();
                     SelectPage("overview");
                 }); return new() { ["state"] = testSuiteState };

@@ -194,8 +194,9 @@ public sealed partial class WorkflowEngine
         if (!final) tcp.Add(plan.Number("Server.BootstrapSshPort"));
         if (Enabled(plan, "RealityEntry")) { tcp.Add(plan.Number("Ports.XrayPrimary")); if (plan.Number("Ports.XrayBackup") > 0) tcp.Add(plan.Number("Ports.XrayBackup")); }
         if (Enabled(plan, "AnyTlsEntry")) tcp.Add(plan.Number("Ports.AnyTlsPrimary"));
+        tcp.AddRange(TcpForwarding.Rules(plan["TcpForwarding"] as JsonObject).Where(r => r.Flag("Enabled")).Select(r => r.Number("ListenPort")));
         var ss = Enabled(plan, "ShadowsocksLanding");
-        return new() { ["TCP_PORTS"] = string.Join(',', tcp.Distinct()), ["RESTRICTED_PORT"] = ss ? plan.Text("Ports.LandingShadowsocks") : "", ["ALLOWED_IPV4S"] = ss ? string.Join(',', plan.Strings("Shadowsocks.TrustedEntryIPv4s")) : "", ["ALLOWED_IPV6S"] = ss ? string.Join(',', plan.Strings("Shadowsocks.TrustedEntryIPv6s")) : "" };
+        return new() { ["TCP_PORTS"] = string.Join(',', tcp.Distinct()), ["UDP_PORTS"] = string.Join(',', UdpForwarding.Rules(plan["UdpForwarding"] as JsonObject).Where(r => r.Flag("Enabled")).Select(r => r.Number("ListenPort")).Distinct()), ["RESTRICTED_PORT"] = ss ? plan.Text("Ports.LandingShadowsocks") : "", ["ALLOWED_IPV4S"] = ss ? string.Join(',', plan.Strings("Shadowsocks.TrustedEntryIPv4s")) : "", ["ALLOWED_IPV6S"] = ss ? string.Join(',', plan.Strings("Shadowsocks.TrustedEntryIPv6s")) : "" };
     }
     private static bool Enabled(JsonObject plan, string role) => plan.At("ProtocolInventory." + role) == null ? DeploymentPlans.InitiallyEnabled(plan, role) : plan.Flag("ProtocolInventory." + role + ".Enabled");
     private async Task ArchiveConfigs(Context c, string? onlyRole = null)

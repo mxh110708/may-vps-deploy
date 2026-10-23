@@ -40,6 +40,8 @@ public sealed partial class MainWindow
     {
         var request = review.Request;
         if (request.Kind == OperationKind.ServerOutbound) return await ShowDialog(OperationDialog("审阅服务器固定下一跳", DialogScroll(Column(Text(request.InstanceRelativePath.Replace("/May-VPS-Deploy", ""), 17), Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
+        if (request.Kind == OperationKind.TcpForward) return await ShowDialog(OperationDialog(request.Options.Text("Action") == "Check" ? "审阅 TCP 转发检查" : "审阅 TCP 转发变更", DialogScroll(Column(Text(request.InstanceRelativePath.Replace("/May-VPS-Deploy", ""), 17), Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
+        if (request.Kind == OperationKind.UdpForward) return await ShowDialog(OperationDialog(request.Options.Text("Action") == "Check" ? "审阅 UDP 转发检查" : "审阅 UDP 转发变更", DialogScroll(Column(Text(request.InstanceRelativePath.Replace("/May-VPS-Deploy", ""), 17), Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
         if (request.Kind == OperationKind.InstallComponent) return await ShowDialog(OperationDialog("审阅追加安装计划", InstallationReview(request), "开始安装")) == ContentDialogResult.Primary;
         if (request.Kind is OperationKind.Deploy or OperationKind.ConnectExisting or OperationKind.Resume or OperationKind.ResumeImport)
         {

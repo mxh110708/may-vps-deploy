@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 
 namespace May.VpsDeploy.Core;
 
-public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFactory connections, IManagedKeyStore keys, IUserInteraction user, IProtocolValidation validation, INetworkMeasurement? network = null) : IOperationWorkflow
+public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFactory connections, IManagedKeyStore keys, IUserInteraction user, IProtocolValidation validation, INetworkMeasurement? network = null, ITcpForwardValidation? tcpForwarding = null, IUdpForwardValidation? udpForwarding = null) : IOperationWorkflow
 {
     private readonly RemoteAssets assets = new(store.Paths);
     private ArchiveStore Store => store;
@@ -56,6 +56,8 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
                 case OperationKind.InstallComponent: await InstallComponent(context); break;
                 case OperationKind.MeasureNetwork: await MeasureNetwork(context); break;
                 case OperationKind.ServerOutbound: await ConfigureServerOutbound(context); break;
+                case OperationKind.TcpForward: await ConfigureTcpForwarding(context); break;
+                case OperationKind.UdpForward: await ConfigureUdpForwarding(context); break;
                 case OperationKind.TuneNetwork: await TuneMeasuredNetwork(context); break;
                 default: await Maintain(context); break;
             }

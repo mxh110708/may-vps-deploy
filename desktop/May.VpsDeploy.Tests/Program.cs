@@ -17,6 +17,9 @@ else if (args.Contains("--server-rules-only")) await new BoundaryTests(repositor
 else if (args.Contains("--server-hops-only")) await new BoundaryTests(repository).RunServerHopTests();
 else if (args.Contains("--hop-probe-only")) await new BoundaryTests(repository).RunHopProbeTests();
 else if (args.Contains("--client-share-only")) new BoundaryTests(repository).RunClientShareTests();
+else if (args.Contains("--tcp-forward-only")) await new BoundaryTests(repository).RunTcpForwardTests();
+else if (args.Contains("--udp-forward-only")) await new BoundaryTests(repository).RunUdpForwardTests();
+else if (args.Contains("--udp-proxy-only")) await new BoundaryTests(repository).RunUdpProxyTests();
 else await new BoundaryTests(repository).Run();
 
 internal sealed partial class BoundaryTests(string repository)
@@ -49,6 +52,8 @@ internal sealed partial class BoundaryTests(string repository)
         using (var destinationRules = new Fixture(repository)) { await ServerDestinationExperience(destinationRules); await ServerOutboundLoopback(destinationRules, true); await RealityOutboundLoopback(destinationRules, true); }
         using (var hops = new Fixture(repository)) { await ServerHopExperience(hops); await ServerOutboundLoopback(hops, withHops: true); await RealityOutboundLoopback(hops, withHops: true); await ServerHopProbeRuntime(hops); }
         using (var shares = new Fixture(repository)) ClientShareExperience(shares);
+        using (var forwarding = new Fixture(repository)) { await TcpForwardExperience(forwarding); await TcpForwardValidationLoopback(forwarding); }
+        using (var udpForwarding = new Fixture(repository)) { await UdpForwardExperience(udpForwarding); await UdpForwardLoopback(udpForwarding); await UdpProxySourceExperience(udpForwarding); await UdpProxyWorkflow(udpForwarding); await UdpProxyRuntime(udpForwarding); }
         await MonitoringArchiveExperience(f);
         await ComponentUpdateExperience(f);
         await RecoveryExperience(f);

@@ -4,12 +4,25 @@ namespace May.VpsDeploy.Core;
 
 public static class OperationSteps
 {
-    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate or OperationKind.ServerOutbound;
+    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate or OperationKind.ServerOutbound or OperationKind.TcpForward or OperationKind.UdpForward;
     public static IReadOnlyList<PlannedTaskStep> Create(OperationRequest request, JsonObject plan)
     {
         var steps = new List<PlannedTaskStep>();
         if (request.Kind == OperationKind.CheckComponentUpdate) return [new("component-release-check", "查询并核对官方稳定版", "锁定具体发行资产与摘要，只查询版本，不安装软件。")];
         void Add(string id, string title, string description) => steps.Add(new(id, title, description));
+        if (request.Kind is OperationKind.TcpForward or OperationKind.UdpForward)
+        {
+            var udp = request.Kind == OperationKind.UdpForward; var prefix = udp ? "udp-forward-" : "forward-";
+            Add(prefix + "preflight", "核对转发、端口与管理连接", "只读检查实际归属、白名单、可用程序和监听冲突。");
+            if (request.Options.Text("Action") != "Check")
+            {
+                Add(prefix + "backup", "建立独立转发恢复点", "仅保存转发及本次涉及的受管防火墙，启用限时回滚。");
+                Add(prefix + "apply", udp ? "应用 UDP 转发" : "应用 TCP 转发", "更新本组件监听与白名单，不重启代理或监控。");
+            }
+            Add(prefix + "validation", "核验实际转发", udp ? "从控制端经 UDP 转发取得匹配的 DNS 回答或原样回显。" : "从控制端经转发执行 TLS、SSH 响应或代理 HTTPS 验收。");
+            if (request.Options.Text("Action") != "Check") Add(prefix + "commit", "确认完成", "核对事务身份并解除限时回滚。");
+            return steps;
+        }
         if (request.Kind == OperationKind.ServerOutbound)
         {
             var target = ServerOutboundRouting.Label(request.Options.Text("Protocol"));

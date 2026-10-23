@@ -23,6 +23,8 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install --disable-pip-version-check paramiko==5.0.0
+      - run: python tests/test_tcp_forwarding.py
+      - run: python tests/test_udp_forwarding.py
       - run: dotnet restore desktop/May.VpsDeploy.Tests/May.VpsDeploy.Tests.csproj --locked-mode
       - run: dotnet run --project desktop/May.VpsDeploy.Tests/May.VpsDeploy.Tests.csproj -c Release --no-restore -- "${{ github.workspace }}"
       - if: runner.os == 'Windows'

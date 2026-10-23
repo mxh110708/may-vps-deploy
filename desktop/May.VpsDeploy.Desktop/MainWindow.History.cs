@@ -11,7 +11,7 @@ public sealed partial class MainWindow
     {
         OperationKind.ConnectExisting or OperationKind.ResumeImport => "接入实例", OperationKind.Deploy or OperationKind.Resume => "部署实例",
         OperationKind.HealthAudit => "健康检查", OperationKind.TunnelAccess => "公开访问验证", OperationKind.TuneNetwork => "网络调优", OperationKind.MeasureNetwork => "入口线路测量", OperationKind.ProtocolState => "协议管理",
-        OperationKind.ServerOutbound => "服务器固定下一跳", OperationKind.RotateCredentials => "凭据轮换", OperationKind.Upgrade => "代理核心升级", OperationKind.Restore => "协议恢复",
+        OperationKind.UdpForward => "独立 UDP 转发", OperationKind.TcpForward => "独立 TCP 转发", OperationKind.ServerOutbound => "服务器固定下一跳", OperationKind.RotateCredentials => "凭据轮换", OperationKind.Upgrade => "代理核心升级", OperationKind.Restore => "协议恢复",
         OperationKind.BbrKernel => "BBR 内核管理", OperationKind.Recover => "事务状态核对", OperationKind.Komari => "监控与访问管理", OperationKind.Decommission => "实例退役", _ => "任务"
     };
     private void Records()

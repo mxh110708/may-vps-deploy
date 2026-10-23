@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-10-23",
+  "campus_direct_suffixes": [
+    "edu.cn", "ac.cn", "cnki.net", "cnki.cn", "cnki.com.cn",
+    "wanfangdata.com.cn", "cqvip.com", "duxiu.com", "chaoxing.com", "superlib.net"
+  ],
+  "research_suffixes": [
+    "huggingface.co", "hf.co", "hf.space", "kaggle.com", "kaggle.io", "kaggle.net", "kaggleusercontent.com",
+    "colab.research.google.com", "colab.google", "scholar.googleusercontent.com",
+    "deepmind.com", "deepmind.google", "research.google", "research.google.com",
+    "sciencedirect.com", "sciencedirectassets.com", "elsevier.com", "elsevier.io", "els-cdn.com",
+    "elsevier-ae.com", "elseviercdn.cn", "scopus.com", "engineeringvillage.com", "embase.com",
+    "reaxys.com", "clinicalkey.com", "knovel.com", "scival.com",
+    "webofscience.com", "webofknowledge.com", "isiknowledge.com", "clarivate.com", "webofscience.clarivate.cn",
+    "springer.com", "springerlink.com", "springernature.com", "nature.com", "biomedcentral.com",
+    "wiley.com", "wiley-vch.de", "tandfonline.com", "taylorfrancis.com", "taylorandfrancis.com", "tandf.co.uk",
+    "ieee.org", "acm.org", "theiet.org", "ietdl.org", "acs.org", "rsc.org", "aip.org", "aps.org",
+    "iop.org", "siam.org", "asme.org", "ascelibrary.org", "astm.org", "spiedigitallibrary.org",
+    "optica.org", "osapublishing.org", "scitation.org", "informs.org",
+    "oup.com", "cambridge.org", "sagepub.com", "jstor.org", "proquest.com", "ebsco.com", "ebscohost.com",
+    "ebscohost.cloud", "ebsco.io", "ebscohost.io", "ebsco-content.com", "ebsco.zone", "ebsco.babelscape.com", "epnet.com", "dynamed.com",
+    "gale.com", "galegroup.com", "ggsrv.com", "emerald.com", "degruyter.com", "brill.com",
+    "annualreviews.org", "worldscientific.com", "karger.com", "ovid.com", "cochranelibrary.com",
+    "science.org", "sciencemag.org", "aaas.org", "cell.com", "thelancet.com", "nejm.org", "bmj.com", "jamanetwork.com",
+    "arxiv.org", "biorxiv.org", "medrxiv.org", "ncbi.nlm.nih.gov", "europepmc.org", "plos.org", "mdpi.com",
+    "frontiersin.org", "peerj.com", "elifesciences.org", "doaj.org", "semanticscholar.org", "openalex.org",
+    "dblp.org", "openreview.net", "aclweb.org", "aclanthology.org", "jmlr.org", "inspirehep.net",
+    "researchgate.net", "ssrn.com", "osf.io", "zenodo.org", "figshare.com", "datadryad.org", "dataverse.harvard.edu",
+    "crossref.org", "doi.org", "orcid.org", "mendeley.com", "zotero.org", "overleaf.com",
+    "openathens.net", "openathens.org", "oclc.org", "worldcat.org", "exlibrisgroup.com", "serialssolutions.com",
+    "silverchair-cdn.com", "literatumonline.com"
+  ],
+  "scholar_google_bases": [
+    "google.com", "google.com.hk", "google.com.sg", "google.com.tw", "google.com.au",
+    "google.co.jp", "google.co.uk", "google.co.in", "google.ca", "google.de", "google.fr", "google.cn", "google.com.cn"
+  ],
+  "developer_suffixes": ["openxla.org", "tensorflow.org", "pytorch.org", "keras.io"],
+  "sources": [
+    "https://library.sysu.edu.cn/vpn-visit",
+    "https://library.sysu.edu.cn/basic/860",
+    "https://cse.sysu.edu.cn/article/2471",
+    "https://www.elsevier.support/scopus/answer/how-can-i-allowlist-your-product-in-our-firewall",
+    "https://www.elsevier.support/sciencedirect/answer/what-are-the-technical-requirements-for-sciencedirect",
+    "https://support.springernature.com/en/support/solutions/articles/6000080441-springerlink-ip-addresses",
+    "https://scholar.google.com/intl/en/scholar/about.html",
+    "https://huggingface.co/docs/hub/datasets-downloading#downloading-behind-a-proxy-or-firewall",
+    "https://huggingface.co/docs/hub/spaces-overview",
+    "https://about.ebsco.com/sites/default/files/acquiadam-assets/EBSCO-Discovery-Service-Tech-Sheet.pdf",
+    "https://wiki.metacubex.one/config/dns/type/",
+    "https://deepmind.google/research/",
+    "https://research.google/pubs/",
+    "https://github.com/openxla/xla",
+    "https://www.tensorflow.org/"
+  ]
+}

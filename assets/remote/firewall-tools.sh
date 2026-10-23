@@ -123,6 +123,9 @@ def verify_archive():
     ports = [int(p) for p in os.environ['VPS_PARAM_TCP_PORTS'].split(',')]
     if len(ports) < 2 or any(not 1 <= p <= 65535 for p in ports): raise SystemExit('Invalid archived firewall ports.')
     rules = ['iifname "lo" accept', 'ct state invalid drop', 'ct state established,related accept', 'tcp dport { '+','.join(map(str, ports))+' } accept']
+    udp = [int(p) for p in os.environ.get('VPS_PARAM_UDP_PORTS', '').split(',') if p]
+    if any(not 1 <= p <= 65535 for p in udp): raise SystemExit('Invalid archived UDP ports.')
+    if udp: rules.append('udp dport { '+','.join(map(str, udp))+' } accept')
     restricted = os.environ.get('VPS_PARAM_RESTRICTED_PORT', '')
     if restricted:
         if not restricted.isdigit() or not 1 <= int(restricted) <= 65535: raise SystemExit('Invalid restricted port.')

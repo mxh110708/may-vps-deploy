@@ -14,6 +14,15 @@ for port in "${ports[@]}"; do
   [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || exit 1
 done
 ports_rendered="$(IFS=', '; echo "${ports[*]}")"
+udp_rule=''
+if [[ -n "${VPS_PARAM_UDP_PORTS:-}" ]]; then
+  IFS=',' read -r -a udp_ports <<<"$VPS_PARAM_UDP_PORTS"
+  for port in "${udp_ports[@]}"; do
+    [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || exit 1
+  done
+  udp_rendered="$(IFS=','; echo "${udp_ports[*]}")"
+  udp_rule="    udp dport { ${udp_rendered} } accept"$'\n'
+fi
 
 restricted_rules=''
 if [[ -n "$restricted_port" ]]; then
@@ -68,7 +77,7 @@ table inet filter {
     ct state invalid drop
     ct state established,related accept
     tcp dport { ${ports_rendered} } accept
-${restricted_rules}    udp sport 67 udp dport 68 accept
+${udp_rule}${restricted_rules}    udp sport 67 udp dport 68 accept
     udp sport 547 udp dport 546 accept
     ip protocol icmp accept
     ip6 nexthdr ipv6-icmp accept
