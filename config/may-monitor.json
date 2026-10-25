@@ -3,8 +3,8 @@
   "Server": {
     "Version": "0.1.0-rc.3",
     "Name": "may-monitor-server-linux-amd64.tar.gz",
-    "Bytes": 15710330,
-    "Sha256": "87a2cf48550e67c6dbb8fa11f85c113d37be0cac64f736edfb214f472eab229c",
+    "Bytes": 15529251,
+    "Sha256": "68000e65df6d6f68e43a9c3abcdd4c30bfc01612c199f615498e563a99797660",
     "Url": "https://github.com/mxh110708/may-monitor-server/releases/download/v0.1.0-rc.3/may-monitor-server-linux-amd64.tar.gz"
   },
   "Agent": {

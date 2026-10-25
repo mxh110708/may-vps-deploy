@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import ssl
+import socketserver
 import sys
 
 settings=json.loads(Path(sys.argv[3]).read_text(encoding='utf-8-sig'))
@@ -20,6 +21,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
     def log_message(self,*args): pass
 
-with ThreadingHTTPServer(('127.0.0.1',0),Handler) as server:
+class FixtureServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer's default reverse lookup can stall on macOS runners. This
+        # fixture binds only a literal loopback address and needs no DNS at all.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name='localhost'
+        self.server_port=self.server_address[1]
+
+with FixtureServer(('127.0.0.1',0),Handler) as server:
     context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(sys.argv[1],sys.argv[2]);server.socket=context.wrap_socket(server.socket,server_side=True)
     print(server.server_port,flush=True);server.serve_forever(poll_interval=.1)
