@@ -1769,6 +1769,10 @@ if($pythonCommandForClient){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_tunnel_public_access.py')
     if ($LASTEXITCODE -ne 0) { throw 'Tunnel public access probe regressions failed.' }
 }
+if($pythonCommandForClient){
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_inbound_host.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Independent inbound ownership regression failed.' }
+}
 if($bash -and $pythonCommandForClient){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_tcp_forwarding.py')
     if($LASTEXITCODE -ne 0){throw 'TCP forwarding ownership and recovery tests failed.'}

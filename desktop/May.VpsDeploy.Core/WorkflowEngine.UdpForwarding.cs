@@ -9,7 +9,7 @@ public sealed partial class WorkflowEngine
         var preview = UdpForwarding.Prepare(store, c.Request); var action = c.Request.Options.Text("Action");
         async Task<JsonObject> Read()
         {
-            var response = await c.Run("udp-forward-read.sh", marker: "UDP_FORWARD_READ");
+            var response = await c.Run("udp-forward-read.sh", new() { ["ARCHIVED_HASH"] = preview.ExpectedHash }, marker: "UDP_FORWARD_READ");
             return JsonNode.Parse(RemoteAssets.Marker(response.Output, "UDP_FORWARD_STATE"))!.AsObject();
         }
         await c.TrackStep("udp-forward-preflight", async () =>
@@ -20,7 +20,7 @@ public sealed partial class WorkflowEngine
             if ((await Read()).Text("Hash") != preview.ExpectedHash) throw new OperationException("UDP 转发实际资源与归档不同，未写入服务器。", code: "UdpForwardRemoteDrift");
             if (action != "Check")
             {
-                await c.Run("udp-forward-read.sh", new() { ["CANDIDATE_JSON"] = preview.Configuration.ToJsonString() }, marker: "UDP_FORWARD_READ");
+                await c.Run("udp-forward-read.sh", new() { ["CANDIDATE_JSON"] = preview.Configuration.ToJsonString(), ["ARCHIVED_HASH"] = preview.ExpectedHash }, marker: "UDP_FORWARD_READ");
                 if (c.Plan.Text("Firewall.Mode") != "PreserveExisting") await c.Run("firewall-preflight.sh", FirewallParameters(c.Plan, true), marker: "FIREWALL_SCOPE_OK");
             }
         });
@@ -50,7 +50,8 @@ public sealed partial class WorkflowEngine
                 UdpForwarding.RequireValidation(c.Plan, preview.Configuration, result);
                 foreach (var rule in UdpForwarding.Rules(preview.Configuration).Where(r => r.Flag("Enabled") && r.Text("Validation.Type") == "Shadowsocks")) _ = UdpForwarding.ProxyNode(store, rule, c.Request.InstanceRelativePath);
                 if ((await Read()).Text("Hash") != observed.Text("Hash")) throw new OperationException("UDP 验收期间配置发生变化，未提交。");
-                c.State["UdpForwarding"] = new JsonObject { ["RemoteHash"] = observed.Text("Hash"), ["WorkerHash"] = observed["Files"]?["/etc/may-udp-forward/worker.py"]?.DeepClone(), ["Validation"] = result.DeepClone(), ["At"] = DateTimeOffset.UtcNow };
+                c.State["UdpForwarding"] = new JsonObject { ["RemoteHash"] = observed.Text("Hash"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(preview.Configuration), ["TemplateCurrent"] = observed.Flag("TemplateCurrent", true), ["WorkerHash"] = observed["Files"]?["/etc/may-udp-forward/worker.py"]?.DeepClone(), ["Validation"] = result.DeepClone(), ["At"] = DateTimeOffset.UtcNow };
+                if (!observed.Flag("TemplateCurrent", true)) { c.Warnings = true; c.Report("UDP 转发需要更新", "旧单元已按归档核对并保持原样，请重新审阅保存转发规则以应用当前启动依赖。"); }
             }
             await VerifyManagement(c); c.Save();
         });

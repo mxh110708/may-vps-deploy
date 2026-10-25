@@ -30,6 +30,7 @@ public static class HealthReports
         Check("防火墙配置", Booleans(audit["Nftables"], "Valid") && audit.Flag("Nftables.Valid"), "防火墙配置校验失败或证据缺失。");
         if (plan["TcpForwarding"] != null) Check("TCP 端口转发", audit.Flag("TcpForwarding.MatchesArchive") && audit.Text("TcpForwarding.Scope") == "ConfigurationSocketsWhitelist", "转发配置、监听或白名单与归档不同；请从独立 TCP 转发入口核对。");
         if (plan["UdpForwarding"] != null) Check("UDP 端口转发", audit.Flag("UdpForwarding.MatchesArchive") && audit.Text("UdpForwarding.Scope") == "ConfigurationSocketsWhitelist", "UDP 配置、工作程序、监听或白名单与归档不同；请从独立 UDP 转发入口核对。");
+        if (plan["InboundModel"] != null) Check("独立入站", audit.Flag("Inbounds.MatchesArchive") && audit.Text("Inbounds.Scope") == "IdentityConfigurationRuntime", "入站身份、配置或启停状态与归档不同；请从通用多入站入口核对。");
         foreach (var name in new[] { "KomariAgent", "KomariController", "Cloudflared" })
         {
             var service = audit.At("Services." + name);

@@ -46,8 +46,12 @@ jobs:
           python3 tests/test_server_hops.py --bash /bin/bash
           test -x /usr/lib/systemd/systemd-socket-proxyd
           python3 tests/test_tcp_forwarding.py
+          python3 tests/test_inbound_host.py
           python3 tests/test_udp_forwarding.py
           python3 tests/test_komari_lifecycle.py --bash /bin/bash
+          # Only temporary files and fake service/account runners; the Debian
+          # container supplies root for checking real uid/gid permission rules.
+          python3 tests/test_may_monitor_lifecycle.py
           python3 tests/test_health_audit.py
           python3 tests/test_network_runtime.py
           python3 tests/test_network_audit.py

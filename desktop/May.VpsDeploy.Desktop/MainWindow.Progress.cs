@@ -26,12 +26,14 @@ public sealed partial class MainWindow
         var plan = request.Options["Plan"] as JsonObject ?? ArchiveStore.ReadJson(SafePath.Resolve(paths.Instance(request.InstanceRelativePath), "deployment-plan.json"));
         executionRows.Clear(); executionResult = null; executionStarted = DateTimeOffset.UtcNow;
         page.Children.Clear(); pageAction.Content = null; notice.IsOpen = false;
-        heading.Text = request.Kind switch { OperationKind.InstallComponent => "正在追加安装", OperationKind.MeasureNetwork => "正在测量入口线路", OperationKind.TuneNetwork => "正在配置网络", OperationKind.BbrKernel => "BBR 内核任务", _ => "正在部署" };
+        heading.Text = request.Kind switch { OperationKind.Inbounds => "通用多入站任务", OperationKind.TcpChain => "跨实例 TCP 线路任务", OperationKind.InstallComponent => "正在追加安装", OperationKind.MeasureNetwork => "正在测量入口线路", OperationKind.TuneNetwork => "正在配置网络", OperationKind.BbrKernel => "BBR 内核任务", _ => "正在部署" };
         caption.Text = plan.Text("Provider") + " / " + plan.Text("Instance") + " · " + plan.Text("NodeName");
         executionSummary = Text("正在准备执行计划。", 16); executionSummary.Tag = "ExecutionSummary";
         page.Children.Add(Card(Column(executionSummary, Text("每一步完成后会更新状态。取消会在安全边界处理，未执行的步骤保留为待完成。", 14, true))));
+        if (request.Kind == OperationKind.TcpChain && request.Options["Configuration"] is JsonObject chain)
+            page.Children.Add(Card(Column(Text(chain.Text("Name"), 17), Text("前置：" + chain.Text("FrontInstance") + ":" + chain.Number("FrontPort") + "\n↓ TCP\n中转：" + chain.Text("RelayInstance") + ":" + chain.Number("RelayPort") + "\n↓ TCP\n落地：" + chain.Text("LandingInstance"), 14, true))));
         var table = new StackPanel { Spacing = 0 };
-        var header = ExecutionGrid(Text(request.Kind is OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel ? "网络任务计划" : "部署计划", 14, true), Text("状态", 14, true), Text("耗时", 14, true));
+        var header = ExecutionGrid(Text(request.Kind == OperationKind.TcpChain ? "跨实例执行计划" : request.Kind is OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel ? "网络任务计划" : "部署计划", 14, true), Text("状态", 14, true), Text("耗时", 14, true));
         header.Padding = new Thickness(20, 14, 20, 14); table.Children.Add(header);
         foreach (var (step, index) in OperationSteps.Create(request, plan).Select((step, index) => (step, index)))
         {
@@ -88,7 +90,7 @@ public sealed partial class MainWindow
     private void FinishExecution(TaskRecord record)
     {
         executionResult = record; executionTimer.Stop();
-        heading.Text = record.Kind switch { OperationKind.CheckComponentUpdate => "组件版本查询结果", OperationKind.InstallComponent => "追加安装结果", OperationKind.MeasureNetwork => "线路测量结果", OperationKind.TuneNetwork => "网络配置结果", OperationKind.BbrKernel => "BBR 内核任务结果", _ => "部署结果" };
+        heading.Text = record.Kind switch { OperationKind.Inbounds => "通用多入站结果", OperationKind.TcpChain => "跨实例 TCP 线路结果", OperationKind.CheckComponentUpdate => "组件版本查询结果", OperationKind.InstallComponent => "追加安装结果", OperationKind.MeasureNetwork => "线路测量结果", OperationKind.TuneNetwork => "网络配置结果", OperationKind.BbrKernel => "BBR 内核任务结果", _ => "部署结果" };
         foreach (var row in executionRows.Values.Where(row => row.State == TaskStepState.Running))
         {
             row.State = record.Outcome == TaskOutcome.Cancelled ? TaskStepState.Cancelled : TaskStepState.Failed; row.Detail.Text = TaskMessage(record); row.Finished = record.FinishedAt; PaintExecutionRow(row);

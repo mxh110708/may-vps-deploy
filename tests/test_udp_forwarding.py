@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 import unittest
-from test_tcp_forwarding import BACKUP, Kernel, ROOT
+from test_tcp_forwarding import BACKUP, Kernel, ROOT, check_unit_revision
 
 
 def load(name, filename):
@@ -37,6 +37,9 @@ def config():
 
 
 class Ownership(unittest.TestCase):
+    def test_unit_revision_is_pinned_to_the_controller_archive(self):
+        check_unit_revision(self, UDP)
+
     def setUp(self):
         (ROOT / '.test-output').mkdir(exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(prefix='udp-forward-', dir=ROOT / '.test-output')

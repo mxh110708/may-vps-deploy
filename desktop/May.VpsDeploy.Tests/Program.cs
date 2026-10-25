@@ -18,8 +18,18 @@ else if (args.Contains("--server-hops-only")) await new BoundaryTests(repository
 else if (args.Contains("--hop-probe-only")) await new BoundaryTests(repository).RunHopProbeTests();
 else if (args.Contains("--client-share-only")) new BoundaryTests(repository).RunClientShareTests();
 else if (args.Contains("--tcp-forward-only")) await new BoundaryTests(repository).RunTcpForwardTests();
+else if (args.Contains("--tcp-chain-only")) await new BoundaryTests(repository).RunTcpChainTests();
+else if (args.Contains("--inbounds-only")) await new BoundaryTests(repository).RunInboundTests();
+else if (args.Contains("--hysteria-only")) await new BoundaryTests(repository).RunHysteriaTests();
+else if (args.Contains("--hysteria-vm")) await new BoundaryTests(repository).RunHysteriaVmTests(args[Array.IndexOf(args, "--hysteria-vm") + 1]);
+else if (args.Contains("--inbounds-vm")) await new BoundaryTests(repository).RunInboundVmTests(args[Array.IndexOf(args, "--inbounds-vm") + 1]);
+else if (args.Contains("--tcp-chain-vm")) await new BoundaryTests(repository).RunTcpChainVmTests(args[Array.IndexOf(args, "--tcp-chain-vm") + 1]);
 else if (args.Contains("--udp-forward-only")) await new BoundaryTests(repository).RunUdpForwardTests();
 else if (args.Contains("--udp-proxy-only")) await new BoundaryTests(repository).RunUdpProxyTests();
+else if (args.Contains("--forwarded-nodes-only")) await new BoundaryTests(repository).RunForwardedNodeTests();
+else if (args.Contains("--monitor-read-only")) await new BoundaryTests(repository).RunMonitorReadTests();
+else if (args.Contains("--may-monitor-only")) await new BoundaryTests(repository).RunMayMonitorTests();
+else if (args.Contains("--monitor-access-only")) await new BoundaryTests(repository).RunMonitorAccessTests();
 else await new BoundaryTests(repository).Run();
 
 internal sealed partial class BoundaryTests(string repository)
@@ -52,9 +62,17 @@ internal sealed partial class BoundaryTests(string repository)
         using (var destinationRules = new Fixture(repository)) { await ServerDestinationExperience(destinationRules); await ServerOutboundLoopback(destinationRules, true); await RealityOutboundLoopback(destinationRules, true); }
         using (var hops = new Fixture(repository)) { await ServerHopExperience(hops); await ServerOutboundLoopback(hops, withHops: true); await RealityOutboundLoopback(hops, withHops: true); await ServerHopProbeRuntime(hops); }
         using (var shares = new Fixture(repository)) ClientShareExperience(shares);
+        using (var forwardedNodes = new Fixture(repository)) await ForwardedNodeExperience(forwardedNodes);
         using (var forwarding = new Fixture(repository)) { await TcpForwardExperience(forwarding); await TcpForwardValidationLoopback(forwarding); }
+        await TcpChainExperience();
+        await InboundExperience();
+        await HysteriaLoopback();
+        await HysteriaModelBoundary();
         using (var udpForwarding = new Fixture(repository)) { await UdpForwardExperience(udpForwarding); await UdpForwardLoopback(udpForwarding); await UdpProxySourceExperience(udpForwarding); await UdpProxyWorkflow(udpForwarding); await UdpProxyRuntime(udpForwarding); }
         await MonitoringArchiveExperience(f);
+        using (var monitorRead = new Fixture(repository)) await MonitorReadExperience(monitorRead);
+        using (var mayMonitor = new Fixture(repository)) await MayMonitorExperience(mayMonitor);
+        using (var monitorAccess = new Fixture(repository)) await MonitorAccessExperience(monitorAccess);
         await ComponentUpdateExperience(f);
         await RecoveryExperience(f);
         await PrivateDirectoryExperience();

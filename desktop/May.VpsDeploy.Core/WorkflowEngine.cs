@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 
 namespace May.VpsDeploy.Core;
 
-public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFactory connections, IManagedKeyStore keys, IUserInteraction user, IProtocolValidation validation, INetworkMeasurement? network = null, ITcpForwardValidation? tcpForwarding = null, IUdpForwardValidation? udpForwarding = null) : IOperationWorkflow
+public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFactory connections, IManagedKeyStore keys, IUserInteraction user, IProtocolValidation validation, INetworkMeasurement? network = null, ITcpForwardValidation? tcpForwarding = null, IUdpForwardValidation? udpForwarding = null, IMonitorReadProbe? monitorRead = null, ITcpChainValidation? tcpChains = null, IInboundValidation? inboundValidation = null) : IOperationWorkflow
 {
     private readonly RemoteAssets assets = new(store.Paths);
     private ArchiveStore Store => store;
@@ -14,6 +14,8 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
 
     public async Task<TaskOutcome> ExecuteAsync(OperationRequest request, string taskId, IProgress<TaskProgress> progress, CancellationToken cancellationToken)
     {
+        if (request.Kind == OperationKind.TcpChain) return await ConfigureTcpChain(request, taskId, progress, cancellationToken);
+        TcpChains.GuardOperation(store, request);
         var directory = store.Paths.Instance(request.InstanceRelativePath);
         var planFile = SafePath.Resolve(directory, "deployment-plan.json");
         var initial = request.Kind is OperationKind.Deploy or OperationKind.ConnectExisting;
@@ -40,6 +42,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
             context.StartSteps();
             switch (request.Kind)
             {
+                case OperationKind.Inbounds: await ConfigureInbounds(context); break;
                 case OperationKind.ConnectExisting: await Import(context); break;
                 case OperationKind.ResumeImport:
                     if (plan.Text("Import.Status") != "Pending") throw new OperationException("该归档不是未完成的接入草稿。");
@@ -58,6 +61,8 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
                 case OperationKind.ServerOutbound: await ConfigureServerOutbound(context); break;
                 case OperationKind.TcpForward: await ConfigureTcpForwarding(context); break;
                 case OperationKind.UdpForward: await ConfigureUdpForwarding(context); break;
+                case OperationKind.MayMonitor: await ManageMayMonitor(context); break;
+                case OperationKind.MayMonitorAccess: await VerifyMayMonitorAccess(context); break;
                 case OperationKind.TuneNetwork: await TuneMeasuredNetwork(context); break;
                 default: await Maintain(context); break;
             }
@@ -77,7 +82,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
             if (context.Pending != null && context.Pending.Text("Phase") is not ("Committed" or "RolledBack"))
             {
                 context.Pending["InterruptedStage"] = interruptedStage;
-                try { await Rollback(context); recovered = context.Pending.Text("Phase") == "RolledBack"; }
+                try { if (context.Pending.Text("Kind") == "MayMonitor") await RecoverMayMonitor(context); else await Rollback(context); recovered = context.Pending.Text("Phase") == "RolledBack"; }
                 catch { var uncertain = new OperationException("操作结果或回滚未确认，备份已保留。", true, "RollbackUnconfirmed", "先核对该实例的未完成事务，不能自动重复写入。"); context.Finish(TaskOutcome.NeedsRecovery, uncertain); throw uncertain; }
             }
             if (context.Pending?.Text("Phase") == "Committed" && context.Pending.Text("TaskId") == context.Id)
@@ -111,6 +116,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         public CancellationToken Cancellation { get; set; } = cancellationToken;
         public JsonObject? Pending { get; set; } = System.IO.File.Exists(SafePath.Resolve(directory, "operation-pending.dotnet.json")) ? ArchiveStore.ReadJson(SafePath.Resolve(directory, "operation-pending.dotnet.json")) : null;
         public bool Warnings { get; set; }
+        public IProgress<TaskProgress> Progress => progress;
         public bool MutationStarted { get; set; }
         public string CurrentStage { get; private set; } = "准备";
         public int Port => State.Number("CurrentManagementPort", Plan.Number("Ports.SshPrimary", Plan.Number("Server.BootstrapSshPort")));
@@ -118,6 +124,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         private string? passphrase;
         public string? KeyPassphrase { get => passphrase; set => passphrase = value; }
         public JsonObject? RestoreRecord { get; set; }
+        public InboundPreview? InboundsPreview { get; set; }
         private int stage;
         private string? activeStep;
         private int completedSteps;
@@ -166,6 +173,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         }
         public async Task<IRemoteSession> Session(int? port = null, string username = "root", bool bootstrap = false)
         {
+            var promptTarget = Request.Kind == OperationKind.TcpChain ? Plan.Text("NodeName", Request.InstanceRelativePath) + " · " : "";
             var key = bootstrap ? Plan.Text("Server.BootstrapKeyPath") : File("ssh/" + AppPaths.Segment(Plan.Text("SshKey.ManagedFileName", "id_vps_management")));
             if (!System.IO.File.Exists(key)) key = Plan.Text("SshKey.SourcePrivateKeyPath", Plan.Text("Server.BootstrapKeyPath"));
             if (key == "" || !System.IO.File.Exists(key))
@@ -173,7 +181,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
                 if (!passwords.TryGetValue(username, out var password))
                 {
                     password = username == Plan.Text("AdminUser") ? Secrets.Text("AdminPassword") : "";
-                    if (password.Length == 0) password = await owner.User.SecretAsync(username + " 的 SSH 登录密码", Cancellation) ?? throw new OperationCanceledException();
+                    if (password.Length == 0) password = await owner.User.SecretAsync(promptTarget + username + " 的 SSH 登录密码", Cancellation) ?? throw new OperationCanceledException();
                     passwords[username] = password;
                 }
                 return await owner.Connections.OpenAsync(new(Plan.Text("Server.IPv4"), port ?? Port, username, null, password), owner.User, Cancellation);
@@ -182,14 +190,14 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
             catch (KeyPassphraseRequiredException) when (passphrase == null)
             {
                 // A retry is allowed only while opening authentication, before any command is sent.
-                passphrase = await owner.User.SecretAsync("SSH 私钥口令（未加密可留空）", Cancellation) ?? throw new OperationCanceledException();
+                passphrase = await owner.User.SecretAsync(promptTarget + "SSH 私钥口令（未加密可留空）", Cancellation) ?? throw new OperationCanceledException();
                 return await owner.Connections.OpenAsync(new(Plan.Text("Server.IPv4"), port ?? Port, username, key, KeyPassphrase: passphrase), owner.User, Cancellation);
             }
         }
         public async Task<CommandResult> Run(string asset, Dictionary<string, string>? parameters = null, bool mutation = false, int timeout = 600, string? marker = null, int? port = null, bool bootstrap = false)
         {
             Cancellation.ThrowIfCancellationRequested(); parameters ??= [];
-            if (mutation && !asset.StartsWith("kernel-", StringComparison.Ordinal) && asset is not ("protocol-migration-trigger-rollback.sh" or "maintenance-transaction-commit.sh" or "maintenance-transaction-status.sh") && Pending?.Text("RemoteBackup") is { Length: > 0 } backup) parameters["EXPECTED_TRANSACTION"] = backup;
+            if (mutation && !asset.StartsWith("kernel-", StringComparison.Ordinal) && asset is not ("may-monitor-lifecycle.sh" or "tcp-chain-rollback.sh" or "protocol-migration-trigger-rollback.sh" or "maintenance-transaction-commit.sh" or "maintenance-transaction-status.sh") && Pending?.Text("RemoteBackup") is { Length: > 0 } backup) parameters["EXPECTED_TRANSACTION"] = backup;
             Report(asset[..^3], mutation ? "正在执行受管步骤，取消将在安全边界处理。" : "正在读取远端状态。");
             await using var session = await Session(port, bootstrap: bootstrap);
             if (mutation) { MutationStarted = true; if (Pending != null) { Pending["Stage"] = asset; Save(); } }

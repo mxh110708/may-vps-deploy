@@ -75,6 +75,7 @@ public static partial class ServerOutboundRouting
     }
     public static JsonObject NextHop(JsonObject node)
     {
+        if (node["ForwardedOrigin"] != null) throw new OperationException("本轮服务器落地须选择原始代理节点，不能引用转发节点。");
         if (node["sing_box"] is not JsonObject native || native.Text("type") != "shadowsocks" || native.Any(p => !new[] { "type", "tag", "server", "server_port", "method", "password" }.Contains(p.Key))) throw new OperationException("下一跳需为具有完整 sing-box 原生参数的 Shadowsocks 节点；插件、客户端链式和其他高级拨号参数本轮不支持。");
         if (!Methods.Contains(native.Text("method")) || native.Number("server_port") is < 1 or > 65535 || native.Text("password").Length is < 1 or > 4096 || native.Text("password").Any(char.IsControl)) throw new OperationException("下一跳的加密方法、端口或鉴权参数无效。");
         Address(native.Text("server"));

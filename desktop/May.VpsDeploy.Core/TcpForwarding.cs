@@ -71,6 +71,11 @@ public static class TcpForwarding
                 Fields(check, "Type", "SchemeId", "NodeId", "NodeFingerprint");
                 if (!Regex.IsMatch(check.Text("SchemeId"), "^[a-f0-9]{32}$") || !Regex.IsMatch(check.Text("NodeId"), "^[a-f0-9]{32}$") || !Regex.IsMatch(check.Text("NodeFingerprint"), "^[a-f0-9]{64}$")) throw new OperationException("请重新选择代理验收来源。");
             }
+            else if (kind == "TcpChain")
+            {
+                Fields(check, "Type", "ChainId", "FrontInstance"); _ = TcpChains.Id(check.Text("ChainId"));
+                OperationPolicy.Validate(new(OperationKind.HealthAudit, check.Text("FrontInstance"), new()));
+            }
             else throw new OperationException("实际转发验收支持 TLS、SSH 响应或已保存的代理节点。");
             normalized.Add(new JsonObject { ["Id"] = rule.Text("Id"), ["Name"] = name, ["Enabled"] = enabled, ["ListenFamily"] = family, ["ListenPort"] = port, ["TargetAddress"] = Address(rule.Text("TargetAddress")), ["TargetPort"] = Port(rule, "TargetPort"), ["AllowedSources"] = new JsonArray(allowed.Select(s => (JsonNode?)JsonValue.Create(s)).ToArray()), ["Validation"] = check });
         }
@@ -93,6 +98,8 @@ public static class TcpForwarding
         var source = rule["Validation"]!.AsObject(); var scheme = store.ReadSecret(ServerOutboundRouting.SchemeFile(store.Paths, source.Text("SchemeId")));
         var node = (scheme["Nodes"] as JsonArray)?.OfType<JsonObject>().SingleOrDefault(n => n.Text("Id") == source.Text("NodeId")) ?? throw new OperationException("代理验收来源已移除，请重新选择。");
         if (ArchiveStore.Fingerprint(node) != source.Text("NodeFingerprint")) throw new OperationException("代理验收来源已变化，请重新选择并审阅。");
+        if (node.Text("sing_box.type") == "hysteria2") throw new OperationException("Hysteria2 使用 UDP/QUIC，不能作为仅 TCP 透明转发的协议目标。");
+        if (node["ForwardedOrigin"] != null || node["TcpChainOrigin"] != null) throw new OperationException("本轮转发目标须选择原始代理节点，不能再次引用转发或跨实例线路节点。");
         if (node["ManagedOrigin"] is JsonObject origin)
         {
             if (origin.Text("Instance") != changingInstance) ManagedNodeSources.Verify(store, new JsonArray(origin.DeepClone()));
@@ -124,6 +131,7 @@ public static class TcpForwarding
     }
     public static TcpForwardPreview Prepare(ArchiveStore store, OperationRequest request)
     {
+        TcpChains.GuardOperation(store, request);
         ValidateOptions(request.Options); var directory = store.Paths.Instance(request.InstanceRelativePath);
         var plan = ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-plan.json")); var state = ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-state.json"));
         var lifecycle = InstanceLifecycle.Read(store, request.InstanceRelativePath, plan);
@@ -133,12 +141,26 @@ public static class TcpForwarding
         if (expected == "Absent" && request.Options.Text("Action") != "Apply") throw new OperationException("此实例尚未配置受管 TCP 转发。");
         var config = Normalize(request.Options["Configuration"]!.AsObject());
         if (request.Options.Text("Action") == "Check" && ArchiveStore.Fingerprint(config) != ArchiveStore.Fingerprint(plan["TcpForwarding"] ?? Empty())) throw new OperationException("只读检查只能核对已保存的转发配置。");
+        if (Rules(config).Any(r => r.Text("Validation.Type") == "TcpChain")) throw new OperationException("跨实例规则只能由跨实例编排统一管理。");
+        ValidateCandidate(plan, config, state);
+        foreach (var rule in Rules(config).Where(r => r.Flag("Enabled") && r.Text("Validation.Type") == "Proxy")) _ = ProxyNode(store, rule);
+        var action = request.Options.Text("Action");
+        var summary = action == "Remove" ? "移除当前实例全部受管 TCP 转发、独立白名单和相关端口放行。" : action == "Check" ? "只读核对实际配置、监听和白名单，并经转发执行已保存的验收。" : string.Join("\n", Rules(config).Select(r => r.Text("Name") + " · " + (r.Flag("Enabled") ? "启用" : "停用") + " · " + r.Text("ListenFamily") + ":" + r.Number("ListenPort") + " → " + new IPEndPoint(IPAddress.Parse(r.Text("TargetAddress")), r.Number("TargetPort")) + "\n允许来源：" + string.Join("，", r.Strings("AllowedSources")) + "；验收：" + r.Text("Validation.Type")));
+        summary += "\n\n仅 TCP；不传递真实客户端 IP，不改变代理入站、SSH 或监控。转发使用系统自带程序，无连接 60 秒后工作进程退出，监听仍保持可用。";
+        if (action != "Check") summary += "\n本次会重建当前组件的转发监听，已有转发连接中断。" + (plan.Text("Firewall.Mode") == "PreserveExisting" ? "保留既有防火墙，所需端口须已放行。" : "同步受管防火墙的转发端口。") + "失败或取消恢复本组件及本次防火墙范围。";
+        return new(config, expected, summary);
+    }
+    public static void ValidateCandidate(JsonObject plan, JsonObject config, JsonObject? state = null)
+    {
+        state ??= new JsonObject();
         var reserved = new HashSet<int> { plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue"), plan.Number("Server.BootstrapSshPort") };
+        foreach (var inbound in InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds")) reserved.Add(inbound.Number("Listener.Port"));
         foreach (var (role, fields) in new[] { ("RealityEntry", new[] { "Ports.XrayPrimary", "Ports.XrayBackup" }), ("AnyTlsEntry", new[] { "Ports.AnyTlsPrimary" }), ("ShadowsocksLanding", new[] { "Ports.LandingShadowsocks" }) })
             if (plan.Flag("ProtocolInventory." + role + ".Installed", DeploymentPlans.Uses(plan, role))) foreach (var field in fields) reserved.Add(plan.Number(field));
         if (plan.Text("Reality.TargetMode") == "LocalOwnedTls") reserved.Add(plan.Number("Reality.LocalHttpsPort"));
         if (state.Flag("KomariController.Installed")) reserved.Add(plan.Number("KomariController.Port", 25774));
         if (state.Flag("Cloudflared.Installed")) reserved.Add(plan.Number("Cloudflared.MetricsPort", 20241));
+        if (plan.Number("MayMonitorServer.Port") > 0) reserved.Add(plan.Number("MayMonitorServer.Port"));
         var ports = Rules(config).Select(r => r.Number("ListenPort")).ToHashSet();
         foreach (var rule in Rules(config))
         {
@@ -146,23 +168,18 @@ public static class TcpForwarding
             _ = ProbeAddresses(plan, rule);
             var target = IPAddress.Parse(rule.Text("TargetAddress"));
             if (ports.Contains(rule.Number("TargetPort")) && (IPAddress.IsLoopback(target) || new[] { plan.Text("Server.IPv4"), plan.Text("Server.IPv6") }.Contains(target.ToString()))) throw new OperationException("转发目标指向本组件监听，可能形成环路。");
-            if (rule.Flag("Enabled") && rule.Text("Validation.Type") == "Proxy") _ = ProxyNode(store, rule);
         }
-        var action = request.Options.Text("Action");
-        var summary = action == "Remove" ? "移除当前实例全部受管 TCP 转发、独立白名单和相关端口放行。" : action == "Check" ? "只读核对实际配置、监听和白名单，并经转发执行已保存的验收。" : string.Join("\n", Rules(config).Select(r => r.Text("Name") + " · " + (r.Flag("Enabled") ? "启用" : "停用") + " · " + r.Text("ListenFamily") + ":" + r.Number("ListenPort") + " → " + new IPEndPoint(IPAddress.Parse(r.Text("TargetAddress")), r.Number("TargetPort")) + "\n允许来源：" + string.Join("，", r.Strings("AllowedSources")) + "；验收：" + r.Text("Validation.Type")));
-        summary += "\n\n仅 TCP；不传递真实客户端 IP，不改变代理入站、SSH 或监控。转发使用系统自带程序，无连接 60 秒后工作进程退出，监听仍保持可用。";
-        if (action != "Check") summary += "\n本次会重建当前组件的转发监听，已有转发连接中断。" + (plan.Text("Firewall.Mode") == "PreserveExisting" ? "保留既有防火墙，所需端口须已放行。" : "同步受管防火墙的转发端口。") + "失败或取消恢复本组件及本次防火墙范围。";
-        return new(config, expected, summary);
     }
     public static void RequireValidation(JsonObject configuration, JsonObject result)
     {
         var ids = Rules(configuration).Where(r => r.Flag("Enabled")).Select(r => r.Text("Id")).ToArray();
         var items = (result["Items"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? [];
-        if (result.Text("Status") != "Passed" || items.Length != ids.Length || ids.Any(id => items.Count(i => i.Text("Id") == id && i.Text("Status") == "Passed" && i.Text("From") == "Controller" && i.Text("Scope") == "ForwardedApplication") != 1)) throw new OperationException("实际转发验收未全部通过，不能提交本次变更。", code: "TcpForwardValidationIncomplete");
+        if (result.Text("Status") != "Passed" || items.Length != ids.Length || ids.Any(id => items.Count(i => i.Text("Id") == id && i.Text("Status") == "Passed" && i.Text("From") == "Controller" && i.Text("Scope") == (Rules(configuration).Single(r => r.Text("Id") == id).Text("Validation.Type") == "TcpChain" ? "TcpChainEndToEnd" : "ForwardedApplication")) != 1)) throw new OperationException("实际转发验收未全部通过，不能提交本次变更。", code: "TcpForwardValidationIncomplete");
         foreach (var rule in Rules(configuration).Where(r => r.Flag("Enabled")))
         {
             var checks = (items.Single(i => i.Text("Id") == rule.Text("Id"))["Checks"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? [];
             if (checks.Length != (rule.Text("ListenFamily") == "DualStack" ? 2 : 1) || checks.Select(i => i.Text("Address")).Distinct().Count() != checks.Length || checks.Any(i => i.Text("Status") != "Passed" || i.Text("Type") != rule.Text("Validation.Type"))) throw new OperationException("转发验收缺少所选地址族或应用协议的结果。", code: "TcpForwardValidationIncomplete");
+            if (rule.Text("Validation.Type") == "TcpChain" && checks.Any(i => i.Text("ChainId") != rule.Text("Validation.ChainId") || i.Text("Result.Status") != "Passed" || i.Text("Result.Result.Status") != "Reachable")) throw new OperationException("线路规则缺少整链代理验收。");
         }
     }
 }

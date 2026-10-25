@@ -60,6 +60,7 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
         if (scheme["Sources"] is JsonObject originalSources) foreach (var item in originalSources) { if (ClientSchemes.SourceFingerprint(item.Key) != item.Value!.ToString()) throw new OperationException("节点来源发生变化，请重新读取。"); sources[item.Key] = item.Value.DeepClone(); }
         var origins = new JsonArray(specification["manual_nodes"]!.AsArray().Where(n => n!["ManagedOrigin"] != null).Select(n => n!["ManagedOrigin"]!.DeepClone()).ToArray());
         ManagedNodeSources.Verify(store, origins);
+        ForwardedNodeSources.VerifyNodes(store, specification["manual_nodes"]!.AsArray().OfType<JsonObject>());
         var directory = store.Paths.Resolve("private/client-candidates/" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
         ArchiveStore.WriteJson(SafePath.Resolve(directory, "candidate-owner.json"), new JsonObject { ["SchemeId"] = scheme.Text("Id") });
         var specFile = SafePath.Resolve(directory, "layout.private.json"); ArchiveStore.WriteJson(specFile, specification);
@@ -70,6 +71,9 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
         result.RequireSuccess("候选生成失败，请检查节点、连接关系与分组。");
         var candidate = new JsonObject { ["SchemeId"] = scheme.Text("Id"), ["OutputClients"] = scheme.Text("OutputClients", "Both"), ["Sources"] = sources, ["SpecFingerprint"] = ArchiveStore.Fingerprint(specification), ["ValidationStatus"] = "Pending", ["Targets"] = new JsonObject() };
         candidate["ManagedSources"] = origins;
+        candidate["ForwardedSources"] = new JsonArray(specification["manual_nodes"]!.AsArray().OfType<JsonObject>().Where(n => n["ForwardedOrigin"] != null).Select(n => n["ForwardedOrigin"]!.DeepClone()).ToArray());
+        candidate["ChainSources"] = new JsonArray(specification["manual_nodes"]!.AsArray().OfType<JsonObject>().Where(n => n["TcpChainOrigin"] != null).Select(n => n["TcpChainOrigin"]!.DeepClone()).ToArray());
+        candidate["InboundSources"] = new JsonArray(specification["manual_nodes"]!.AsArray().OfType<JsonObject>().Where(n => n["InboundOrigin"] != null).Select(n => n["InboundOrigin"]!.DeepClone()).ToArray());
         foreach (var format in formats) { candidate[format] = SafePath.Resolve(directory, format == "Clash" ? "Clash_General.candidate.yaml" : "sing-box-general.candidate.json"); candidate[format + "Hash"] = ClientSchemes.SourceFingerprint(candidate.Text(format)); }
         VerifySources(candidate); scheme["Candidate"] = candidate; Save(scheme); return candidate;
     }
@@ -77,6 +81,9 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
     {
         foreach (var source in candidate["Sources"]!.AsObject()) if (ClientSchemes.SourceFingerprint(source.Key) != source.Value!.ToString()) throw new OperationException("来源已变化，请重新生成候选。");
         if (candidate["ManagedSources"] is JsonArray origins) ManagedNodeSources.Verify(store, origins);
+        if (candidate["ForwardedSources"] is JsonArray forwarding) ForwardedNodeSources.VerifyOrigins(store, forwarding);
+        if (candidate["ChainSources"] is JsonArray chains) TcpChains.VerifyOrigins(store, chains);
+        if (candidate["InboundSources"] is JsonArray inbounds) InboundSources.VerifyOrigins(store, inbounds);
     }
     private void VerifyCandidate(JsonObject scheme, JsonObject candidate)
     {

@@ -98,10 +98,12 @@ public sealed partial class MainWindow
         var route = ClientTopology.DiagnosticRoute(selected, model.Text("Entry"), model.Text("Landing") == "" ? null : model.Text("Landing"));
         var origins = new[] { route.Entry, route.Landing }.Where(n => n?["ManagedOrigin"] != null).Select(n => (JsonNode?)n!["ManagedOrigin"]!.DeepClone()).ToArray();
         ManagedNodeSources.Verify(store, new JsonArray(origins));
+        ForwardedNodeSources.VerifyNodes(store, new[] { route.Entry, route.Landing }.OfType<JsonObject>());
         JsonObject? report = null;
         try
         {
             await RunBackground("轻量链路诊断", async token => report = await clientDiagnostics.RunAsync(route, paths.Resolve("private/client-diagnostics"), new Progress<string>(s => taskText.Text = s), token));
+            ForwardedNodeSources.VerifyNodes(store, new[] { route.Entry, route.Landing }.OfType<JsonObject>());
             report!["EntryId"] = route.Entry.Text("Id"); report["EntryName"] = route.Entry.Text("name"); report["LandingId"] = route.Landing?.Text("Id") ?? ""; report["LandingName"] = route.Landing?.Text("name") ?? "";
             if (selected["Diagnostics"] is not JsonArray) selected["Diagnostics"] = new JsonArray();
             var reports = selected["Diagnostics"]!.AsArray(); reports.Add(report); while (reports.Count > 8) reports.RemoveAt(0);

@@ -27,7 +27,7 @@ public static class ClientTopology
         return IPAddress.TryParse(host, out var address) ? address.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4" : "域名 · 由 DNS 解析";
     }
     public static string EgressFamily(JsonObject node) => node.Text("Egress.Family", node.Text("ManagedOrigin.EgressFamily", "Unknown"));
-    public static string OriginLabel(JsonObject node) => node["ManagedOrigin"] != null ? "受管实例" + (node.Text("ServerRoute.Name") == "" ? "" : " · 默认服务器落地 " + node.Text("ServerRoute.Name") + (node.At("ServerRoute.DestinationRules") is JsonArray rules && rules.Count > 0 ? " · 存在服务器 TCP 分流例外" : "") + (node.Number("ServerRoute.AdditionalHopCount") > 0 ? " · 附加落地 " + node.Number("ServerRoute.AdditionalHopCount") + " 个" : "")) : node.Text("Source.Kind") == "Subscription" ? "外部订阅来源" : node.Text("Source.Kind") == "ShareLink" ? "外部分享链接" : "外部 / 手动节点";
+    public static string OriginLabel(JsonObject node) => node["InboundOrigin"] != null ? "独立入站 · 按用户验收" : node["ForwardedOrigin"] != null ? "受管转发 · " + (node.Text("ForwardedOrigin.UdpRuleId") != "" ? "TCP + 独立 UDP" : node.Text("sing_box.type") == "shadowsocks" ? "仅 TCP" : "TCP · 协议 UDP 封装") : node["ManagedOrigin"] != null ? "受管实例" + (node.Text("ServerRoute.Name") == "" ? "" : " · 默认服务器落地 " + node.Text("ServerRoute.Name") + (node.At("ServerRoute.DestinationRules") is JsonArray rules && rules.Count > 0 ? " · 存在服务器 TCP 分流例外" : "") + (node.Number("ServerRoute.AdditionalHopCount") > 0 ? " · 附加落地 " + node.Number("ServerRoute.AdditionalHopCount") + " 个" : "")) : node.Text("Source.Kind") == "Subscription" ? "外部订阅来源" : node.Text("Source.Kind") == "ShareLink" ? "外部分享链接" : "外部 / 手动节点";
 
     public static ClientDiagnosticRoute DiagnosticRoute(JsonObject scheme, string entryName, string? landingName = null)
     {
@@ -44,15 +44,22 @@ public static class ClientTopology
         return new(entry.DeepClone().AsObject(), landing?.DeepClone().AsObject(), fingerprint);
     }
 
-    private static JsonObject RouteIdentity(JsonObject node) => new()
+    private static JsonObject RouteIdentity(JsonObject node)
     {
-        ["Connection"] = ClientNodeImport.ConnectionFingerprint(node), ["Kind"] = node.Text("kind"),
-        ["Group"] = node.Text(node.Text("kind") == "entry" ? "region_group" : "transit_group"),
-        ["Egress"] = node["Egress"]?.DeepClone(), ["ManagedOrigin"] = node["ManagedOrigin"]?.DeepClone()
-    };
+        var identity = new JsonObject
+        {
+            ["Connection"] = ClientNodeImport.ConnectionFingerprint(node), ["Kind"] = node.Text("kind"),
+            ["Group"] = node.Text(node.Text("kind") == "entry" ? "region_group" : "transit_group"),
+            ["Egress"] = node["Egress"]?.DeepClone(), ["ManagedOrigin"] = node["ManagedOrigin"]?.DeepClone()
+        };
+        if (node["ForwardedOrigin"] != null) identity["ForwardedOrigin"] = node["ForwardedOrigin"]!.DeepClone();
+        if (node["TcpChainOrigin"] != null) identity["TcpChainOrigin"] = node["TcpChainOrigin"]!.DeepClone();
+        if (node["InboundOrigin"] != null) identity["InboundOrigin"] = node["InboundOrigin"]!.DeepClone();
+        return identity;
+    }
     private static void ValidateOutbound(JsonObject node, bool landing, string[] regions)
     {
-        if (node["sing_box"] is not JsonObject config || config.Text("type") is not ("vless" or "anytls" or "shadowsocks")) throw new OperationException("轻量诊断需要受支持的 sing-box 节点参数，请补全此节点。");
+        if (node["sing_box"] is not JsonObject config || config.Text("type") is not ("vless" or "anytls" or "shadowsocks" or "hysteria2")) throw new OperationException("轻量诊断需要受支持的 sing-box 节点参数，请补全此节点。");
         if (config.Number("server_port") is < 1 or > 65535 || config.Text("server") == "") throw new OperationException("节点的服务器或端口无效。");
         // A landing's group is edited separately from its imported raw configuration.
         // The exporter, and this diagnostic, replace that known group with the selected entry.

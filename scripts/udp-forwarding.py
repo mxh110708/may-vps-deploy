@@ -108,7 +108,7 @@ def material(config, python):
             lines.append('  udp dport ' + str(rule['ListenPort']) + ' drop')
     lines += [' }', '}']
     files[ACL] = '\n'.join(lines) + '\n'
-    files[unit_path(ACL_UNIT)] = HEADER + '[Unit]\nDescription=May UDP forwarding source whitelist\nAfter=nftables.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/sbin/nft -f ' + ACL + '\nExecStop=/usr/sbin/nft delete table inet ' + TABLE + '\n\n[Install]\nWantedBy=multi-user.target\n'
+    files[unit_path(ACL_UNIT)] = HEADER + '[Unit]\nDescription=May UDP forwarding source whitelist\nDefaultDependencies=no\nAfter=nftables.service\nBefore=sockets.target shutdown.target\nConflicts=shutdown.target\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/sbin/nft -f ' + ACL + '\nExecStop=/usr/sbin/nft delete table inet ' + TABLE + '\n\n[Install]\nWantedBy=multi-user.target\n'
     return files
 
 
@@ -144,7 +144,7 @@ class Host(ForwardHost):
 
 
 def main():
-    host, action = Host(), sys.argv[1]
+    host, action = Host(archived_hash=os.environ.get('VPS_PARAM_UDP_FORWARD_EXPECTED_HASH') or os.environ.get('VPS_PARAM_EXPECTED_HASH') or os.environ.get('VPS_PARAM_ARCHIVED_HASH')), sys.argv[1]
     if action == 'read':
         value = host.read()
         if os.environ.get('VPS_PARAM_CANDIDATE_JSON'):

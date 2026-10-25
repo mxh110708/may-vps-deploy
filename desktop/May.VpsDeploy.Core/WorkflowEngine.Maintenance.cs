@@ -19,9 +19,22 @@ public sealed partial class WorkflowEngine
         {
             if (c.Plan[component] == null) continue;
             var matched = false;
-            try { var forward = await c.Run(asset, marker: marker + "_READ"); var current = JsonNode.Parse(RemoteAssets.Marker(forward.Output, marker + "_STATE"))!; matched = current.Text("Hash") == c.State.Text(component + ".RemoteHash") && current["Configuration"] != null && ArchiveStore.Fingerprint(current["Configuration"]!) == ArchiveStore.Fingerprint(c.Plan[component]!); }
+            try { var forward = await c.Run(asset, new() { ["ARCHIVED_HASH"] = c.State.Text(component + ".RemoteHash") }, marker: marker + "_READ"); var current = JsonNode.Parse(RemoteAssets.Marker(forward.Output, marker + "_STATE"))!; matched = current.Flag("TemplateCurrent", true) && current.Text("Hash") == c.State.Text(component + ".RemoteHash") && current["Configuration"] != null && ArchiveStore.Fingerprint(current["Configuration"]!) == ArchiveStore.Fingerprint(c.Plan[component]!); }
             catch (Exception error) when (error is OperationException or IOException or System.Text.Json.JsonException) { }
             audit[component] = new JsonObject { ["MatchesArchive"] = matched, ["Scope"] = "ConfigurationSocketsWhitelist" };
+        }
+        if (c.Plan["InboundModel"] is JsonObject inbounds)
+        {
+            var matched = false;
+            try
+            {
+                var response = await c.Run("inbound-read.sh", marker: "INBOUND_READ"); var current = JsonNode.Parse(RemoteAssets.Marker(response.Output, "INBOUND_STATE"))!;
+                matched = current.Text("Hash") == c.State.Text("Inbounds.RemoteHash") && JsonNode.DeepEquals(current.At("Registry.Model"), inbounds);
+                if (matched) { c.State.Put("Inbounds.Runtime", current["Runtime"]!.DeepClone()); matched = InboundCatalog.Items(inbounds, "Inbounds").All(i => current.Flag("Runtime." + i.Text("Id") + ".Enabled") == i.Flag("Enabled") && current.Flag("Runtime." + i.Text("Id") + ".Active") == i.Flag("Enabled")); }
+            }
+            catch (Exception error) when (error is OperationException or IOException or System.Text.Json.JsonException) { }
+            if (!matched) c.State.Put("Inbounds.LastCheck", JsonValue.Create("Failed"));
+            audit["Inbounds"] = new JsonObject { ["MatchesArchive"] = matched, ["Scope"] = "IdentityConfigurationRuntime" };
         }
         ArchiveStore.WriteJson(c.File("health-audits/" + c.Id + ".json"), audit);
         c.State["HealthReport"] = HealthReports.Build(c.Plan, c.State, audit);
@@ -62,7 +75,13 @@ public sealed partial class WorkflowEngine
         var role = DeploymentPlans.Roles.Contains(c.Plan.Text("Role")) ? c.Plan.Text("Role") : "MonitorOnly";
         var parameters = new Dictionary<string, string> { ["SOURCE_ROLE"] = role, ["TARGET_ROLE"] = role, ["TIMEOUT_MINUTES"] = c.Request.Kind == OperationKind.InstallComponent ? "60" : "20", ["QUIESCE_KOMARI_CONTROLLER"] = Bool(components.Contains("KomariController")), ["COMPONENTS"] = string.Join(',', components), ["CONTROL_TASK_ID"] = c.Id, ["NETWORK_SNAPSHOT"] = Bool(c.Request.Kind == OperationKind.TuneNetwork) };
         if (components.Contains("TcpForwarding")) parameters["TCP_FORWARD_EXPECTED_HASH"] = c.State.Text("TcpForwarding.RemoteHash", "Absent");
+        if (c.Request.Kind == OperationKind.TcpChain) { parameters["TCP_CHAIN_ID"] = c.Request.Options.Text("Configuration.Id"); c.Pending["TcpChainId"] = parameters["TCP_CHAIN_ID"]; c.Save(); }
         if (components.Contains("UdpForwarding")) parameters["UDP_FORWARD_EXPECTED_HASH"] = c.State.Text("UdpForwarding.RemoteHash", "Absent");
+        if (components.Contains("Inbounds"))
+        {
+            var preview = c.InboundsPreview ?? throw new OperationException("入站变更尚未完成预检。"); parameters["INBOUND_EXPECTED_HASH"] = preview.ExpectedHash;
+            parameters["INBOUND_DOCUMENT"] = preview.Payload.ToJsonString(); parameters["INBOUND_AFFECTED"] = new JsonArray(preview.Affected.Select(i => (JsonNode?)JsonValue.Create(i)).ToArray()).ToJsonString();
+        }
         if (components.Contains("Firewall")) foreach (var field in FirewallParameters(c.Plan, true)) parameters[field.Key] = field.Value;
         var result = await c.Run("protocol-migration-arm-rollback.sh", parameters, true, 600);
         c.Pending["RemoteBackup"] = RemoteAssets.Marker(result.Output, "BACKUP_DIR"); c.Pending["Phase"] = "Armed"; c.Save();
@@ -170,6 +189,7 @@ public sealed partial class WorkflowEngine
         if (components.Contains("Firewall")) Restore(c.Plan, oldPlan, "Firewall");
         if (components.Contains("TcpForwarding")) { Restore(c.Plan, oldPlan, "TcpForwarding"); Restore(c.State, oldState, "TcpForwarding"); }
         if (components.Contains("UdpForwarding")) { Restore(c.Plan, oldPlan, "UdpForwarding"); Restore(c.State, oldState, "UdpForwarding"); }
+        if (components.Contains("Inbounds")) { Restore(c.Plan, oldPlan, "InboundModel"); Restore(c.State, oldState, "Inbounds"); Restore(c.Secrets, oldSecrets, "Inbounds"); }
         if (components.Contains("KomariAgent")) { Restore(c.Plan, oldPlan, "Komari"); Restore(c.Secrets, oldSecrets, "KomariAgent"); Restore(c.State, oldState, "KomariInstalled"); }
         if (components.Contains("KomariController")) Restore(c.State, oldState, "KomariController");
         if (components.Contains("Cloudflared")) { Restore(c.State, oldState, "Cloudflared"); Restore(c.Secrets, oldSecrets, "Cloudflared"); }
@@ -202,6 +222,7 @@ public sealed partial class WorkflowEngine
     }
     private async Task Recover(Context c)
     {
+        if (c.Pending?.Text("Kind") == "MayMonitor") { await RecoverMayMonitor(c); return; }
         if (!c.HasPending() && InstanceLifecycle.Describe(c.Plan, c.State, c.Pending).CanContinue)
         {
             c.Report("无需回滚", "当前只有未完成草稿，尚无待恢复事务。请选择继续部署或继续接入。"); return;
@@ -290,6 +311,7 @@ public sealed partial class WorkflowEngine
     }
     private static void ValidateMaintenance(Context c)
     {
+        if (c.Request.Kind == OperationKind.Decommission && InboundCatalog.Items(c.Plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").Any()) throw new OperationException("请先在通用多入站中移除全部独立入站，再退役此实例。");
         if (c.Request.Kind == OperationKind.Decommission && c.Plan["TcpForwarding"] != null) throw new OperationException("请先在独立 TCP 转发中移除受管转发组件，再退役此实例。", code: "ForwardingStillInstalled");
         if (c.Request.Kind == OperationKind.Decommission && c.Plan["UdpForwarding"] != null) throw new OperationException("请先在独立 UDP 转发中移除受管转发组件，再退役此实例。", code: "ForwardingStillInstalled");
         var options = c.Request.Options; var role = options.Text("Protocol");
@@ -517,6 +539,7 @@ public sealed partial class WorkflowEngine
         if (c.Plan.Text("Firewall.Mode") != "PreserveExisting" && !FirewallParameters(c.Plan, true).OrderBy(p => p.Key).SequenceEqual(FirewallParameters(firewallPlan, true).OrderBy(p => p.Key))) throw new OperationException("协议恢复点需要的监听或可信入口与当前防火墙不同。此次范围保留防火墙，请先切换到兼容的协议状态，未开始恢复。");
         var reserved = new List<int> { c.Plan.Number("Ports.SshPrimary"), c.Plan.Number("Ports.SshRescue") };
         reserved.AddRange(TcpForwarding.Rules(c.Plan["TcpForwarding"] as JsonObject).Select(r => r.Number("ListenPort")));
+        reserved.AddRange(InboundCatalog.Items(c.Plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").Select(i => i.Number("Listener.Port")));
         if (Enabled(oldPlan, "ShadowsocksLanding") && UdpForwarding.Rules(c.Plan["UdpForwarding"] as JsonObject).Any(r => r.Number("ListenPort") == oldPlan.Number("Ports.LandingShadowsocks"))) throw new OperationException("协议恢复点与当前 UDP 转发端口冲突，未开始恢复。");
         if (c.State.Flag("KomariController.Installed") || c.State.Flag("MonitoringInventory.KomariController.Installed")) reserved.Add(c.Plan.Number("KomariController.Port", 25774));
         if (c.State.Flag("Cloudflared.Installed") || c.State.Flag("MonitoringInventory.Cloudflared.Installed")) reserved.Add(c.Plan.Number("Cloudflared.MetricsPort", 20241));

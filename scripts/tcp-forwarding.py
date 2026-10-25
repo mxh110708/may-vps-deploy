@@ -70,6 +70,10 @@ def normalize(value):
         elif kind == 'Proxy':
             if set(check) != {'Type', 'SchemeId', 'NodeId', 'NodeFingerprint'} or not all(re.fullmatch('[a-f0-9]{32}', check[k]) for k in ('SchemeId', 'NodeId')) or not re.fullmatch('[a-f0-9]{64}', check['NodeFingerprint']):
                 raise ValueError('Invalid proxy validation reference.')
+        elif kind == 'TcpChain':
+            parts = check.get('FrontInstance', '').split('/')
+            if set(check) != {'Type', 'ChainId', 'FrontInstance'} or not re.fullmatch('[a-f0-9]{32}', check['ChainId']) or len(parts) != 3 or parts[2] != 'May-VPS-Deploy' or any(not re.fullmatch(r'[^\W_][\w. -]{0,63}', part) or part.endswith(('.', ' ')) for part in parts[:2]):
+                raise ValueError('Invalid cross-instance TCP owner.')
         else:
             raise ValueError('Application-level validation is required.')
         result.append(dict(rule, TargetAddress=str(target), AllowedSources=sorted(set(networks))))
@@ -111,7 +115,7 @@ def material(config, proxy):
         lines.append('  tcp dport ' + str(rule['ListenPort']) + ' drop')
     lines += [' }', '}']
     files[ACL] = '\n'.join(lines) + '\n'
-    files[unit_path(ACL_UNIT)] = HEADER + '[Unit]\nDescription=May TCP forwarding source whitelist\nAfter=nftables.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/sbin/nft -f ' + ACL + '\nExecStop=/usr/sbin/nft delete table inet ' + TABLE + '\n\n[Install]\nWantedBy=multi-user.target\n'
+    files[unit_path(ACL_UNIT)] = HEADER + '[Unit]\nDescription=May TCP forwarding source whitelist\nDefaultDependencies=no\nAfter=nftables.service\nBefore=sockets.target shutdown.target\nConflicts=shutdown.target\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/sbin/nft -f ' + ACL + '\nExecStop=/usr/sbin/nft delete table inet ' + TABLE + '\n\n[Install]\nWantedBy=multi-user.target\n'
     return files
 
 
@@ -155,7 +159,7 @@ class Host(ForwardHost):
 
 def main():
     action = sys.argv[1]
-    host = Host()
+    host = Host(archived_hash=os.environ.get('VPS_PARAM_TCP_FORWARD_EXPECTED_HASH') or os.environ.get('VPS_PARAM_EXPECTED_HASH') or os.environ.get('VPS_PARAM_ARCHIVED_HASH'))
     if action == 'read':
         value = host.read()
         if os.environ.get('VPS_PARAM_CANDIDATE_JSON'):

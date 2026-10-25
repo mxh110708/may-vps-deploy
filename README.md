@@ -2,6 +2,18 @@
 
 面向个人 Debian VPS 的中文部署与运维工具，由 Windows 控制端统一管理部署计划、远端操作、私有归档和客户端配置。
 
+v0.9.36 整合原计划第十一至十四轮及监控 M1–M3：转发节点、有限 TCP 跨实例编排、通用多入站、Hysteria2 和 May Monitor 接入维护。配套 Server v0.1.0-rc.3 保持预发布，用户手动更新与逐实例部署；详见[本次发行范围与验证](docs/TESTING-0.9.36.zh-CN.md)。
+
+**主线进度：** 原定[第十二轮跨实例 TCP 编排](docs/TCP-CHAIN-ROUND-12-2026-10-24.zh-CN.md)、[第十三轮通用多入站](docs/INBOUND-MODEL-ROUND-13-2026-10-25.zh-CN.md)及[第十四轮 Hysteria2](docs/HYSTERIA2-ROUND-14-2026-10-25.zh-CN.md)已补齐源码、对应隔离验收并纳入 v0.9.36。独立入站支持 Reality、AnyTLS、SS2022 和 Hysteria2，分别管理监听、用户、证书、出站和恢复范围，按用户生成 Clash/Mihomo 与 sing-box 节点；Hysteria2 包含真实 QUIC 鉴权、HTTPS、UDP 回显及 Debian 12／13 生命周期验证。旧服务保留原维护入口，TUIC 与更多服务器出站完成后续评估，尚未实现。May Monitor M1–M3 独立编号，完整状态以[主线路线图](docs/DEPLOY-ROADMAP-2026-10-24.zh-CN.md)为准。
+
+监控支线 M3 增加 May 独立 HTTPS 接入计划、服务安装身份核验和单节点连续上报验收。配套 Server RC3 在升级／恢复／重启中保留安装身份，旧 Agent 可只读核验归属，旧 Komari 继续保留。源码纳入 v0.9.36，尚未迁移生产，详见[接入与试迁移流程及验证](docs/MAY-MONITOR-ACCESS-ROUND-14-2026-10-24.zh-CN.md)。
+
+监控支线 M2 增加 May Monitor 独立部署维护：固定版本及摘要、专用服务身份、Agent 凭据核验、一致性备份、同组件恢复和确认丢失对账。按 Komari 与 May 并存、逐节点迁移设计，Debian 12／13 的真实隔离生命周期和短时资源观测已通过。Deploy 源码纳入 v0.9.36，配套使用后续 Server RC3；详见[监控 M2 流程、验证与边界](docs/MAY-MONITOR-LIFECYCLE-ROUND-13-2026-10-24.zh-CN.md)。
+
+监控支线 M1 增加「监测」页，使用独立、限节点且有有效期的只读令牌接入 May Monitor，逐实例显示在线状态、CPU、内存与流量，支持可见时刷新、取消及连接失效保护。Deploy 源码纳入 v0.9.36，配套使用 Server RC3；旧 Server `v0.1.0-rc.1` 不包含本轮接口。详见[监控 M1 功能与接入边界](docs/MONITOR-READ-ROUND-12-2026-10-24.zh-CN.md)。
+
+第十一轮增加「添加转发节点」：将已验收的 TCP 转发及匹配 UDP 转发纳入配置设计，保留目标鉴权／TLS、稳定身份和来源失效保护，并修正真实重启暴露的转发单元启动依赖。已纳入 v0.9.36，详见[功能与验证边界](docs/FORWARDED-NODES-ROUND-11-2026-10-23.zh-CN.md)。持续监测转向[自有 Komari fork、先审计后接入](docs/MONITOR-FORK-PLAN-2026-10-23.zh-CN.md)。
+
 v0.9.35 整合第八至第十轮独立 TCP／UDP 转发：双栈监听、来源白名单、启停移除、真实应用验收与组件范围恢复；UDP 会话有数量和超时限制，并新增从已保存 Shadowsocks／SS2022 节点选择目标的真实加密 UDP 验收。见[第八轮 TCP](docs/TCP-FORWARDING-ROUND-8-2026-10-21.zh-CN.md)、[第九轮 UDP](docs/UDP-FORWARDING-ROUND-9-2026-10-21.zh-CN.md)、[第十轮代理 UDP](docs/UDP-PROXY-ROUND-10-2026-10-23.zh-CN.md)及[发行验证](docs/TESTING-0.9.35.zh-CN.md)。
 
 本版同时补齐校园、学术数据库及全文下载链路的业务分类与 DNS，Scholar 等研究平台和 ML 开发工具不再按厂商或 AI 主题粗略归组；国内校园入口明确直连，两种真实核心已完成隔离分流验证。见[分类审查](docs/ACADEMIC-ROUTING-AUDIT-2026-10-23.zh-CN.md)、[此前 Hugging Face 修复](docs/HUGGINGFACE-RESEARCH-ROUTING-2026-10-22.zh-CN.md)。ExistingAuthority 仍保持显式修改边界。
@@ -12,7 +24,7 @@ v0.9.31 将项目与应用统一更名为 May VPS Deploy，采用独立安装身
 
 v0.9.30 统一新方案的城市/湾区命名：LA 入口与 SF 湾区入口分别建组，SF 包含 San Jose。IPv4、IPv6 落地出口可分别保存节点名，避免重新提取时恢复旧名称；改名保留原连接与凭据。详见[命名约定与归档同步](docs/CITY-NAMING-2026-10-19.zh-CN.md)。
 
-正式版为 [v0.9.35](https://github.com/mxh110708/may-vps-deploy/releases/tag/v0.9.35)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+正式版为 [v0.9.36](https://github.com/mxh110708/may-vps-deploy/releases/tag/v0.9.36)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
 
 v0.9.28 将 BBR v3 改用 Google 官方 `google/bbr` v3 源码。固定版由 May 在开发机预编译，内核包、通用配置和校验清单随应用提供，小 VPS 只接收、验证和安装；不提供最新提交选择或 VPS 在线编译，固定包随应用版本更新。审阅展示真实基础版本、日期、提交及包 SHA256，不标作 Google 官方二进制或最新 LTS。旧版 XanMod 来源及其事务兼容处理已移除；默认仍沿用 VPS 原有内核。详见[网络调优流程](docs/NETWORK-TUNING.zh-CN.md)、[预编译维护](docs/GOOGLE-BBR-PREBUILT.zh-CN.md)及[安装启动验证](docs/GOOGLE-BBR-PREBUILT-2026-10-16.zh-CN.md)。下方 v0.9.16–v0.9.18 的内核发行、签名与 LTS 描述属于当时的第三方实现。
 

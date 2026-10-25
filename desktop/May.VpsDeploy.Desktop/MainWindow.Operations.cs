@@ -39,6 +39,8 @@ public sealed partial class MainWindow
     private async Task<bool> ReviewOperation(ReviewedOperation review)
     {
         var request = review.Request;
+        if (request.Kind == OperationKind.Inbounds) return await ShowDialog(OperationDialog("审阅通用入站变更", DialogScroll(Column(Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
+        if (request.Kind == OperationKind.TcpChain) return await ShowDialog(OperationDialog("审阅跨实例 TCP 线路", DialogScroll(Column(Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
         if (request.Kind == OperationKind.ServerOutbound) return await ShowDialog(OperationDialog("审阅服务器固定下一跳", DialogScroll(Column(Text(request.InstanceRelativePath.Replace("/May-VPS-Deploy", ""), 17), Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
         if (request.Kind == OperationKind.TcpForward) return await ShowDialog(OperationDialog(request.Options.Text("Action") == "Check" ? "审阅 TCP 转发检查" : "审阅 TCP 转发变更", DialogScroll(Column(Text(request.InstanceRelativePath.Replace("/May-VPS-Deploy", ""), 17), Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
         if (request.Kind == OperationKind.UdpForward) return await ShowDialog(OperationDialog(request.Options.Text("Action") == "Check" ? "审阅 UDP 转发检查" : "审阅 UDP 转发变更", DialogScroll(Column(Text(request.InstanceRelativePath.Replace("/May-VPS-Deploy", ""), 17), Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
@@ -76,6 +78,9 @@ public sealed partial class MainWindow
     }
     private static string StageLabel(string stage) => stage switch
     {
+        "inbound-preflight" => "核对入站资源与引用", "inbound-backup" => "建立入站范围恢复点", "inbound-apply" => "应用入站资源", "inbound-validation" => "验收入站用户与代理", "inbound-commit" => "提交入站目录", "inbound-read" => "读取入站实际状态",
+        "chain-preflight" => "核对三台依赖与端口", "chain-backup" => "建立两台恢复点", "chain-apply" => "应用跨实例线路",
+        "chain-validation" => "验收实际线路与既有规则", "chain-commit" => "协调提交与归档", "chain-recovery" or "tcp-chain-rollback" => "协调恢复整条线路", "tcp-chain-probe" => "检查分段 TCP 连接",
         "audit" => "系统审计", "management-key" => "准备管理密钥", "deployment-baseline-arm" => "部署基线备份", "bootstrap-access" => "建立管理访问", "base-system" => "系统准备",
         "ssh-transition" => "管理入口切换", "target-audit" => "Reality 目标检查", "certbot-dns-setup" => "证书配置", "local-https-target" => "本机 HTTPS 配置",
         "deployment-commit" => "部署提交", "maintenance-transaction-status" => "事务状态核对", "无需回滚" => "草稿状态核对",

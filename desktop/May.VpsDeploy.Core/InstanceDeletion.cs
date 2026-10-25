@@ -15,6 +15,8 @@ public sealed class InstanceDeletion(ArchiveStore store)
     {
         SafePath.CheckTree(directory);
         var plan = ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-plan.json"));
+        if (InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").Any()) throw new OperationException("请先在通用多入站中移除全部独立入站，再删除其归档；停用仍保留恢复材料。");
+        if (plan["TcpChain"] != null || TcpChains.List(store).Any(r => TcpChains.Pending(r) && TcpChains.Instances(r["Configuration"]!.AsObject()).Contains(relative, StringComparer.OrdinalIgnoreCase))) throw new OperationException("此实例仍被跨实例线路依赖，请先移除或恢复整条线路，再删除归档。");
         if (relative != plan.Text("Provider") + "/" + plan.Text("Instance") + "/May-VPS-Deploy") throw new OperationException("实例归档身份不一致，未删除。", code: "InstanceIdentityMismatch");
         var stateFile = SafePath.Resolve(directory, "deployment-state.json");
         var state = File.Exists(stateFile) ? ArchiveStore.ReadJson(stateFile) : new JsonObject();

@@ -11,6 +11,7 @@ public sealed class ClientShareExport(ArchiveStore store)
         var text = ClientShareLinks.Generate(scheme, preview, selected, format);
         var chosen = selected.ToHashSet(StringComparer.Ordinal);
         ManagedNodeSources.Verify(store, new JsonArray(scheme["Nodes"]!.AsArray().OfType<JsonObject>().Where(n => chosen.Contains(n.Text("Id")) && n["ManagedOrigin"] != null).Select(n => n["ManagedOrigin"]!.DeepClone()).ToArray()));
+        ForwardedNodeSources.VerifyNodes(store, scheme["Nodes"]!.AsArray().OfType<JsonObject>().Where(n => chosen.Contains(n.Text("Id"))));
         return text;
     }
     public void SaveNew(JsonObject scheme, ClientSharePreview preview, IReadOnlyList<string> selected, string format, string target)

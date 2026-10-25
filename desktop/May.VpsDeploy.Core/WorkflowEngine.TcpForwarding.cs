@@ -9,7 +9,7 @@ public sealed partial class WorkflowEngine
         var preview = TcpForwarding.Prepare(store, c.Request); var action = c.Request.Options.Text("Action");
         async Task<JsonObject> Read()
         {
-            var response = await c.Run("tcp-forward-read.sh", marker: "TCP_FORWARD_READ");
+            var response = await c.Run("tcp-forward-read.sh", new() { ["ARCHIVED_HASH"] = preview.ExpectedHash }, marker: "TCP_FORWARD_READ");
             return JsonNode.Parse(RemoteAssets.Marker(response.Output, "TCP_FORWARD_STATE"))!.AsObject();
         }
         await c.TrackStep("forward-preflight", async () =>
@@ -21,7 +21,7 @@ public sealed partial class WorkflowEngine
             if (observed.Text("Hash") != preview.ExpectedHash) throw new OperationException("转发实际配置、白名单或监听状态与归档不同，未写入服务器。", code: "TcpForwardRemoteDrift");
             if (action != "Check")
             {
-                await c.Run("tcp-forward-read.sh", new() { ["CANDIDATE_JSON"] = preview.Configuration.ToJsonString() }, marker: "TCP_FORWARD_READ");
+                await c.Run("tcp-forward-read.sh", new() { ["CANDIDATE_JSON"] = preview.Configuration.ToJsonString(), ["ARCHIVED_HASH"] = preview.ExpectedHash }, marker: "TCP_FORWARD_READ");
                 if (c.Plan.Text("Firewall.Mode") != "PreserveExisting") await c.Run("firewall-preflight.sh", FirewallParameters(c.Plan, true), marker: "FIREWALL_SCOPE_OK");
             }
         });
@@ -52,7 +52,8 @@ public sealed partial class WorkflowEngine
                 TcpForwarding.RequireValidation(preview.Configuration, result);
                 var after = await Read();
                 if (after.Text("Hash") != observed.Text("Hash")) throw new OperationException("验收期间转发配置发生变化，未提交。");
-                c.State["TcpForwarding"] = new JsonObject { ["RemoteHash"] = observed.Text("Hash"), ["Validation"] = result.DeepClone(), ["At"] = DateTimeOffset.UtcNow };
+                c.State["TcpForwarding"] = new JsonObject { ["RemoteHash"] = observed.Text("Hash"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(preview.Configuration), ["TemplateCurrent"] = observed.Flag("TemplateCurrent", true), ["Validation"] = result.DeepClone(), ["At"] = DateTimeOffset.UtcNow };
+                if (!observed.Flag("TemplateCurrent", true)) { c.Warnings = true; c.Report("TCP 转发需要更新", "旧单元已按归档核对并保持原样，请重新审阅保存转发规则以应用当前启动依赖。"); }
             }
             await VerifyManagement(c); c.Save();
         });

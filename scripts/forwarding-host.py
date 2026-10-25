@@ -22,8 +22,8 @@ def encoded(value):
 
 
 class ForwardHost:
-    def __init__(self, root=Path('/'), run=subprocess.run):
-        self.root, self.run = root, run
+    def __init__(self, root=Path('/'), run=subprocess.run, archived_hash=None):
+        self.root, self.run, self.archived_hash = root, run, archived_hash
 
     def path(self, absolute):
         return self.root / absolute.lstrip('/')
@@ -77,13 +77,18 @@ class ForwardHost:
         files = self.material(config, self.proxy())
         if set(self.units()) != {p for p in files if p.startswith('/etc/systemd/system/')} or set(p.name for p in self.path(self.DIRECTORY).iterdir()) != {Path(p).name for p in files if p.startswith(self.DIRECTORY + '/')}:
             raise ValueError('Unknown forwarding files or unit overrides; review required.')
+        archived_units = False
         for target, content in files.items():
             actual = self.regular(target).read_bytes()
             # Installed program bytes are pinned by the controller's archived
             # resource hash. They may predate this app; a reviewed save updates
             # them without adopting an externally changed hash.
-            if len(actual) > 131072 or target not in self.ARCHIVED_PROGRAMS and actual != content.encode():
+            if len(actual) > 131072:
                 raise ValueError('Forwarding files changed outside this application.')
+            if target not in self.ARCHIVED_PROGRAMS and actual != content.encode():
+                if not (target.startswith('/etc/systemd/system/') and actual.startswith(content.splitlines()[0].encode() + b'\n') and re.fullmatch(r'[a-f0-9]{64}', self.archived_hash or '')):
+                    raise ValueError('Forwarding files changed outside this application.')
+                archived_units = True
         if self.table() != self.canonical_table(files[self.ACL]):
             raise ValueError('Forwarding whitelist runtime differs from its archive.')
         units = {}
@@ -102,7 +107,10 @@ class ForwardHost:
         if units != expected:
             raise ValueError('Forwarding activation state differs from the saved rules.')
         identity = self.identity(files)
-        return {'Hash': digest(encoded(dict(identity, Units=units))), 'Configuration': config, 'Files': identity['Files'], 'Units': units, 'Table': identity['Table']}
+        fingerprint = digest(encoded(dict(identity, Units=units)))
+        if archived_units and fingerprint != self.archived_hash:
+            raise ValueError('Installed forwarding units do not match the controller archive.')
+        return {'Hash': fingerprint, 'Configuration': config, 'Files': identity['Files'], 'Units': units, 'Table': identity['Table'], 'TemplateCurrent': not archived_units}
 
     def preflight(self, config):
         observed = self.read()
@@ -123,6 +131,11 @@ class ForwardHost:
                 if (family, port) in existing:
                     continue
                 with socket.socket(family, self.SOCKET_TYPE) as listener:
+                    if self.SOCKET_TYPE == socket.SOCK_STREAM:
+                        # systemd listeners also use SO_REUSEADDR. Closed TCP
+                        # sessions in TIME_WAIT must not masquerade as a live
+                        # listener when a reviewed route is removed/recreated.
+                        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     if family == socket.AF_INET6:
                         listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
                     listener.bind((address, port))
@@ -261,6 +274,7 @@ class ForwardHost:
     def rollback_complete(self, backup):
         journal = self.journal(backup)
         if journal['Original']['Files']:
+            self.archived_hash = digest(encoded(dict(journal['Original'], Units=journal['OriginalUnits'])))
             config = self.normalize(json.loads(self.regular(self.CONFIG).read_text()))
             self.activate(config)
             observed = self.read()

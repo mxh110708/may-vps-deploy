@@ -18,6 +18,11 @@ public sealed class RemoteAssets(AppPaths paths)
         {
             if (!Regex.IsMatch(name, "^[A-Z][A-Z0-9_]*$")) throw new OperationException("远端参数名称无效。");
             var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+            if (name == "INBOUND_DOCUMENT")
+            {
+                text.Append("VPS_PARAM_INBOUND_DOCUMENT_FILE=$(mktemp /tmp/may-inbound-document.XXXXXXXXXX)\nchmod 0600 \"$VPS_PARAM_INBOUND_DOCUMENT_FILE\"\nexport VPS_PARAM_INBOUND_DOCUMENT_FILE\ntrap 'rm -f -- \"$VPS_PARAM_INBOUND_DOCUMENT_FILE\"' EXIT\nbase64 -d > \"$VPS_PARAM_INBOUND_DOCUMENT_FILE\" <<'MAY_INBOUND_DOCUMENT_B64'\n").Append(encoded).Append("\nMAY_INBOUND_DOCUMENT_B64\n");
+                continue;
+            }
             text.Append("export VPS_PARAM_").Append(name).Append("=\"$(printf '%s' '").Append(encoded).Append("' | base64 -d)\"\n");
         }
         void Program(string variable, params string[] sources)
@@ -35,6 +40,8 @@ public sealed class RemoteAssets(AppPaths paths)
             Program("VPS_KERNEL_PROGRAM", "scripts/kernel-runtime.py", "scripts/kernel-engine.py");
         }
         if (asset == "component-release-latest.sh") Program("VPS_COMPONENT_RELEASE_PROGRAM", "scripts/component-releases.py");
+        if (asset == "may-monitor-lifecycle.sh") Program("VPS_MAY_MONITOR_PROGRAM", "scripts/may-monitor-lifecycle.py");
+        if (asset is "inbound-read.sh" or "inbound-apply.sh" || asset == "protocol-migration-arm-rollback.sh" && parameters.TryGetValue("COMPONENTS", out var inboundScopes) && inboundScopes.Split(',').Contains("Inbounds")) Program("VPS_INBOUND_PROGRAM", "scripts/inbound-host.py");
         if (asset is "tcp-forward-read.sh" or "tcp-forward-apply.sh" || asset == "protocol-migration-arm-rollback.sh" && parameters.TryGetValue("COMPONENTS", out var scopes) && scopes.Split(',').Contains("TcpForwarding")) Program("VPS_TCP_FORWARD_PROGRAM", "scripts/forwarding-host.py", "scripts/tcp-forwarding.py");
         if (asset is "udp-forward-read.sh" or "udp-forward-apply.sh" || asset == "protocol-migration-arm-rollback.sh" && parameters.TryGetValue("COMPONENTS", out var udpScopes) && udpScopes.Split(',').Contains("UdpForwarding")) Program("VPS_UDP_FORWARD_PROGRAM", "scripts/forwarding-host.py", "scripts/udp-forwarding.py");
         if (asset is "network-preflight.sh" or "network-apply.sh" || asset == "protocol-migration-arm-rollback.sh" && parameters.TryGetValue("NETWORK_SNAPSHOT", out var network) && network == "true") text.Append(Read("network-tools.sh")).Append('\n');

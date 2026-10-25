@@ -46,7 +46,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
         this.paths = paths; launchArguments = arguments; testSession = session; store = new(paths, new WindowsSecretProtector());
         var assets = new ValidationAssets(paths, "windows-amd64"); var tools = new ExternalToolRunner();
         IRemoteSessionFactory remote = new SshSessionFactory(store); if (session != null) remote = session.Restrict(remote);
-        coordinator = new(store, new WorkflowEngine(store, remote, new ManagedKeys(new WindowsManagedKeyAccess()), this, new ProtocolValidation(assets, tools, store), new NetworkMeasurement(assets, tools), new TcpForwardValidation(store, new ClientRouteDiagnostics(assets, tools)), new UdpForwardValidation(store, assets, tools)));
+        coordinator = new(store, new WorkflowEngine(store, remote, new ManagedKeys(new WindowsManagedKeyAccess()), this, new ProtocolValidation(assets, tools, store), new NetworkMeasurement(assets, tools), new TcpForwardValidation(store, new ClientRouteDiagnostics(assets, tools)), new UdpForwardValidation(store, assets, tools), new MonitorReadClient(), new TcpChainValidation(new ClientRouteDiagnostics(assets, tools)), new InboundValidation(store, new ClientRouteDiagnostics(assets, tools))));
         workbench = new(store, tools, assets, paths.Resolve("runtime/python/python.exe"));
         clientDiagnostics = new(assets, tools);
         var preference = paths.Resolve("private/desktop-settings.json"); settings = File.Exists(preference) ? ArchiveStore.ReadJson(preference) : new JsonObject { ["AutoCheckUpdates"] = false, ["UpdateProxy"] = "http://127.0.0.1:2080" };
@@ -65,7 +65,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
         var body = new Grid(); body.ColumnDefinitions.Add(new() { Width = new GridLength(220) }); body.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
         var sidebar = new StackPanel { Padding = new Thickness(14, 22, 14, 18), Spacing = 5 };
         sidebar.Children.Add(new StackPanel { Margin = new Thickness(12, 0, 0, 26), Spacing = 8, Children = { new TextBlock { Text = "May Deploy", FontSize = 26, Foreground = Brush(Paint.SidebarText), FontFamily = new FontFamily("ms-appx:///Fonts/SourceSerif4-600.ttf#Source Serif 4"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold }, new TextBlock { Text = "VPS 部署与维护", FontSize = 12, Foreground = Brush(Paint.SidebarMuted) } } });
-        foreach (var (id, label, icon) in new[] { ("overview", "概述", Symbol.Home), ("instances", "实例", Symbol.World), ("deploy", "部署", Symbol.Add), ("clients", "配置设计", Symbol.Link), ("network", "网络调优", Symbol.Globe), ("records", "记录", Symbol.Clock), ("settings", "设置", Symbol.Setting) })
+        foreach (var (id, label, icon) in new[] { ("overview", "概述", Symbol.Home), ("instances", "实例", Symbol.World), ("monitoring", "监测", Symbol.View), ("deploy", "部署", Symbol.Add), ("clients", "配置设计", Symbol.Link), ("network", "网络调优", Symbol.Globe), ("records", "记录", Symbol.Clock), ("settings", "设置", Symbol.Setting) })
         { var labelText = Text(label, 14); labelText.Foreground = Brush(Paint.SidebarText); var button = new Button { Content = Row(new SymbolIcon(icon) { Width = 18, Height = 18, Foreground = Brush(Paint.SidebarIcon) }, labelText), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(14, 11, 14, 11), Background = Brush(Paint.Sidebar), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(7) }; button.Click += (_, _) => SelectPage(id); navigation[id] = button; sidebar.Children.Add(button); }
         body.Children.Add(new Border { Background = Brush(Paint.Sidebar), BorderBrush = Brush(Paint.SidebarBorder), BorderThickness = new Thickness(0, 0, 1, 0), Child = sidebar });
         pageHost.Content = page;
@@ -91,8 +91,9 @@ public sealed partial class MainWindow : Window, IUserInteraction
                 catch (Exception error) { Show(error is OperationException safe ? safe.Message : "方案未能保存，窗口保持打开。", InfoBarSeverity.Error); }
             }
         };
-        Closed += (_, _) => { CancelNodeReorder(); StopNetworkScheduler(); trayIcon?.Dispose(); trayIcon = null; };
+        Closed += (_, _) => { CancelNodeReorder(); StopNetworkScheduler(); StopMonitoring(); trayIcon?.Dispose(); trayIcon = null; };
         SetAppearance(settings.Text("Appearance", "Dark"));
+        InitializeMonitoring();
         InitializeWindowPlacement();
         root.Loaded += (_, _) => { Program.Trace(arguments, "Root Loaded"); StartNetworkScheduler(); };
         root.Loaded += async (_, _) => { SelectPage("overview"); if (fontFallback) Show("所选字体暂时不可用，已使用内置原版字体。可在设置中重新选择或导入。", InfoBarSeverity.Warning); if (testSession != null) { StartTestSession(); return; } if (arguments.Contains("--verify-installed-update")) { await InstalledUpdateSmoke(); return; } if (arguments.Contains("--ui-smoke") || arguments.Contains("--verify-runtime")) { await UiSmoke(); return; } if (settings.Flag("AutoCheckUpdates")) await CheckUpdates(true); };
@@ -133,9 +134,10 @@ public sealed partial class MainWindow : Window, IUserInteraction
     private void Navigate(string id)
     {
         CancelNodeReorder();
+        StopMonitoring();
         ClearExecution();
-        currentPage = id; page.Children.Clear(); disclosures.Clear(); pageAction.Content = null; notice.IsOpen = false; heading.Text = id switch { "overview" => "概述", "instances" => "实例", "deploy" => "部署", "clients" => "配置设计", "network" => "网络调优", "records" => "任务记录", _ => "设置" }; caption.Text = id switch { "overview" => "集中管理你的 VPS 与连接配置。", "instances" => "选择实例，查看归档并进行维护。", "deploy" => "组合选择用途，审阅计划，然后执行。", "clients" => "选择目标，设计连接，校验后导出配置。", "network" => "部署完成后，按需要单独审阅并调整网络参数。", "records" => "查看任务结果和需要处理的恢复记录。", _ => "应用更新、外观设置与私人数据。" };
-        try { switch (id) { case "overview": Overview(); break; case "instances": Instances(); break; case "deploy": Deployment(); break; case "clients": Clients(); break; case "network": NetworkPage(); break; case "records": Records(); break; default: Settings(); break; } } catch (Exception error) { Show(error is OperationException safe ? safe.Message : "本地记录暂时无法读取，请核对数据目录。", InfoBarSeverity.Error); }
+        currentPage = id; page.Children.Clear(); disclosures.Clear(); pageAction.Content = null; notice.IsOpen = false; heading.Text = id switch { "overview" => "概述", "instances" => "实例", "monitoring" => "持续监测", "deploy" => "部署", "clients" => "配置设计", "network" => "网络调优", "records" => "任务记录", _ => "设置" }; caption.Text = id switch { "overview" => "集中管理你的 VPS 与连接配置。", "instances" => "选择实例，查看归档并进行维护。", "monitoring" => "读取 May Monitor 授权节点的最近状态。", "deploy" => "组合选择用途，审阅计划，然后执行。", "clients" => "选择目标，设计连接，校验后导出配置。", "network" => "部署完成后，按需要单独审阅并调整网络参数。", "records" => "查看任务结果和需要处理的恢复记录。", _ => "应用更新、外观设置与私人数据。" };
+        try { switch (id) { case "overview": Overview(); break; case "instances": Instances(); break; case "monitoring": MonitoringPage(); break; case "deploy": Deployment(); break; case "clients": Clients(); break; case "network": NetworkPage(); break; case "records": Records(); break; default: Settings(); break; } } catch (Exception error) { Show(error is OperationException safe ? safe.Message : "本地记录暂时无法读取，请核对数据目录。", InfoBarSeverity.Error); }
         if (Content is DependencyObject root) ApplyFont(root);
     }
     private void SelectPage(string id)
@@ -154,6 +156,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
         grid.Children.Add(Card(Column(Row(new SymbolIcon(Symbol.World) { Foreground = Brush(Paint.Accent) }, Text("受管实例", 15)), Row(Text(store.ListInstances().Count().ToString(), 32), Text("个实例", 12, true)), Action("查看实例", () => { SelectPage("instances"); return Task.CompletedTask; }))));
         var right = Card(Column(Row(new SymbolIcon(Symbol.Link) { Foreground = Brush(Paint.Accent) }, Text("配置方案", 15)), Row(Text(workbench.List().Count().ToString(), 32), Text("个方案", 12, true)), Action("打开配置设计", () => { SelectPage("clients"); return Task.CompletedTask; }))); Grid.SetColumn(right, 1); grid.Children.Add(right); page.Children.Add(grid);
         page.Children.Add(Card(Trailing(Column(Text("开始新的部署", 18), Text("部署新的 VPS，或接入已经配置好的实例。", 13, true)), Row(Action("新建部署", () => { deploymentForm["Existing"] = false; SelectPage("deploy"); return Task.CompletedTask; }, true), Action("接入已有 VPS", () => { deploymentForm["Existing"] = true; SelectPage("deploy"); return Task.CompletedTask; })) )));
+        page.Children.Add(Card(Trailing(Column(Text("持续监测", 18), Text("连接 May Monitor，按实例查看在线状态和最近指标。", 13, true)), Action("查看监测", () => { SelectPage("monitoring"); return Task.CompletedTask; }))));
         var last = new TaskHistory(store).Read().LastOrDefault();
         page.Children.Add(Card(Column(Text("最近任务", 18), Text(last == null ? "暂时还没有任务记录" : OutcomeLabel((TaskOutcome)last.Number("Outcome")), 14, last == null), Text(last == null ? "完成部署、维护或配置导出后，可在记录页查看结果。" : last.Text("Stage"), 13, true), Action("查看记录", () => { SelectPage("records"); return Task.CompletedTask; }))));
     }
@@ -182,6 +185,8 @@ public sealed partial class MainWindow : Window, IUserInteraction
             details.Children.Add(GroupLabel("日常维护"));
             var forwarding = TcpForwarding.Rules(plan["TcpForwarding"] as JsonObject).ToArray();
             details.Children.Add(SettingsGroup(SettingRow("独立 TCP 端口转发", forwarding.Length == 0 ? "按需激活、来源白名单与实际转发验收" : forwarding.Count(r => r.Flag("Enabled")) + " 条已启用 · " + forwarding.Length + " 条已保存；实际状态需核对", Symbol.Forward, Action("管理转发", () => TcpForwardSheet(relative, plan)))));
+            details.Children.Add(SettingsGroup(SettingRow("跨实例 TCP 编排", "前置 → 中转 → 落地 · 统一依赖、验收与恢复", Symbol.Link, Action("管理线路", () => TcpChainSheet(relative, plan)))));
+            details.Children.Add(SettingsGroup(SettingRow("通用多入站", "独立身份、监听、用户、证书、出站与恢复范围", Symbol.AllApps, Action("管理入站", () => InboundsSheet(relative, plan)))));
             var udpForwarding = UdpForwarding.Rules(plan["UdpForwarding"] as JsonObject).ToArray();
             details.Children.Add(SettingsGroup(SettingRow("独立 UDP 端口转发", udpForwarding.Length == 0 ? "独立会话、来源白名单与真实 UDP 往返验收" : udpForwarding.Count(r => r.Flag("Enabled")) + " 条已启用 · " + udpForwarding.Length + " 条已保存；实际状态需核对", Symbol.Forward, Action("管理 UDP 转发", () => UdpForwardSheet(relative, plan)))));
             details.Children.Add(SettingsGroup(

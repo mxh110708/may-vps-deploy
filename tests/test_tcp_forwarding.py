@@ -67,7 +67,68 @@ class Kernel:
         return subprocess.CompletedProcess(args, code, output, '')
 
 
+def check_unit_revision(case, driver):
+    before = case.apply()
+    unit = case.host.path(driver.unit_path(driver.ACL_UNIT))
+    current = unit.read_text()
+    case.assertIn('DefaultDependencies=no\n', current)
+    case.assertIn('Before=sockets.target shutdown.target\n', current)
+    older = current.replace('DefaultDependencies=no\n', '').replace('Before=sockets.target shutdown.target\n', '').replace('Conflicts=shutdown.target\n', '')
+    unit.write_bytes(older.encode())
+    with case.assertRaises(ValueError):
+        case.host.read()
+    identity = case.host.identity(before['Files'])
+    expected = driver.digest(driver.encoded(dict(identity, Units=before['Units'])))
+    case.host = driver.Host(case.root, case.kernel, archived_hash=expected)
+    case.assertFalse(case.host.read()['TemplateCurrent'])
+    with case.assertRaises(ValueError):
+        driver.Host(case.root, case.kernel, archived_hash='f' * 64).read()
+    case.snapshot()
+    result = case.host.apply(before['Configuration'], expected, 'Apply', BACKUP)
+    case.assertTrue(result['TemplateCurrent'])
+    case.assertEqual(unit.read_text(), current)
+    case.restore()
+    case.assertEqual(unit.read_text(), older)
+    case.assertFalse(case.host.read()['TemplateCurrent'])
+    unit.write_bytes((older + '\n# external edit\n').encode())
+    with case.assertRaises(ValueError):
+        case.host.read()
+
+
 class ForwardingOwnership(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'linux', 'Linux TCP TIME_WAIT binding semantics')
+    def test_preflight_allows_closed_tcp_sessions_but_rejects_a_live_listener(self):
+        value = config()
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        value['Rules'][0]['ListenPort'] = listener.getsockname()[1]
+        with self.assertRaises(OSError): self.host.preflight(TCP.normalize(value))
+        peer = socket.create_connection(listener.getsockname())
+        accepted, _ = listener.accept()
+        accepted.shutdown(socket.SHUT_WR)
+        self.assertEqual(peer.recv(1), b'')
+        peer.close(); accepted.close(); listener.close()
+        with socket.socket() as old_style:
+            with self.assertRaises(OSError): old_style.bind(('0.0.0.0', value['Rules'][0]['ListenPort']))
+        self.assertEqual(self.host.preflight(TCP.normalize(value))['Hash'], 'Absent')
+
+    def test_chain_owned_rules_keep_strict_identity(self):
+        value = config()
+        value['Rules'][0]['Validation'] = {'Type': 'TcpChain', 'ChainId': 'b' * 32, 'FrontInstance': 'Example/Front/May-VPS-Deploy'}
+        normalized = TCP.normalize(value)
+        self.assertEqual(normalized['Rules'][0]['Validation'], value['Rules'][0]['Validation'])
+        for field, bad in [('ChainId', '../other'), ('FrontInstance', 'Example/../May-VPS-Deploy')]:
+            edited = copy.deepcopy(value)
+            edited['Rules'][0]['Validation'][field] = bad
+            with self.assertRaises(ValueError): TCP.normalize(edited)
+        value['Rules'][0]['Validation']['Unreviewed'] = True
+        with self.assertRaises(ValueError): TCP.normalize(value)
+
+    def test_unit_revision_is_pinned_to_the_controller_archive(self):
+        check_unit_revision(self, TCP)
+
     def setUp(self):
         (ROOT / '.test-output').mkdir(exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(prefix='tcp-forward-', dir=ROOT / '.test-output')

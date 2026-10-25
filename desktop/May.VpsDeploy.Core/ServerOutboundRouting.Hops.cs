@@ -56,6 +56,11 @@ public static partial class ServerOutboundRouting
         if (role == "AnyTlsEntry") { var result = native.DeepClone().AsObject(); result["tag"] = tag; return result; }
         return new JsonObject { ["tag"] = tag, ["protocol"] = "shadowsocks", ["settings"] = new JsonObject { ["servers"] = new JsonArray(new JsonObject { ["address"] = native.Text("server"), ["port"] = native.Number("server_port"), ["method"] = native.Text("method"), ["password"] = native.Text("password") }) } };
     }
+    public static JsonObject XrayNextHop(JsonObject native)
+    {
+        var next = NextHop(new JsonObject { ["name"] = "独立入站出站", ["sing_box"] = native.DeepClone() });
+        return ToOutbound("RealityEntry", next, "egress");
+    }
     private static JsonArray MetadataHops(JsonObject? metadata)
     {
         if (metadata?["AdditionalHops"] == null) return new();

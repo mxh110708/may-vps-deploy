@@ -4,12 +4,42 @@ namespace May.VpsDeploy.Core;
 
 public static class OperationSteps
 {
-    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate or OperationKind.ServerOutbound or OperationKind.TcpForward or OperationKind.UdpForward;
+    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate or OperationKind.ServerOutbound or OperationKind.TcpForward or OperationKind.UdpForward or OperationKind.MayMonitor or OperationKind.TcpChain or OperationKind.Inbounds;
     public static IReadOnlyList<PlannedTaskStep> Create(OperationRequest request, JsonObject plan)
     {
         var steps = new List<PlannedTaskStep>();
         if (request.Kind == OperationKind.CheckComponentUpdate) return [new("component-release-check", "查询并核对官方稳定版", "锁定具体发行资产与摘要，只查询版本，不安装软件。")];
         void Add(string id, string title, string description) => steps.Add(new(id, title, description));
+        if (request.Kind == OperationKind.Inbounds)
+        {
+            Add("inbound-preflight", "核对资源引用与实际布局", "核对管理连接、用户/证书/出站引用、端口和明确影响范围。");
+            if (request.Options.Text("Action") != "Check") { Add("inbound-backup", "建立入站范围恢复点", "仅保存受影响入站及本次防火墙，启用限时回退。"); Add("inbound-apply", "应用独立入站配置", "验证固定核心配置后，仅重启本次影响的入站。"); }
+            Add("inbound-validation", "验收入站用户与真实代理", "按用户、监听地址族完成实际代理 HTTPS 请求。");
+            if (request.Options.Text("Action") != "Check") Add("inbound-commit", "提交并保存资源目录", "确认同一事务并更新当前入站及验证记录。"); return steps;
+        }
+        if (request.Kind == OperationKind.TcpChain)
+        {
+            if (request.Options.Text("Action") == "Recover") { Add("chain-recovery", "协调恢复整条线路", "按原任务身份恢复前置与中转，核对原资源和管理连接。"); return steps; }
+            Add("chain-preflight", "核对三台依赖与端口", "核对实际机器身份、管理连接、配置摘要、端口及来源限制。");
+            if (request.Options.Text("Action") != "Check")
+            {
+                Add("chain-backup", "建立两台恢复点", "分别保存本次转发与必要的受管防火墙，启用限时回退。");
+                Add("chain-apply", request.Options.Text("Action") == "Remove" ? "从前向后移除线路" : "从后向前应用线路", "逐台核对实际规则；保留其他转发及落地代理。");
+            }
+            Add("chain-validation", "验收实际线路与既有规则", "分段 TCP 与整链代理 HTTPS 分别核验，再核对资源和管理连接。");
+            if (request.Options.Text("Action") != "Check") Add("chain-commit", "协调提交与归档", "逐台提交后同步依赖；部分提交失败时按本次快照补偿。");
+            return steps;
+        }
+        if (request.Kind == OperationKind.MayMonitor)
+        {
+            Add("may-preflight", "核对 May 组件归属", "核对系统、SSH、固定版本、实际文件及服务身份。");
+            if (request.Options.Text("Action") == "Check") return steps;
+            Add("may-backup", "保存组件一致性备份", "短暂停止所选 May 服务，保存程序、配置和数据，启用限时回退保护。");
+            if (request.Options.Text("Action") != "Backup") Add("may-apply", "应用本次 May 操作", "只处理明确选择的 May 组件，保留旧监控及其他服务。");
+            Add("may-verify", "核对组件与管理连接", "确认实际归属、服务及管理连接；外部 HTTPS 和业务指标在监测页另行核验。");
+            Add("may-commit", "确认事务完成", "记录范围、摘要与恢复点，解除本次回退计时器。");
+            return steps;
+        }
         if (request.Kind is OperationKind.TcpForward or OperationKind.UdpForward)
         {
             var udp = request.Kind == OperationKind.UdpForward; var prefix = udp ? "udp-forward-" : "forward-";

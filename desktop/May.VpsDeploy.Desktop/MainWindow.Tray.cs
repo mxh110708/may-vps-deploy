@@ -28,7 +28,7 @@ public sealed partial class MainWindow
         {
             trayIcon ??= new WindowsTrayIcon(WinRT.Interop.WindowNative.GetWindowHandle(this), Path.Combine(AppContext.BaseDirectory, "assets", "gui", "app.ico"), testSession == null ? "May VPS Deploy" : "May VPS Deploy 后台测试", () => RestoreFromTray(), RequestTrayExit);
             CancelNodeReorder(); WindowsWindowLifecycle.ResetCaptionInteraction(WinRT.Interop.WindowNative.GetWindowHandle(this));
-            AppWindow.Hide(); minimizedToTray = true; return true;
+            PauseMonitoring(); AppWindow.Hide(); minimizedToTray = true; return true;
         }
         catch { Show("托盘图标未能创建，窗口保持打开。", InfoBarSeverity.Error); return false; }
     }
@@ -36,6 +36,7 @@ public sealed partial class MainWindow
     {
         WindowsWindowLifecycle.ResetCaptionInteraction(WinRT.Interop.WindowNative.GetWindowHandle(this));
         AppWindow.Show(activate && !backgroundTest); minimizedToTray = false;
+        UpdateMonitorVisibility();
         if (activate && !backgroundTest) Activate();
         WindowsWindowLifecycle.ResetCaptionInteraction(WinRT.Interop.WindowNative.GetWindowHandle(this));
         trayIcon?.Dispose(); trayIcon = null;

@@ -33,11 +33,12 @@ components="${VPS_PARAM_COMPONENTS:-Protocols,Network,Firewall}"
 IFS=',' read -r -a component_list <<<"$components"
 ((${#component_list[@]} > 0))
 for component in "${component_list[@]}"; do
-  case "$component" in Protocols|RealityEntry|AnyTlsEntry|ShadowsocksLanding|TrustedTls|Network|Firewall|KomariAgent|KomariController|Cloudflared|TcpForwarding|UdpForwarding) ;; *) echo 'Unsupported transaction component.' >&2; exit 1 ;; esac
+  case "$component" in Protocols|RealityEntry|AnyTlsEntry|ShadowsocksLanding|TrustedTls|Network|Firewall|KomariAgent|KomariController|Cloudflared|TcpForwarding|UdpForwarding|Inbounds) ;; *) echo 'Unsupported transaction component.' >&2; exit 1 ;; esac
 done
 scope_has(){ [[ ",$components," == *",$1,"* ]]; }
 if scope_has TcpForwarding; then python3 -c "$VPS_TCP_FORWARD_PROGRAM" verify "${VPS_PARAM_TCP_FORWARD_EXPECTED_HASH:?}"; fi
 if scope_has UdpForwarding; then python3 -c "$VPS_UDP_FORWARD_PROGRAM" verify "${VPS_PARAM_UDP_FORWARD_EXPECTED_HASH:?}"; fi
+if scope_has Inbounds; then python3 -c "$VPS_INBOUND_PROGRAM" verify; fi
 printf '%s\n' "$components" > "$backup_dir/components"
 printf '%s\n' "$backup_dir" > "$owner"
 chmod 0600 "$owner"
@@ -67,6 +68,12 @@ if scope_has UdpForwarding; then
   python3 -c "$VPS_UDP_FORWARD_PROGRAM" snapshot "$backup_dir"
   printf '%s' "$VPS_UDP_FORWARD_PROGRAM" > "$backup_dir/udp-forwarding.py"
   (cd "$backup_dir" && sha256sum udp-forwarding.py > udp-forward-program.sha256)
+fi
+
+if scope_has Inbounds; then
+  python3 -c "$VPS_INBOUND_PROGRAM" snapshot "$backup_dir"
+  printf '%s' "$VPS_INBOUND_PROGRAM" > "$backup_dir/inbound-host.py"
+  (cd "$backup_dir" && sha256sum inbound-host.py > inbound-program.sha256)
 fi
 
 service_snapshot() {
@@ -119,6 +126,13 @@ if [[ "$quiesce_controller" == true ]]; then
 fi
 
 candidate_paths=()
+if scope_has Inbounds; then
+  inbound_paths="$(python3 -c "$VPS_INBOUND_PROGRAM" paths)"
+  if [[ -n "$inbound_paths" ]]; then
+    mapfile -t inbound_path_list <<<"$inbound_paths"
+    candidate_paths+=("${inbound_path_list[@]}")
+  fi
+fi
 if scope_has UdpForwarding; then
   udp_forwarding_paths="$(python3 -c "$VPS_UDP_FORWARD_PROGRAM" paths)"
   if [[ -n "$udp_forwarding_paths" ]]; then
@@ -205,6 +219,11 @@ if scope_has UdpForwarding; then
   (cd "$backup_dir" && sha256sum -c udp-forward-program.sha256 >/dev/null)
   python3 "$backup_dir/udp-forwarding.py" rollback-check "$backup_dir"
 fi
+if scope_has Inbounds; then
+  [[ -f "$backup_dir/inbound-host.py" && ! -L "$backup_dir/inbound-host.py" ]]
+  (cd "$backup_dir" && sha256sum -c inbound-program.sha256 >/dev/null)
+  python3 "$backup_dir/inbound-host.py" rollback-check "$backup_dir"
+fi
 if scope_has Firewall && [[ -f "$backup_dir/nftables.conf" ]]; then
   [[ -f "$backup_dir/firewall-state.json" ]] || { echo 'Legacy firewall snapshot needs explicit ownership review.' >&2; exit 1; }
   # shellcheck disable=SC1091
@@ -241,6 +260,7 @@ cleanup_role() {
   esac
 }
 
+if scope_has Inbounds; then python3 "$backup_dir/inbound-host.py" rollback-prepare "$backup_dir"; fi
 if scope_has TcpForwarding; then
   python3 "$backup_dir/tcp-forwarding.py" rollback-prepare "$backup_dir"
 fi
@@ -390,6 +410,7 @@ restore_aux() {
 if scope_has KomariAgent; then restore_aux KomariAgent komari-agent.service; fi
 if scope_has KomariController; then restore_aux KomariController komari.service; fi
 if scope_has Cloudflared; then restore_aux Cloudflared cloudflared.service; fi
+if scope_has Inbounds; then python3 "$backup_dir/inbound-host.py" rollback-complete "$backup_dir"; fi
 if scope_has TcpForwarding; then python3 "$backup_dir/tcp-forwarding.py" rollback-complete "$backup_dir"; fi
 if scope_has UdpForwarding; then python3 "$backup_dir/udp-forwarding.py" rollback-complete "$backup_dir"; fi
 date -u +%FT%TZ > "$backup_dir/rollback-executed"
@@ -400,6 +421,14 @@ if [[ "${2:-}" == '--transaction' ]]; then
 fi
 ROLLBACK
 chmod 0750 /usr/local/libexec/mxh-protocol-migration-rollback
+
+if [[ -n "${VPS_PARAM_TCP_CHAIN_ID:-}" ]]; then
+  [[ "$VPS_PARAM_TCP_CHAIN_ID" =~ ^[a-f0-9]{32}$ ]]
+  [[ "$components" == TcpForwarding || "$components" == TcpForwarding,Firewall ]]
+  printf '%s\n' "$VPS_PARAM_TCP_CHAIN_ID" > "$backup_dir/tcp-chain-id"
+  cp /usr/local/libexec/mxh-protocol-migration-rollback "$backup_dir/tcp-chain-rollback"
+  (cd "$backup_dir" && sha256sum tcp-chain-rollback > tcp-chain-rollback.sha256)
+fi
 
 cat > /etc/systemd/system/mxh-protocol-migration-rollback.service <<EOF
 [Unit]

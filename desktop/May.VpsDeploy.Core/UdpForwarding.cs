@@ -96,6 +96,7 @@ public static class UdpForwarding
         var ports = Rules(config).Select(r => r.Number("ListenPort")).ToHashSet();
         foreach (var rule in Rules(config))
         {
+            if (InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").Any(i => i.Number("Listener.Port") == rule.Number("ListenPort"))) throw new OperationException("UDP 转发与已保留的独立入站端口冲突。");
             if (rule.Flag("Enabled") && rule.Text("Validation.Type") == "Shadowsocks") _ = ProxyNode(store, rule, request.InstanceRelativePath);
             if (plan.Flag("ProtocolInventory.ShadowsocksLanding.Installed", DeploymentPlans.Uses(plan, "ShadowsocksLanding")) && rule.Number("ListenPort") == plan.Number("Ports.LandingShadowsocks")) throw new OperationException("UDP 转发与已安装 Shadowsocks 的 UDP 端口冲突。");
             _ = TcpForwarding.ProbeAddresses(plan, rule);

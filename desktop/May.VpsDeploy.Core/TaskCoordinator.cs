@@ -14,6 +14,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
     public ReviewedOperation Review(OperationRequest request)
     {
         var snapshot = request.Snapshot(); OperationPolicy.Validate(snapshot);
+        TcpChains.GuardOperation(store, snapshot);
         var planHash = ArchiveFingerprint(snapshot);
         JsonObject? kernelCatalog = null;
         if (snapshot.Kind == OperationKind.BbrKernel && snapshot.Options.Text("Action") == "Install")
@@ -22,6 +23,10 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
             if (kernelCatalog.Text("Id") != snapshot.Options.Text("CatalogId") || kernelCatalog.Text("Sha256") != snapshot.Options.Text("CatalogSha256") || kernelCatalog.Text("Commit") != snapshot.Options.Text("SourceCommit")) throw new OperationException("源码候选与待审阅目标不一致，请重新选择版本。");
         }
         var summary = snapshot.Kind == OperationKind.UdpForward ? UdpForwarding.Prepare(store, snapshot).Summary : snapshot.Kind == OperationKind.TcpForward ? TcpForwarding.Prepare(store, snapshot).Summary : snapshot.Kind == OperationKind.ServerOutbound ? ServerOutboundRouting.Prepare(store, snapshot).Summary : OperationPolicy.Summary(snapshot, kernelCatalog);
+        if (snapshot.Kind == OperationKind.MayMonitor) summary = MayMonitorLifecycle.Summary(snapshot, store.Paths);
+        if (snapshot.Kind == OperationKind.MayMonitorAccess) summary = MayMonitorAccess.Summary(store, snapshot);
+        if (snapshot.Kind == OperationKind.TcpChain) summary = TcpChains.Prepare(store, snapshot).Summary;
+        if (snapshot.Kind == OperationKind.Inbounds) { var preview = InboundCatalog.Prepare(store, snapshot); summary = preview.Summary; preview.Credentials.Clear(); preview.Payload["Configurations"]!.AsObject().Clear(); }
         return new(snapshot, Fingerprint(snapshot), planHash, summary);
     }
     public static string Fingerprint(OperationRequest request) => ArchiveStore.Fingerprint(new JsonObject
@@ -31,6 +36,20 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
     private string ArchiveFingerprint(OperationRequest request)
     {
         var directory = store.Paths.Instance(request.InstanceRelativePath); var files = new JsonObject();
+        if (request.Kind == OperationKind.Inbounds)
+        {
+            foreach (var asset in new[] { "config/versions.json", "scripts/inbound-host.py", "assets/remote/inbound-read.sh", "assets/remote/inbound-apply.sh", "assets/remote/audit.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/protocol-migration-trigger-rollback.sh", "assets/remote/maintenance-transaction-status.sh", "assets/remote/maintenance-transaction-commit.sh", "assets/remote/maintenance-mutation-guard.sh", "assets/remote/nftables-apply.sh", "assets/remote/firewall-tools.sh", "assets/remote/firewall-preflight.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(asset));
+            foreach (var outbound in InboundCatalog.Items(request.Options["Model"]!.AsObject(), "Outbounds").Where(o => o.Text("Kind") == "Proxy")) files["InboundSource:" + outbound.Text("Id")] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, outbound.Text("Source.SchemeId")));
+        }
+        if (request.Kind == OperationKind.TcpChain)
+        {
+            var config = request.Options["Configuration"]!.AsObject();
+            foreach (var instance in TcpChains.Instances(config))
+                foreach (var name in new[] { "deployment-plan.json", "deployment-state.json", "secrets.dotnet.private.json", "operation-pending.dotnet.json" }) files[instance + ":" + name] = ClientSchemes.SourceFingerprint(SafePath.Resolve(store.Paths.Instance(instance), name));
+            files["ChainRecord"] = ClientSchemes.SourceFingerprint(TcpChains.FileName(store.Paths, config.Text("Id")));
+            files["ChainSource"] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, config.Text("Landing.SchemeId")));
+            foreach (var name in new[] { "scripts/forwarding-host.py", "scripts/tcp-forwarding.py", "assets/remote/audit.sh", "assets/remote/tcp-chain-probe.sh", "assets/remote/tcp-chain-rollback.sh", "assets/remote/tcp-forward-read.sh", "assets/remote/tcp-forward-apply.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/protocol-migration-trigger-rollback.sh", "assets/remote/maintenance-transaction-commit.sh", "assets/remote/maintenance-transaction-status.sh", "assets/remote/maintenance-mutation-guard.sh", "assets/remote/nftables-apply.sh", "assets/remote/firewall-preflight.sh", "assets/remote/firewall-tools.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
+        }
         foreach (var name in new[] { "deployment-plan.json", "deployment-state.json", "secrets.dotnet.private.json", "deployment-secrets.private.json", "operation-pending.dotnet.json" })
         { var path = SafePath.Resolve(directory, name); files[name] = ClientSchemes.SourceFingerprint(path); }
         if (request.Kind == OperationKind.TuneNetwork && request.Options.Text("Profile") == "EntryMeasured")
@@ -50,6 +69,20 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
             foreach (var asset in new[] { "scripts/forwarding-host.py", "scripts/udp-forwarding.py", "scripts/udp-forward-worker.py", "assets/remote/udp-forward-read.sh", "assets/remote/udp-forward-apply.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/nftables-apply.sh", "assets/remote/firewall-tools.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(asset));
             foreach (var rule in UdpForwarding.Rules(request.Options["Configuration"] as JsonObject).Where(r => r.Flag("Enabled") && r.Text("Validation.Type") == "Shadowsocks"))
                 files["UdpForwardSource:" + rule.Text("Id")] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, rule.Text("Validation.SchemeId")));
+        }
+        if (request.Kind == OperationKind.MayMonitor)
+        {
+            foreach (var asset in new[] { "config/may-monitor.json", "scripts/may-monitor-lifecycle.py", "assets/remote/may-monitor-lifecycle.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(asset));
+            if (request.Options.Text("Action") == "ConfigureRead") files["MayReadSource"] = ClientSchemes.SourceFingerprint(store.Paths.Resolve("private/monitor-read.private.json"));
+            if (request.Options.Text("Action") == "Restore")
+                foreach (var name in new[] { "may-monitor.json", "may-secret.private.json", "may-files.tar.gz" }) files["MayRestore:" + name] = ClientSchemes.SourceFingerprint(SafePath.Resolve(directory, "maintenance-backups/" + request.Options.Text("Configuration.RestoreTask") + "/" + name));
+        }
+        if (request.Kind == OperationKind.MayMonitorAccess)
+        {
+            foreach (var name in new[] { "may-monitor-access.json" }) files[name] = ClientSchemes.SourceFingerprint(SafePath.Resolve(directory, name));
+            foreach (var name in new[] { "scripts/may-monitor-lifecycle.py", "assets/remote/may-monitor-lifecycle.sh", "private/monitor-read.private.json" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
+            if (request.Options.Text("Action") == "PilotCheck")
+                foreach (var name in new[] { "deployment-plan.json", "deployment-state.json", "secrets.dotnet.private.json", "operation-pending.dotnet.json" }) files["MayPilot:" + name] = ClientSchemes.SourceFingerprint(SafePath.Resolve(store.Paths.Instance(request.Options.Text("NodeInstance")), name));
         }
         if (request.Kind == OperationKind.ServerOutbound)
         {
@@ -81,7 +114,8 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         if (!await active.WaitAsync(0, cancellationToken)) throw new OperationException("已有任务执行中。");
         try
         {
-            using var instanceLock = store.LockInstance(current.InstanceRelativePath);
+            using var instanceLock = LockParticipants(current);
+            TcpChains.GuardOperation(store, current);
             var planHash = ArchiveFingerprint(current);
             if (planHash != review.PlanFingerprint) throw new OperationException("实例归档在审阅后发生变化，请重新读取并审阅。");
             Current = new(Guid.NewGuid().ToString("N"), current.Kind, DateTimeOffset.UtcNow, null, TaskOutcome.Running, "准备", InstanceRelativePath: current.InstanceRelativePath, TargetLabel: OperationPolicy.TargetLabel(current));
@@ -104,6 +138,22 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         }
         finally { active.Release(); }
     }
+    private IDisposable LockParticipants(OperationRequest request)
+    {
+        var locks = new ParticipantLocks();
+        try
+        {
+            var instances = request.Kind == OperationKind.TcpChain ? TcpChains.Instances(request.Options["Configuration"]!.AsObject()) : [request.InstanceRelativePath];
+            foreach (var instance in instances.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase)) locks.Items.Add(store.LockInstance(instance));
+            return locks;
+        }
+        catch { locks.Dispose(); throw; }
+    }
+    private sealed class ParticipantLocks : IDisposable
+    {
+        public List<IDisposable> Items { get; } = [];
+        public void Dispose() { for (var i = Items.Count - 1; i >= 0; i--) Items[i].Dispose(); }
+    }
 }
 
 public sealed class InlineProgress<T>(Action<T> report) : IProgress<T> { public void Report(T value) => report(value); }
@@ -113,9 +163,13 @@ public static class OperationPolicy
     public static void Validate(OperationRequest request)
     {
         if (!Enum.IsDefined(request.Kind)) throw new OperationException("未知任务类型。");
+        if (request.Kind == OperationKind.TcpChain) TcpChains.Validate(request);
+        if (request.Kind == OperationKind.Inbounds) InboundCatalog.ValidateOptions(request.Options);
         if (request.Kind == OperationKind.ServerOutbound) ServerOutboundRouting.ValidateOptions(request.Options);
         if (request.Kind == OperationKind.TcpForward) TcpForwarding.ValidateOptions(request.Options);
         if (request.Kind == OperationKind.UdpForward) UdpForwarding.ValidateOptions(request.Options);
+        if (request.Kind == OperationKind.MayMonitor) MayMonitorLifecycle.Validate(request.Options);
+        if (request.Kind == OperationKind.MayMonitorAccess) MayMonitorAccess.Validate(request);
         if (request.Kind == OperationKind.BbrKernel) BbrKernels.Validate(request.Options);
         if (request.Kind == OperationKind.CheckComponentUpdate) ComponentUpdates.ValidateQuery(request.Options);
         if (request.Kind == OperationKind.Upgrade || request.Kind == OperationKind.Komari && request.Options.Text("Action") == "Upgrade") ComponentUpdates.ValidateOptions(request);
@@ -155,6 +209,10 @@ public static class OperationPolicy
     }
     public static string TargetLabel(OperationRequest request) => request.Kind switch
     {
+        OperationKind.TcpChain => "跨实例 TCP 前置 → 中转 → 落地",
+        OperationKind.Inbounds => "通用多入站资源 · " + (request.Options.Text("Action") == "Check" ? "只读检查" : "审阅变更范围"),
+        OperationKind.MayMonitor => MayMonitorLifecycle.Label(request.Options.Text("Role")) + " · " + request.Options.Text("Action"),
+        OperationKind.MayMonitorAccess => "May Monitor · 接入与单节点验收",
         OperationKind.TcpForward => "独立 TCP 端口转发",
         OperationKind.UdpForward => "独立 UDP 端口转发",
         OperationKind.ServerOutbound => ServerOutboundRouting.Label(request.Options.Text("Protocol")) + " · 服务器固定下一跳",
@@ -170,6 +228,7 @@ public static class OperationPolicy
     };
     public static string Summary(OperationRequest request, JsonObject? kernelCatalog = null) => request.Kind switch
     {
+        OperationKind.MayMonitor => MayMonitorLifecycle.Summary(request),
         OperationKind.CheckComponentUpdate => "经所选 VPS 查询 " + TargetLabel(request) + "。只读取官方稳定发行元数据，保存具体版本、资产身份和 SHA256；不会安装程序、重启服务或修改系统仓库。",
         OperationKind.ConnectExisting => "接入已有实例：只读识别现有配置，保留 SSH 认证、端口与防火墙。",
         OperationKind.ResumeImport => "继续接入草稿：重新只读识别现有配置，完成应用内归档。",
