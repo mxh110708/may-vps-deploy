@@ -8,6 +8,7 @@ import base64
 import datetime
 import hashlib
 import json
+import math
 import os
 import signal
 from pathlib import Path
@@ -22,6 +23,61 @@ import uuid
 def stamp():return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def port():
     with socket.socket() as value:value.bind(('127.0.0.1',0));return value.getsockname()[1]
+
+
+def finite_sample_number(value):
+    if type(value) not in (int,float):return False
+    try:return math.isfinite(value)
+    except OverflowError:return False
+
+
+def snapshot_evidence(snapshot, expected_ids, max_age_seconds=15):
+    """Keep signed ages and bounded, non-credential evidence for failed samples."""
+    if not isinstance(snapshot,dict) or not isinstance(snapshot.get('captured_at'),str) or not isinstance(snapshot.get('nodes'),list) or any(not isinstance(n,dict) for n in snapshot['nodes']):
+        raise ValueError('Invalid monitoring snapshot structure')
+    capture=datetime.datetime.fromisoformat(snapshot['captured_at'].replace('Z','+00:00'))
+    if capture.tzinfo is None:
+        raise ValueError('Snapshot timestamp requires a timezone')
+    indexed={}
+    for node in snapshot['nodes']:
+        if node.get('uuid') in expected_ids:
+            indexed.setdefault(node['uuid'],[]).append(node)
+    ages=[];evidence=[];online=0;fresh=0;issues={}
+    metric_keys=('cpu_percent','memory_used','memory_total','upload_per_sec','download_per_sec','upload_total','download_total')
+    for slot,node_id in enumerate(expected_ids,1):
+        matches=indexed.get(node_id,[]);node=matches[0] if matches else {}
+        reasons=[];age=None;report_time=None;metrics=node.get('metrics')
+        if not matches:reasons.append('missing_node')
+        if len(matches)>1:reasons.append('duplicate_node')
+        active=node.get('online') is True
+        online+=active
+        if not active:reasons.append('offline')
+        reported=node.get('report_at')
+        if reported is None:
+            reasons.append('missing_report')
+        else:
+            try:
+                report=datetime.datetime.fromisoformat(reported.replace('Z','+00:00'))
+                if report.tzinfo is None:raise ValueError('Report timestamp requires a timezone')
+                report_time=report.isoformat()
+                age=(capture-report).total_seconds();ages.append(age)
+                if age<0:reasons.append('report_from_future')
+                elif age>max_age_seconds:reasons.append('stale_report')
+            except (AttributeError,TypeError,ValueError):reasons.append('invalid_report_time')
+        if metrics is None:
+            reasons.append('missing_metrics')
+        else:
+            valid=isinstance(metrics,dict) and all(finite_sample_number(metrics.get(k)) and metrics[k]>=0 for k in metric_keys)
+            if not valid or metrics['cpu_percent']>100 or metrics['memory_total']<=0 or metrics['memory_used']>metrics['memory_total']:
+                reasons.append('invalid_metrics')
+        if not reasons:fresh+=1
+        for reason in reasons:issues[reason]=issues.get(reason,0)+1
+        # Never retain names, addresses, tokens, node UUIDs or arbitrary fields.
+        selected={k:(v if finite_sample_number(v) or type(v) is bool or v is None else 'non_finite_or_invalid_type') for k in metric_keys for v in [metrics.get(k)]} if isinstance(metrics,dict) else None
+        evidence.append({'slot':slot,'online':active,'report_at':report_time,'age_seconds':age,'metrics':selected,'reasons':reasons})
+    result={'online':online,'fresh':fresh,'min_report_age_seconds':min(ages,default=None),'max_report_age_seconds':max(ages,default=None),'captured_at':snapshot['captured_at'],'snapshot_issue_counts':issues}
+    if issues:result['node_evidence']=evidence
+    return result
 
 
 class Fixture:
@@ -119,11 +175,9 @@ class Fixture:
         try:
             snapshot=self.request('/api/integration/v1/snapshot',headers={'Authorization':'Bearer '+self.read})
             if snapshot['server_instance_id']!=self.origin:raise ValueError('wrong fixture origin')
-            capture=datetime.datetime.fromisoformat(snapshot['captured_at'].replace('Z','+00:00'))
-            nodes=[v for v in snapshot['nodes'] if v['uuid'] in {n['uuid'] for n in self.nodes[:started]}]
-            ages=[(capture-datetime.datetime.fromisoformat(v['report_at'].replace('Z','+00:00'))).total_seconds() for v in nodes if v.get('report_at')]
-            result.update(online=sum(v['online'] for v in nodes),fresh=sum(v['online'] and v.get('metrics') is not None and v.get('report_at') and 0<=(capture-datetime.datetime.fromisoformat(v['report_at'].replace('Z','+00:00'))).total_seconds()<=15 for v in nodes),max_report_age_seconds=max(ages,default=None))
-        except (OSError,ValueError,KeyError,TypeError):result['read_error']=True
+            result.update(snapshot_evidence(snapshot,[n['uuid'] for n in self.nodes[:started]]))
+        except (OSError,ValueError,KeyError,TypeError) as error:
+            result['read_error']=True;result['read_error_type']=type(error).__name__
         return result
 
     def close(self):

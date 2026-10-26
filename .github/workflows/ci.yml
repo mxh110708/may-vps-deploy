@@ -53,6 +53,7 @@ jobs:
           # container supplies root for checking real uid/gid permission rules.
           python3 tests/test_may_monitor_lifecycle.py
           python3 tests/test_may_monitor_maintenance.py
+          python3 tests/test_monitor_observation.py
           python3 tests/test_health_audit.py
           python3 tests/test_network_runtime.py
           python3 tests/test_network_audit.py
