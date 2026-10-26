@@ -39,7 +39,7 @@ public sealed partial class MainWindow
             if (hold) await Task.Delay(Timeout.Infinite, ct);
             if (failing) return new HttpResponseMessage(HttpStatusCode.Unauthorized);
             var nodes = new JsonArray();
-            foreach (var id in ids) nodes.Add(new JsonObject { ["uuid"] = id, ["online"] = true, ["report_at"] = DateTimeOffset.UtcNow.ToString("O"), ["metrics"] = new JsonObject { ["cpu_percent"] = 12.5, ["memory_used"] = 128L * 1024 * 1024, ["memory_total"] = 1024L * 1024 * 1024, ["upload_per_sec"] = 1024L, ["download_per_sec"] = 2048L, ["upload_total"] = 4096L, ["download_total"] = 8192L } });
+            foreach (var id in ids) nodes.Add(new JsonObject { ["uuid"] = id, ["online"] = true, ["report_at"] = DateTimeOffset.UtcNow.ToString("O"), ["alerts"] = new JsonObject { ["active"] = 2, ["silenced"] = 1, ["delivery_failed"] = 1 }, ["metrics"] = new JsonObject { ["cpu_percent"] = 12.5, ["memory_used"] = 128L * 1024 * 1024, ["memory_total"] = 1024L * 1024 * 1024, ["upload_per_sec"] = 1024L, ["download_per_sec"] = 2048L, ["upload_total"] = 4096L, ["download_total"] = 8192L } });
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(new JsonObject { ["schema_version"] = 1, ["server_version"] = "0.1.0-rc.1+read-api", ["captured_at"] = DateTimeOffset.UtcNow.ToString("O"), ["nodes"] = nodes }.ToJsonString(), Encoding.UTF8, "application/json") };
         });
         try
@@ -74,6 +74,7 @@ public sealed partial class MainWindow
             Invoke(Find<Button>(shell).Single(b => b.Content as string == "刷新监测"));
             await Wait(() => monitorSnapshot != null && monitorCancellation == null);
             Require(monitorRows?.Children.Count == 3 && Find<TextBlock>(monitorRows).Count(t => t.Text == "在线") == 3, "授权实例没有逐项显示在线状态。");
+            Require(Find<TextBlock>(monitorRows!).Count(t=>t.Text.Contains("告警 2")&&t.Text.Contains("静默 1")&&t.Text.Contains("通知失败 1"))==3 && Find<Button>(shell).Any(b=>b.Content as string=="打开 May Web"),"告警计数或独立 Web 入口没有显示。");
             notice.IsOpen = false; monitorRows!.StartBringIntoView(); await Task.Delay(100);
             await Capture(SafePath.Resolve(outputDirectory, "monitor-read-page.png"));
             var beforeAging = requests;
@@ -81,8 +82,15 @@ public sealed partial class MainWindow
             RenderMonitorRows(MonitorArchive.Load()!);
             await Wait(() => Find<TextBlock>(monitorRows!).Count(t => t.Text == "读取失败或快照过期") == 3);
             Require(requests == beforeAging && !monitorExpiryTimer.IsEnabled, "快照没有按时间过期，或过期刷新触发了网络／持续定时器。");
+            var aged = monitorSnapshot;
+            monitorSnapshot = monitorSnapshot! with { ReceivedAt = DateTimeOffset.UtcNow, CredentialExpiresAt = DateTimeOffset.UtcNow.AddMilliseconds(100) };
+            RenderMonitorRows(MonitorArchive.Load()!);
+            await Wait(() => Find<TextBlock>(monitorRows!).Any(t=>t.Text.Contains("只读凭据已到期")) && Find<TextBlock>(monitorRows!).All(t=>t.Text!="在线"));
+            Require(requests==beforeAging,"凭据到期刷新触发了新的网络请求。");
+            monitorSnapshot=aged;RenderMonitorRows(MonitorArchive.Load()!);
             failing = true; Invoke(Find<Button>(shell).Single(b => b.Content as string == "刷新监测"));
             await Wait(() => monitorReadFailed && monitorCancellation == null);
+            Require(monitorMessage.Contains("令牌"),"鉴权失败没有给出凭据提示。");
             Require(Find<TextBlock>(monitorRows!).Count(t => t.Text == "读取失败或快照过期") == 3, "连接失败被显示为节点在线或全部离线。");
             failing = false; hold = true; Invoke(Find<Button>(shell).Single(b => b.Content as string == "刷新监测"));
             await Wait(() => monitorCancellation != null);

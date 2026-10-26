@@ -53,6 +53,16 @@ internal sealed partial class BoundaryTests
         var sample = MonitorSample(id, now);
         MonitorReadSnapshot Parse(JsonObject value) => MonitorReadSnapshot.Parse(Encoding.UTF8.GetBytes(value.ToJsonString()), now);
         var snapshot = Parse(sample); var node = snapshot.Nodes[id];
+        var withAlerts = sample.DeepClone().AsObject();
+        withAlerts["credential_expires_at"] = now.AddDays(2).ToString("O");
+        withAlerts["nodes"]![0]!["alerts"] = new JsonObject { ["active"] = 2, ["silenced"] = 1, ["delivery_failed"] = 1 };
+        Check(Parse(withAlerts).Nodes[id].Alerts == new MonitorReadAlerts(2, 1, 1), "alert counts were lost");
+        Check(Parse(withAlerts).CredentialExpiresAt == now.AddDays(2), "credential expiry was not surfaced");
+        withAlerts["nodes"]![0]!["alerts"]!["silenced"] = 3;
+        Refuses(() => Parse(withAlerts), "impossible alert counts accepted");
+        var origin = Guid.NewGuid().ToString("D");
+        var pinned = new MonitorReadConnection(connection.Endpoint.AbsoluteUri, token, bindings, origin);
+        Check(MonitorReadConnection.FromJson(pinned.ToJson()).ServerInstanceId == origin, "server identity did not round trip");
         Check(node.Status(now, now, false) == "在线" && node.Metrics?.CpuPercent == 12.5, "valid snapshot lost values");
         Check(node.Status(now, now, true) != "在线", "failed refresh left a healthy online state");
         Check(node.Status(now.AddMinutes(2), now, false).Contains("过期"), "stale snapshot remained current");
@@ -85,6 +95,20 @@ internal sealed partial class BoundaryTests
             using var client = new MonitorReadClient(new MonitorHandler((_, _) => Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("synthetic-server-secret-" + token), Headers = { Location = new Uri("https://untrusted.example/") } })));
             try { await client.FetchAsync(connection, default); throw new Exception("invalid response accepted"); }
             catch (OperationException safe) { Check(!safe.Message.Contains(token) && !safe.Message.Contains("synthetic-server-secret"), "server error leaked secret"); }
+        }
+        using (var client = new MonitorReadClient(new MonitorHandler((_, _) => Task.FromResult(MonitorResponse(sample)))))
+        {
+            try { await client.FetchAsync(pinned, default); throw new Exception("missing origin accepted"); }
+            catch (OperationException safe) { Check(safe.Code == "MonitorIdentityMismatch", "identity failure lacks actionable status"); }
+            var sameOrigin = sample.DeepClone().AsObject(); sameOrigin["server_instance_id"] = origin;
+            using var valid = new MonitorReadClient(new MonitorHandler((_, _) => Task.FromResult(MonitorResponse(sameOrigin))));
+            Check((await valid.FetchAsync(pinned, default)).ServerInstanceId == origin, "matching service identity rejected");
+        }
+        foreach (var mode in new[] { "tls", "network", "timeout" })
+        {
+            using var client = new MonitorReadClient(new MonitorHandler((_, _) => mode == "tls" ? throw new HttpRequestException(HttpRequestError.SecureConnectionError, "synthetic-private-detail") : mode == "network" ? throw new HttpRequestException("synthetic-private-detail") : throw new OperationCanceledException()));
+            try { await client.FetchAsync(connection, default); throw new Exception("failure accepted"); }
+            catch (OperationException safe) { Check(safe.Code == (mode == "tls" ? "MonitorTlsError" : mode == "network" ? "MonitorUnreachable" : "MonitorTimeout") && !safe.Message.Contains("synthetic-private-detail"), "transport errors were conflated or disclosed details"); }
         }
         using (var client = new MonitorReadClient(new MonitorHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>login</html>", Encoding.UTF8, "text/html") }))))
             await RefusesAsync(() => client.FetchAsync(connection, default), "login HTML was treated as a snapshot");

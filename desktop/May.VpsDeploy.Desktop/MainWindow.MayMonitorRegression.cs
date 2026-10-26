@@ -33,11 +33,23 @@ public sealed partial class MainWindow
             await Pick("Role", "Agent"); await Pick("Action", "ConfigureRead");
             await RegressionPress(dialog, "PrimaryButton");
             Require(activeTestDialog == dialog, "Agent 接受了服务端只读授权操作。");
+            await Pick("Action", "ConfigureAgent");
+            Require(Find<TextBox>(dialog).Single(t => t.Header as string == "原 May 节点 UUID").IsReadOnly && Find<CheckBox>(dialog).Any(t => t.Tag as string == "MayMonitor.ReplaceToken"), "Agent 维护缺少固定节点或显式凭据选项。");
+            Require(!Find<PasswordBox>(dialog).Any(), "维护表单提前读取了 Token。");
+            await RegressionPress(dialog, "PrimaryButton");
+            Require(activeTestDialog == dialog, "缺少节点身份的 Agent 配置进入审阅。");
+            await Pick("Action", "RepairAgent");
+            Require(!Find<CheckBox>(dialog).Single(t => t.Tag as string == "MayMonitor.ReplaceToken").IsEnabled, "凭据恢复允许沿用被撤销 Token。");
+            await RegressionPress(dialog, "PrimaryButton");
+            Require(activeTestDialog == dialog, "无待恢复事务仍执行了 Agent 修复。");
+            await Pick("Action", "RevokeRead");
+            await RegressionPress(dialog, "PrimaryButton");
+            Require(activeTestDialog == dialog, "Agent 接受了撤销 Server 只读授权。");
             await Pick("Role", "Server"); await Pick("Action", "Install");
             dialog.UpdateLayout(); await Task.Delay(100); await Capture(SafePath.Resolve(outputDirectory, "may-monitor-maintenance.png"), dialog);
             await RegressionPress(dialog, "CloseButton"); await pending;
             Require(taskCancellation == null && new TaskHistory(store).Read().Count == history, "取消维护仍提交了任务。");
-            return new() { ["entry_without_connection"] = true, ["explicit_role_action"] = true, ["role_fields_reset"] = true, ["invalid_stays_open"] = true, ["scoped_restore_only"] = true, ["agent_read_authorization_refused"] = true, ["cancel_no_task"] = true, ["production_connections"] = 0 };
+            return new() { ["entry_without_connection"] = true, ["explicit_role_action"] = true, ["role_fields_reset"] = true, ["invalid_stays_open"] = true, ["scoped_restore_only"] = true, ["agent_read_authorization_refused"] = true, ["fixed_agent_identity"] = true, ["token_prompt_deferred"] = true, ["invalid_agent_config_refused"] = true, ["explicit_pending_repair"] = true, ["agent_cannot_revoke_server_read"] = true, ["cancel_no_task"] = true, ["production_connections"] = 0 };
         }
         finally
         {

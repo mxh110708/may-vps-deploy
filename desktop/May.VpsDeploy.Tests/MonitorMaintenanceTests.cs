@@ -1,0 +1,42 @@
+using System.Text.Json.Nodes;
+using May.VpsDeploy.Core;
+using May.VpsDeploy.Infrastructure;
+
+internal sealed partial class BoundaryTests
+{
+    public async Task RunMonitorMaintenanceTests(){await MonitorMaintenanceExperience();Console.WriteLine($"PASS: {assertions} M4 configuration, credential scope, live-evidence and recovery assertions; inert remote only.");}
+    private async Task MonitorMaintenanceExperience()
+    {
+        using var f=new Fixture(repository);var plan=f.Plan("monitor-maintenance");f.SaveInstance(plan);var relative=f.Relative(plan);var directory=f.Paths.Instance(relative);var stateFile=SafePath.Resolve(directory,"deployment-state.json");var secretFile=SafePath.Resolve(directory,"secrets.dotnet.private.json");
+        var node=Guid.NewGuid().ToString("D");var origin=Guid.NewGuid().ToString("D");var remote=new MayLifecycleRemote();var seeded=remote.SeedAgent(node,origin);var state=ArchiveStore.ReadJson(stateFile);state["MayMonitorAgent"]=seeded;state["Sentinel"]="retained";ArchiveStore.WriteJson(stateFile,state);plan["MayMonitorAgent"]=seeded["Configuration"]!.DeepClone();ArchiveStore.WriteJson(SafePath.Resolve(directory,"deployment-plan.json"),plan);
+        var secret=f.Store.ReadSecret(secretFile);secret["MayMonitorAgent"]=new JsonObject{["AgentToken"]="Synthetic-Old-Agent1"};f.Store.WriteSecret(secretFile,secret);secret.Clear();
+        JsonObject Configuration(bool replace=false)=>new(){["Endpoint"]="https://alias.example/",["ClientUUID"]=node,["ServerInstanceId"]=origin,["ReplaceToken"]=replace};
+        OperationRequest Request(bool replace=false)=>new(OperationKind.MayMonitor,relative,new(){["Role"]="Agent",["Action"]="ConfigureAgent",["Configuration"]=Configuration(replace)});
+        var user=new FakeUser(_=>"Synthetic-New-Agent2");var coordinator=new TaskCoordinator(f.Store,new WorkflowEngine(f.Store,remote,new FakeKeys(),user,new FakeValidation()));
+        async Task<TaskRecord> Execute(OperationRequest request)=>await coordinator.ExecuteAsync(coordinator.Review(request),request,new InlineProgress<TaskProgress>(_=>{}),default);
+        MayMonitorLifecycle.Validate(Request().Options);Check(true,"valid agent configuration rejected");
+        var invalid=Request();invalid.Options["Configuration"]!["AgentToken"]="Synthetic-Secret";Refuses(()=>MayMonitorLifecycle.Validate(invalid.Options),"plaintext credential entered public options");
+        invalid=Request();invalid.Options["Configuration"]!["ReplaceToken"]=1;Refuses(()=>MayMonitorLifecycle.Validate(invalid.Options),"numeric credential mode accepted");
+        invalid=Request();invalid.Options["Role"]="Server";Refuses(()=>MayMonitorLifecycle.Validate(invalid.Options),"server accepted agent reconfiguration");
+        var review=coordinator.Review(Request(true));Check(review.Summary.Contains(origin)&&review.Summary.Contains(node)&&!review.Summary.Contains("Synthetic-New-Agent2"),"review lost identity or exposed credentials");
+        var kept=await Execute(Request());Check(kept.Outcome==TaskOutcome.Completed&&user.SecretPrompts.Count(p=>p.StartsWith("May Monitor"))==0,"keeping token prompted or failed: "+kept.SafeError);Check(ArchiveStore.ReadJson(stateFile).Text("MayMonitorAgent.ConnectionVerification.Status")=="Verified","live-report evidence was not retained");
+        secret=f.Store.ReadSecret(secretFile);Check(secret.Text("MayMonitorAgent.AgentToken")=="Synthetic-Old-Agent1","keep mode changed token");secret.Clear();
+        Check((await Execute(Request(true))).Outcome==TaskOutcome.Completed&&user.SecretPrompts.Count(p=>p.StartsWith("May Monitor"))==1,"rotation did not request a new secret once");secret=f.Store.ReadSecret(secretFile);Check(secret.Text("MayMonitorAgent.AgentToken")=="Synthetic-New-Agent2","new token was not archived after success");secret.Clear();Check(!File.ReadAllText(secretFile).Contains("Synthetic-New-Agent2")&&ArchiveStore.ReadJson(stateFile).Text("Sentinel")=="retained","secret encryption or unrelated state changed");
+        remote.RejectCandidate=true;var calls=remote.Calls.Count;var rejected=await Execute(Request(true));Check(rejected.Outcome==TaskOutcome.Failed&&!remote.Calls.Skip(calls).Contains("Begin"),"rejected credentials armed a mutation");remote.RejectCandidate=false;
+        remote.ReportsPass=false;remote.OldCredentialRevoked=true;Check((await Execute(Request(true))).Outcome==TaskOutcome.NeedsRecovery,"revoked old credentials falsely completed recovery");var pendingFile=SafePath.Resolve(directory,"operation-pending.dotnet.json");Check(ArchiveStore.ReadJson(pendingFile).Text("Phase")!="RolledBack","unverified connection was called restored");
+        var repair=new OperationRequest(OperationKind.Recover,relative,new(){["MayAgentConfiguration"]=Configuration(true)});remote.FailRepair=true;calls=remote.Calls.Count;Check((await Execute(repair)).Outcome==TaskOutcome.NeedsRecovery&&remote.Calls.Skip(calls).Count(c=>c=="RepairAgent")==1&&!remote.Calls.Skip(calls).Contains("Rollback"),"uncertain repair replayed a write or changed recovery scope");
+        remote.FailRepair=false;remote.ReportsPass=true;remote.LoseCommit=true;calls=remote.Calls.Count;Check((await Execute(repair)).Outcome==TaskOutcome.CompletedWithWarnings&&remote.Calls.Skip(calls).Count(c=>c=="RepairAgent")==1&&remote.Calls.Skip(calls).Count(c=>c=="Commit")==1,"lost repair commit was replayed");
+        Check(ArchiveStore.ReadJson(pendingFile).Text("Phase")=="Committed"&&ArchiveStore.ReadJson(stateFile).Text("MayMonitorAgent.Configuration.ClientUUID")==node,"repair lost original node identity or pending status");
+        Check(MayMonitorLifecycle.ReadAuthorizationStatus(new JsonObject{["Configuration"]=new JsonObject{["ReadAuthorization"]=new JsonObject{["ExpiresAt"]=DateTimeOffset.UtcNow.AddDays(-1).ToString("O")}}}).Contains("已过期"),"expired read authorization shown as valid");
+        Check(MayMonitorLifecycle.ReadAuthorizationStatus(new JsonObject{["Configuration"]=new JsonObject{["ReadAuthorization"]=new JsonObject{["ExpiresAt"]=DateTimeOffset.UtcNow.AddDays(2).ToString("O")}}}).Contains("即将到期"),"expiring read authorization not distinguished");
+        var serverPlan=f.Plan("monitor-renewal");f.SaveInstance(serverPlan);var serverRelative=f.Relative(serverPlan);var serverFile=SafePath.Resolve(f.Paths.Instance(serverRelative),"deployment-state.json");var serverRemote=new MayLifecycleRemote();var serverState=ArchiveStore.ReadJson(serverFile);serverState["MayMonitorServer"]=serverRemote.SeedServer(origin);ArchiveStore.WriteJson(serverFile,serverState);
+        var connection=new MonitorReadConnection("https://monitor.example/",MonitorReadConnection.NewToken(),new Dictionary<string,string>{[relative]=node});new MonitorReadArchive(f.Store).Save(connection);var mode="valid";
+        var probe=new AccessProbe((_,_)=>{if(mode=="network")throw new OperationException("synthetic safe network failure");var now=DateTimeOffset.UtcNow;return Task.FromResult(new MonitorReadSnapshot(now,now,"0.1.0-rc.4",new Dictionary<string,MonitorReadNode>(),mode=="wrong-origin"?Guid.NewGuid().ToString("D"):origin));});
+        var serverCoordinator=new TaskCoordinator(f.Store,new WorkflowEngine(f.Store,serverRemote,new FakeKeys(),new FakeUser(),new FakeValidation(),monitorRead:probe));
+        var authorization=new JsonObject{["Sha256"]=Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(connection.Token))),["Clients"]=new JsonArray(node),["ExpiresAt"]=DateTimeOffset.UtcNow.AddDays(10).ToString("O")};
+        OperationRequest Renew()=>new(OperationKind.MayMonitor,serverRelative,new(){["Role"]="Server",["Action"]="ConfigureRead",["ReadSourceIdentity"]=connection.Identity,["Configuration"]=new JsonObject{["ReadAuthorization"]=authorization.DeepClone()}});
+        async Task<TaskRecord> RenewRun(){var request=Renew();return await serverCoordinator.ExecuteAsync(serverCoordinator.Review(request),request,new InlineProgress<TaskProgress>(_=>{}),default);}
+        Check((await RenewRun()).Outcome==TaskOutcome.Completed&&ArchiveStore.ReadJson(serverFile).Text("MayMonitorServer.ReadVerification.Status")=="HttpsVerified","renewal did not verify actual HTTPS origin");
+        foreach(var failure in new[]{"wrong-origin","network"}){mode=failure;var start=serverRemote.Calls.Count;Check((await RenewRun()).Outcome==TaskOutcome.Failed&&serverRemote.Calls.Skip(start).Contains("Rollback"),"unverified renewal committed instead of restoring prior authorization");}
+    }
+}

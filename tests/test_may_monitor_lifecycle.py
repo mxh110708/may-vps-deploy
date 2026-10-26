@@ -280,6 +280,29 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(config['disable_auto_update']); self.assertTrue(config['disable_web_ssh']); self.assertFalse(config['ignore_unsafe_cert'])
         self.assertNotIn('token', result['Configuration']); self.assertEqual(stat_mode(self.host.path(self.life.config + '/config.json')), 0o640)
 
+    def test_reviewed_static_theme_disable_upgrade_and_restore(self):
+        import hashlib
+        self.install()
+        members = {'komari-theme.json': b'{"short":"GlassmorphismEnhanced"}', 'dist/index.html': b'<html>reviewed fixture</html>'}
+        lock = module.canonical({'schema': 1, 'short': 'GlassmorphismEnhanced', 'files': {name: hashlib.sha256(raw).hexdigest() for name, raw in members.items()}})
+        pin = hashlib.sha256(lock).hexdigest()
+        root = self.host.path('/usr/local/share/may-monitor/themes/' + pin)
+        root.mkdir(parents=True, mode=0o755)
+        for name, raw in {**members, 'may-theme.lock.json': lock}.items():
+            p = root / name; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(raw); p.chmod(0o644)
+        task, _ = self.begin()
+        selected = self.life.apply(task, 'ConfigureTheme', {'ThemeLockSha256': pin}, {})
+        self.life.finish(task)
+        self.assertEqual(selected['Configuration']['ThemeLockSha256'], pin)
+        self.assertNotIn('MAY_MONITOR_ALLOW_EXTENSIONS', self.host.path(self.life.config+'/runtime.env').read_text())
+        task, backup = self.begin()
+        self.life.apply(task, 'Upgrade', dict(self.configuration), self.secrets, self.asset(backup, '0.1.0-rc.3')); self.life.finish(task)
+        self.assertIn('MAY_MONITOR_REVIEWED_THEME='+pin, self.host.path(self.life.config+'/runtime.env').read_text())
+        task, _ = self.begin(); self.life.apply(task, 'DisableTheme', {}, {}); self.life.finish(task, True)
+        self.assertEqual(self.life.inspect()['Configuration']['ThemeLockSha256'], pin)
+        (root/'dist/index.html').write_bytes(b'changed')
+        with self.assertRaises(ValueError): self.life.inspect()
+
     def test_server_identity_is_stable_across_upgrade_and_rollback(self):
         self.install('0.1.0-rc.2'); before = self.life.inspect()['Configuration']['InstanceId']
         self.assertEqual(str(uuid.UUID(before)), before)

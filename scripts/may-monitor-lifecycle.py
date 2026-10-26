@@ -130,6 +130,42 @@ class Lifecycle:
     def system(self, *args, required=True):
         return self.host.run(['systemctl', *args], required)
 
+    def reviewed_theme(self, pin):
+        if not isinstance(pin, str) or not re.fullmatch('[a-f0-9]{64}', pin):
+            raise ValueError('Invalid reviewed theme lock digest.')
+        root = self.host.path('/usr/local/share/may-monitor/themes/' + pin)
+        for p in [root, *root.parents]:
+            if p == self.host.root:
+                break
+            info = p.lstat()
+            if p.is_symlink() or not p.is_dir() or info.st_uid != 0 or info.st_mode & 0o022:
+                raise ValueError('Unsafe reviewed theme directory.')
+        lock = root / 'may-theme.lock.json'
+        if lock.is_symlink() or lock.stat().st_size > 2 * 1024 ** 2 or digest(lock) != pin:
+            raise ValueError('Reviewed theme lock differs.')
+        value = self.host.read_json(lock)
+        if set(value) != {'schema', 'short', 'files'} or value['schema'] != 1 or not re.fullmatch('[A-Za-z][A-Za-z0-9_-]{0,63}', value['short']) or value['short'] == 'default' or not 2 <= len(value['files']) <= 10000:
+            raise ValueError('Invalid reviewed theme identity.')
+        total = 0
+        for name, sha in {**value['files'], 'may-theme.lock.json': pin}.items():
+            if name.startswith('/') or '\\' in name or any(part in ('', '.', '..') for part in name.split('/')) or not re.fullmatch('[a-f0-9]{64}', sha):
+                raise ValueError('Invalid reviewed theme member.')
+            if name != 'may-theme.lock.json' and name not in ('komari-theme.json', 'preview.png', 'preview-v2.0.0.png') and not name.startswith('dist/'):
+                raise ValueError('Reviewed theme contains a non-static member.')
+            p = root / name
+            for parent in p.parents:
+                if parent == root:
+                    break
+                info = parent.lstat()
+                if parent.is_symlink() or not parent.is_dir() or info.st_uid != 0 or info.st_mode & 0o022:
+                    raise ValueError('Unsafe reviewed asset directory.')
+            info = p.lstat(); total += info.st_size
+            if p.is_symlink() or not p.is_file() or info.st_nlink != 1 or info.st_uid != 0 or info.st_mode & 0o022 or info.st_size > 16 * 1024 ** 2 or digest(p) != sha:
+                raise ValueError('Reviewed static asset changed.')
+        if total > 256 * 1024 ** 2 or 'dist/index.html' not in value['files'] or self.host.read_json(root/'komari-theme.json').get('short') != value['short']:
+            raise ValueError('Incomplete reviewed theme.')
+        return value['short']
+
     def active(self):
         return self.system('is-active', '--quiet', self.unit, required=False).returncode == 0
 
@@ -185,6 +221,10 @@ class Lifecycle:
         meta = self.host.read_json(meta_path)
         if meta.get('SchemaVersion') != SCHEMA or meta.get('Role') != self.role or set(meta.get('Files', {})) != set(self.files):
             raise ValueError('Unknown monitoring ownership manifest.')
+        if meta.get('Configuration', {}).get('ThemeLockSha256'):
+            if self.role != 'Server':
+                raise ValueError('Reviewed themes belong to the server only.')
+            self.reviewed_theme(meta['Configuration']['ThemeLockSha256'])
         account = pwd.getpwnam(self.leaf)
         if account.pw_uid != meta['Uid'] or account.pw_gid != meta['Gid'] or account.pw_dir != self.data or account.pw_shell != '/usr/sbin/nologin':
             raise ValueError('Monitoring service identity changed.')
@@ -425,7 +465,7 @@ class Lifecycle:
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, *args, **kwargs):
                 return None
-        request = urllib.request.Request(address + '/api/clients/credential-check', canonical({'token': token}), {'Content-Type': 'application/json'})
+        request = urllib.request.Request(address + '/api/clients/credential-check', canonical({'token': token}), {'Content-Type': 'application/json', 'User-Agent': 'May-VPS-Deploy/May-Monitor'})
         try:
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
             with opener.open(request, timeout=10) as response:
@@ -443,8 +483,61 @@ class Lifecycle:
                 if str(uuid.UUID(instance_id)) != instance_id or uuid.UUID(instance_id).int == 0:
                     raise ValueError('Invalid May origin identity.')
                 configuration['ServerInstanceId'] = instance_id
+            return result
         except Exception:
             raise ValueError('May agent credential was not verified by the paired server.') from None
+
+    def candidate_agent(self, configuration, secrets, current):
+        import uuid
+        if self.role != 'Agent' or not current['Installed'] or not current['Active']:
+            raise ValueError('Configure a running owned agent; enable its service first if stopped.')
+        if set(configuration) != {'Endpoint', 'ClientUUID', 'ServerInstanceId', 'ReplaceToken'} or type(configuration['ReplaceToken']) is not bool:
+            raise ValueError('Explicit agent configuration and credential mode are required.')
+        for name in ('ClientUUID', 'ServerInstanceId'):
+            if str(uuid.UUID(configuration[name])) != configuration[name] or uuid.UUID(configuration[name]).int == 0:
+                raise ValueError('Invalid expected May agent identity.')
+        if current['Configuration'].get('ClientUUID') != configuration['ClientUUID']:
+            raise ValueError('Agent maintenance cannot silently rebind the node.')
+        saved = self.host.read_json(self.host.path(self.config + '/config.json'))
+        if not configuration['ReplaceToken'] and endpoint(configuration['Endpoint']) == endpoint(saved['endpoint']):
+            raise ValueError('Agent endpoint and credential are unchanged.')
+        token = secrets.get('AgentToken', '') if configuration['ReplaceToken'] else saved['token']
+        if not configuration['ReplaceToken'] and 'AgentToken' in secrets:
+            import hmac
+            if not hmac.compare_digest(secrets['AgentToken'].encode(), token.encode()):
+                raise ValueError('Archived agent credential differs; explicitly provide the current credential.')
+        confirmed = {'Endpoint': endpoint(configuration['Endpoint'])}
+        response = self.verify_agent_credential(confirmed, {'AgentToken': token})
+        if response.get('maintenance_schema_version') != 1 or confirmed.get('ClientUUID') != configuration['ClientUUID'] or confirmed.get('ServerInstanceId') != configuration['ServerInstanceId']:
+            raise ValueError('The paired maintenance protocol, node or server identity does not match.')
+        return confirmed, token
+
+    def wait_agent_reports(self, configuration, token):
+        import datetime
+        deadline = time.monotonic() + 35
+        reports = []
+        while time.monotonic() < deadline:
+            confirmed = {'Endpoint': configuration['Endpoint']}
+            result = self.verify_agent_credential(confirmed, {'AgentToken': token})
+            if confirmed.get('ClientUUID') != configuration['ClientUUID'] or confirmed.get('ServerInstanceId') != configuration['ServerInstanceId'] or result.get('maintenance_schema_version') != 1:
+                raise ValueError('Agent source identity changed during verification.')
+            try:
+                captured = datetime.datetime.fromisoformat(result['captured_at'].replace('Z', '+00:00'))
+                at = datetime.datetime.fromisoformat(result['report_at'].replace('Z', '+00:00'))
+                now = datetime.datetime.now(datetime.timezone.utc)
+                valid = result.get('online') is True and abs((now-captured).total_seconds()) <= 15 and -5 <= (captured-at).total_seconds() <= 15
+            except (KeyError, TypeError, ValueError, AttributeError):
+                valid = False
+            if valid:
+                if reports and at < reports[-1]:
+                    raise ValueError('Agent report time moved backwards.')
+                reports.append(at)
+                if len(reports) >= 3 and len(set(reports)) >= 2:
+                    return {'Status': 'Verified', 'Samples': len(reports), 'ReportAt': at.isoformat(), 'ClientUUID': confirmed['ClientUUID'], 'ServerInstanceId': confirmed['ServerInstanceId']}
+            else:
+                reports.clear()
+            time.sleep(3)
+        raise ValueError('Fresh advancing agent reports were not confirmed.')
 
     def verify_agent(self, expected=None):
         if self.role != 'Agent':
@@ -459,10 +552,12 @@ class Lifecycle:
             raise ValueError('The agent credential now belongs to another node.')
         return {'StateHash': state['Hash'], **confirmed}
 
-    def apply(self, task, action, configuration, secrets, spec=None):
-        backup, record = self.owned_transaction(task, ('Armed',))
-        current = self.inspect(record['Before']['Hash'])
-        if action not in ('Install', 'Upgrade', 'ConfigureRead', 'Enable', 'Disable', 'Remove', 'Restore', 'Backup'):
+    def apply(self, task, action, configuration, secrets, spec=None, repair_expected=None):
+        backup, record = self.owned_transaction(task, ('Applying', 'Applied', 'CredentialRecoveryRequired') if repair_expected else ('Armed',))
+        if repair_expected and (action != 'ConfigureAgent' or self.role != 'Agent' or record.get('Operation') != 'ConfigureAgent' or configuration.get('ReplaceToken') is not True):
+            raise ValueError('Repair is limited to this pending agent configuration transaction.')
+        current = self.inspect(repair_expected or record['Before']['Hash'])
+        if action not in ('Install', 'Upgrade', 'ConfigureAgent', 'ConfigureRead', 'RevokeRead', 'ConfigureTheme', 'DisableTheme', 'Enable', 'Disable', 'Remove', 'Restore', 'Backup'):
             raise ValueError('Unsupported May monitoring action.')
         if action == 'Install' and current['Hash'] != 'Absent' or action not in ('Install', 'Restore') and not current['Installed']:
             raise ValueError('May monitoring installation state changed.')
@@ -476,6 +571,19 @@ class Lifecycle:
             configuration['InstanceId'] = current['Configuration'].get('InstanceId') or str(uuid.uuid4())
         if self.role == 'Agent' and action == 'Install':
             self.verify_agent_credential(configuration, secrets)
+        agent_configuration = agent_token = None
+        if action == 'ConfigureAgent':
+            if repair_expected and configuration.get('ClientUUID') != record['Before']['Configuration'].get('ClientUUID'):
+                raise ValueError('Repair cannot change the original May node identity.')
+            agent_configuration, agent_token = self.candidate_agent(configuration, secrets, current)
+        if action == 'RevokeRead' and (self.role != 'Server' or configuration):
+            raise ValueError('Read revocation belongs to the selected May server only.')
+        if action in ('ConfigureTheme', 'DisableTheme'):
+            if self.role != 'Server' or set(configuration) != ({'ThemeLockSha256'} if action == 'ConfigureTheme' else set()):
+                raise ValueError('Reviewed theme selection belongs to the server only.')
+            if action == 'ConfigureTheme':
+                self.reviewed_theme(configuration['ThemeLockSha256'])
+        record['Operation'] = action
         record['Phase'] = 'Applying'
         self.save_transaction(backup, record)
         self.system('stop', self.unit, required=False)
@@ -505,7 +613,9 @@ class Lifecycle:
                     setup = secrets.get('SetupToken', '')
                     if not re.fullmatch('[A-Za-z0-9_-]{32,128}', setup):
                         raise ValueError('Missing private initialization token.')
-                    self.write(backup, record, self.config + '/runtime.env', ('MAY_MONITOR_SETUP_TOKEN=' + setup + '\nMAY_MONITOR_INSTANCE_ID=' + configuration['InstanceId'] + '\n').encode())
+                    theme = current['Configuration'].get('ThemeLockSha256')
+                    theme_env = 'MAY_MONITOR_REVIEWED_THEME=' + theme + '\n' if theme else ''
+                    self.write(backup, record, self.config + '/runtime.env', ('MAY_MONITOR_SETUP_TOKEN=' + setup + '\nMAY_MONITOR_INSTANCE_ID=' + configuration['InstanceId'] + '\n' + theme_env).encode())
                 else:
                     address = endpoint(configuration.get('Endpoint', ''))
                     token = secrets.get('AgentToken', '')
@@ -532,6 +642,20 @@ class Lifecycle:
                     raise ValueError('Invalid read-only authorization expiry.')
                 text = 'MAY_MONITOR_READ_TOKEN_SHA256=' + authorization['Sha256'] + '\nMAY_MONITOR_READ_CLIENT_UUIDS=' + ','.join(ids) + '\nMAY_MONITOR_READ_EXPIRES_AT=' + authorization['ExpiresAt'] + '\n'
                 self.write(backup, record, self.config + '/read-access.env', text.encode())
+            if action == 'RevokeRead':
+                self.write(backup, record, self.config + '/read-access.env', None)
+            if action in ('ConfigureTheme', 'DisableTheme'):
+                lines = self.host.path(self.config + '/runtime.env').read_text().splitlines()
+                lines = [line for line in lines if not line.startswith('MAY_MONITOR_REVIEWED_THEME=')]
+                if action == 'ConfigureTheme':
+                    lines.append('MAY_MONITOR_REVIEWED_THEME=' + configuration['ThemeLockSha256'])
+                self.write(backup, record, self.config + '/runtime.env', ('\n'.join(lines) + '\n').encode())
+            if action == 'ConfigureAgent':
+                saved = self.host.read_json(self.host.path(self.config + '/config.json'))
+                saved.update(endpoint=agent_configuration['Endpoint'], token=agent_token)
+                if saved.get('disable_web_ssh') is not True or saved.get('disable_auto_update') is not True or saved.get('ignore_unsafe_cert') is not False:
+                    raise ValueError('Agent maintenance cannot expand remote-control or TLS policy.')
+                self.write(backup, record, self.config + '/config.json', canonical(saved), 0o640, account.pw_gid)
             if action == 'Remove':
                 for name in self.files:
                     self.write(backup, record, name, None)
@@ -539,7 +663,17 @@ class Lifecycle:
             public_configuration = configuration if action == 'Install' else dict(old_meta['Configuration'])
             if self.role == 'Server' and action == 'Upgrade':
                 public_configuration['InstanceId'] = configuration['InstanceId']
-            public_configuration = {key: value for key, value in public_configuration.items() if key in ('Port', 'Username', 'Endpoint', 'ClientUUID', 'InstanceId', 'ServerInstanceId')}
+            if action == 'ConfigureAgent':
+                public_configuration = agent_configuration
+            if action == 'ConfigureRead':
+                public_configuration['ReadAuthorization'] = configuration['ReadAuthorization']
+            if action == 'RevokeRead':
+                public_configuration.pop('ReadAuthorization', None)
+            if action == 'ConfigureTheme':
+                public_configuration['ThemeLockSha256'] = configuration['ThemeLockSha256']
+            if action == 'DisableTheme':
+                public_configuration.pop('ThemeLockSha256', None)
+            public_configuration = {key: value for key, value in public_configuration.items() if key in ('Port', 'Username', 'Endpoint', 'ClientUUID', 'InstanceId', 'ServerInstanceId', 'ReadAuthorization', 'ThemeLockSha256')}
             meta = {'SchemaVersion': SCHEMA, 'Role': self.role, 'Uid': account.pw_uid, 'Gid': account.pw_gid, 'Installed': action != 'Remove', 'Version': spec['Version'] if candidate else old_meta['Version'], 'Configuration': public_configuration, 'Files': {name: digest(self.host.path(name)) if self.host.path(name).is_file() else None for name in self.files}}
             self.write(backup, record, self.meta, canonical(meta))
         self.system('daemon-reload')
@@ -558,6 +692,8 @@ class Lifecycle:
                 self.host.verify_process(self.unit, self.binary)
                 self.initialize(self.host.read_json(self.host.path(self.meta))['Configuration'], secrets)
         after = self.inspect()
+        if action == 'ConfigureAgent':
+            after['ConnectionVerification'] = self.wait_agent_reports(agent_configuration, agent_token)
         record['After'] = after
         record['Phase'] = 'Applied'
         self.save_transaction(backup, record)
@@ -637,7 +773,7 @@ class Lifecycle:
         backup, record = self.transaction(task)
         if record['Phase'] in ('Committed', 'RolledBack'):
             return {'Phase': record['Phase'], 'State': self.inspect()}
-        self.owned_transaction(task, ('Preparing', 'Armed', 'Applying', 'Applied'))
+        self.owned_transaction(task, ('Preparing', 'Armed', 'Applying', 'Applied', 'CredentialRecoveryRequired'))
         if not rollback and record['Phase'] not in ('Armed', 'Applied'):
             raise ValueError('Cannot commit an incomplete May operation.')
         if rollback and record['Phase'] in ('Preparing', 'Armed') and not record['Writes']:
@@ -703,6 +839,15 @@ class Lifecycle:
                 if config_dir.exists():
                     config_dir.rmdir()
             self.inspect(record['Before']['Hash'])
+            if record.get('Operation') == 'ConfigureAgent' and record['Before']['Active']:
+                saved = self.host.read_json(self.host.path(self.config + '/config.json'))
+                try:
+                    self.wait_agent_reports(record['Before']['Configuration'], saved['token'])
+                except ValueError:
+                    record['Phase'] = 'CredentialRecoveryRequired'
+                    self.save_transaction(backup, record)
+                    self.system('stop', 'may-monitor-rollback-' + task + '.timer', required=False)
+                    raise ValueError('Files restored but agent connection is not verified; explicit credential repair is required.') from None
             record['Phase'] = 'RolledBack'
         elif record['Phase'] != 'RolledBack':
             if record['Phase'] == 'Applied' and self.inspect()['Hash'] != record['After']['Hash']:
@@ -726,7 +871,7 @@ def main():
     host = Host()
     if os.geteuid() != 0:
         raise ValueError('Monitoring maintenance requires the reviewed root session.')
-    reading = action in ('Check', 'Transaction', 'VerifyAgent')
+    reading = action in ('Check', 'Transaction', 'VerifyAgent', 'ValidateAgentConfiguration')
     lock_path = host.path('/var/lib/may-vps-deploy/transaction.lock')
     if not reading:
         lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -739,10 +884,16 @@ def main():
             result = lifecycle.inspect(os.environ.get('VPS_PARAM_EXPECTED_HASH'))
         elif action == 'VerifyAgent':
             result = lifecycle.verify_agent(os.environ.get('VPS_PARAM_EXPECTED_HASH'))
+        elif action == 'ValidateAgentConfiguration':
+            current = lifecycle.inspect(os.environ['VPS_PARAM_EXPECTED_HASH'])
+            confirmed, _ = lifecycle.candidate_agent(json.loads(os.environ['VPS_PARAM_CONFIGURATION']), json.loads(os.environ.get('VPS_PARAM_PRIVATE', '{}')), current)
+            result = {'StateHash': current['Hash'], 'Configuration': confirmed}
         elif action == 'Begin':
             result = lifecycle.begin(task, os.environ['VPS_PARAM_EXPECTED_HASH'], os.environ['VPS_MAY_MONITOR_PROGRAM'])
         elif action == 'Apply':
             result = lifecycle.apply(task, os.environ['VPS_PARAM_OPERATION'], json.loads(os.environ['VPS_PARAM_CONFIGURATION']), json.loads(os.environ.get('VPS_PARAM_PRIVATE', '{}')), json.loads(os.environ['VPS_PARAM_ASSET']) if 'VPS_PARAM_ASSET' in os.environ else None)
+        elif action == 'RepairAgent':
+            result = lifecycle.apply(task, 'ConfigureAgent', json.loads(os.environ['VPS_PARAM_CONFIGURATION']), json.loads(os.environ['VPS_PARAM_PRIVATE']), repair_expected=os.environ['VPS_PARAM_EXPECTED_HASH'])
         elif action in ('Commit', 'Rollback'):
             result = lifecycle.finish(task, action == 'Rollback')
         elif action == 'Transaction':

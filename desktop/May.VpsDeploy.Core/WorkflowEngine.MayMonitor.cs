@@ -23,6 +23,8 @@ public sealed partial class WorkflowEngine
         var configuration = options["Configuration"]!.DeepClone().AsObject();
         var expected = c.State.Text(section + ".Hash", "Absent"); JsonObject? before = null;
         JsonObject? asset = action is "Install" or "Upgrade" ? MayMonitorLifecycle.Asset(store.Paths, role) : null;
+        JsonObject? agentPrivate=null; JsonNode? connectionEvidence=null;
+        MonitorReadConnection? readConnection = null;
         await c.TrackStep("may-preflight", async () =>
         {
             var audit = await c.Run("audit.sh");
@@ -30,6 +32,14 @@ public sealed partial class WorkflowEngine
             await VerifyManagement(c);
             before = await MayCommand(c, "Check", extra: action == "Check" ? new() : new() { ["EXPECTED_HASH"] = expected });
             if (action == "Install" && before.Text("Hash") != "Absent" || action is not ("Install" or "Check" or "Restore") && !before.Flag("Installed")) throw new OperationException("May Monitor 实际安装状态与操作不匹配；保留数据的已移除组件请从备份恢复。");
+            if(action=="ConfigureAgent")
+            {
+                agentPrivate=(c.Secrets[section]?.DeepClone() as JsonObject)??new();
+                if(configuration.Flag("ReplaceToken"))agentPrivate["AgentToken"]=await ReadMayAgentToken(c);
+                if(agentPrivate.Text("AgentToken")=="")throw new OperationException("缺少归档 Agent 凭据，请选择输入新 Token。");
+                var candidate=await MayCommand(c,"ValidateAgentConfiguration",extra:new(){["EXPECTED_HASH"]=before.Text("Hash"),["CONFIGURATION"]=configuration.ToJsonString(),["PRIVATE"]=agentPrivate.ToJsonString()});
+                if(candidate.Text("StateHash")!=before.Text("Hash")||candidate.Text("Configuration.ClientUUID")!=configuration.Text("ClientUUID")||candidate.Text("Configuration.ServerInstanceId")!=configuration.Text("ServerInstanceId"))throw new OperationException("新连接未通过对应节点与服务身份核验。");
+            }
             if (action == "ConfigureRead")
             {
                 var file = store.Paths.Resolve("private/monitor-read.private.json"); var source = store.ReadSecret(file);
@@ -38,6 +48,8 @@ public sealed partial class WorkflowEngine
                     var connection = MonitorReadConnection.FromJson(source); var authorization = configuration["ReadAuthorization"]!;
                     var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(connection.Token)));
                     if (connection.Identity != options.Text("ReadSourceIdentity") || authorization.Text("Sha256") != sha || !authorization.Strings("Clients").Order(StringComparer.Ordinal).SequenceEqual(connection.Bindings.Values.Order(StringComparer.Ordinal))) throw new OperationException("只读授权与当前连接不一致，请重新审阅授权。");
+                    if (monitorRead == null || !MayMonitorAccess.CanonicalId(before.Text("Configuration.InstanceId"))) throw new OperationException("请先核对配套 May 服务身份与 HTTPS 检查适配器，再更新只读授权。");
+                    readConnection = connection;
                 }
                 finally { source.Clear(); }
             }
@@ -72,6 +84,7 @@ public sealed partial class WorkflowEngine
         await c.TrackStep("may-backup", async () =>
         {
             c.Pending = new JsonObject { ["Kind"] = "MayMonitor", ["TaskId"] = c.Id, ["Role"] = role, ["Phase"] = "Arming", ["OldPlan"] = c.Plan[section]?.DeepClone(), ["OldState"] = c.State[section]?.DeepClone() };
+            if(action=="ConfigureAgent")c.Pending["MayAgentConfiguration"]=configuration.DeepClone();
             var directory = c.File("maintenance-backups/" + c.Id); Directory.CreateDirectory(directory);
             store.WriteSecret(SafePath.Resolve(directory, "may-secret.private.json"), oldSecret as JsonObject ?? new JsonObject()); c.Save();
             var backup = await MayCommand(c, "Begin", true, new() { ["EXPECTED_HASH"] = expected });
@@ -84,10 +97,16 @@ public sealed partial class WorkflowEngine
         });
         if (action != "Backup") await c.TrackStep("may-apply", async () =>
         {
-            var fields = new Dictionary<string, string> { ["OPERATION"] = action, ["CONFIGURATION"] = configuration.ToJsonString(), ["PRIVATE"] = c.Secrets[section]?.ToJsonString() ?? "{}" };
+            var fields = new Dictionary<string, string> { ["OPERATION"] = action, ["CONFIGURATION"] = configuration.ToJsonString(), ["PRIVATE"] = agentPrivate?.ToJsonString()??c.Secrets[section]?.ToJsonString() ?? "{}" };
             if (asset != null) fields["ASSET"] = asset.ToJsonString();
             var after = await MayCommand(c, "Apply", true, fields);
             c.State[section] = after; c.Plan[section] = after["Configuration"]?.DeepClone();
+            if(action=="ConfigureAgent")
+            {
+                connectionEvidence=after["ConnectionVerification"]?.DeepClone();
+                if(connectionEvidence.Text("Status")!="Verified")throw new OperationException("Agent 新上报尚未通过验收。");
+                c.Secrets[section]=agentPrivate!.DeepClone();
+            }
             if (action == "Restore")
             {
                 var file = c.File("maintenance-backups/" + configuration.Text("RestoreTask") + "/may-secret.private.json");
@@ -95,7 +114,19 @@ public sealed partial class WorkflowEngine
             }
             c.Save();
         });
-        await c.TrackStep("may-verify", async () => { var after = await MayCommand(c, "Check"); c.State[section] = after; await VerifyManagement(c); c.Save(); });
+        await c.TrackStep("may-verify", async () =>
+        {
+            var after = await MayCommand(c, "Check");
+            if (connectionEvidence != null) after["ConnectionVerification"] = connectionEvidence.DeepClone();
+            if (readConnection != null)
+            {
+                if (MayMonitorAccess.Connection(store).Identity != readConnection.Identity) throw new OperationException("本机只读来源已变化，未按旧连接提交授权。");
+                var snapshot = await monitorRead!.FetchAsync(readConnection, c.Cancellation);
+                if (MayMonitorAccess.Connection(store).Identity != readConnection.Identity || snapshot.ServerInstanceId != before!.Text("Configuration.InstanceId") || (DateTimeOffset.UtcNow - snapshot.CapturedAt).Duration() > TimeSpan.FromSeconds(15) || snapshot.Nodes.Keys.Any(id => !readConnection.Bindings.Values.Contains(id, StringComparer.Ordinal))) throw new OperationException("只读授权应用后的 HTTPS 来源、范围或时间核验未通过。");
+                after["ReadVerification"] = new JsonObject { ["Status"] = "HttpsVerified", ["At"] = DateTimeOffset.UtcNow, ["ServerInstanceId"] = snapshot.ServerInstanceId };
+            }
+            c.State[section] = after; await VerifyManagement(c); c.Save();
+        });
         await c.TrackStep("may-commit", async () =>
         {
             c.Pending!["Phase"] = "LocalPrepared"; c.Save(); var result = await MayCommand(c, "Commit", true);
@@ -104,9 +135,10 @@ public sealed partial class WorkflowEngine
         });
     }
 
-    private async Task RecoverMayMonitor(Context c)
+    private async Task RecoverMayMonitor(Context c,bool explicitRecovery=false)
     {
         if (c.Pending?.Text("Kind") != "MayMonitor" || !MayMonitorLifecycle.TaskId(c.Pending.Text("TaskId")) || !MayMonitorLifecycle.Roles.Contains(c.Pending.Text("Role"))) throw new OperationException("未知 May Monitor 恢复记录，未操作远端。", true);
+        if(explicitRecovery&&c.Request.Kind==OperationKind.Recover&&c.Request.Options["MayAgentConfiguration"] is JsonObject repair){await RepairMayAgent(c,repair);return;}
         var original = c.Cancellation; c.Cancellation = CancellationToken.None;
         try
         {
@@ -124,5 +156,31 @@ public sealed partial class WorkflowEngine
             c.Pending["Phase"] = "RolledBack"; c.Pending["CompletedAt"] = DateTimeOffset.UtcNow; c.Save(); await VerifyManagement(c);
         }
         finally { c.Cancellation = original; }
+    }
+
+    private async Task<string> ReadMayAgentToken(Context c)
+    {
+        var token=await user.SecretAsync("May Monitor 新 Agent Token（原节点的新凭据，不是只读令牌）",c.Cancellation)??throw new OperationCanceledException();
+        if(token.Length is <12 or >256||token.StartsWith("may_read_",StringComparison.Ordinal)||token.Any(ch=>ch<33||ch>126))throw new OperationException("请使用该节点的有效独立 Agent Token。");
+        return token;
+    }
+
+    private async Task RepairMayAgent(Context c,JsonObject configuration)
+    {
+        MayMonitorLifecycle.ValidateAgentConfiguration(configuration);
+        if(c.Pending?.Text("Role")!="Agent"||c.Pending["MayAgentConfiguration"] is not JsonObject||!configuration.Flag("ReplaceToken"))throw new OperationException("只能为本实例待恢复的 Agent 连接输入新凭据。",true);
+        await VerifyManagement(c);var phase=await MayCommand(c,"Transaction");
+        if(phase.Text("Phase")=="Committed"){c.Pending["Phase"]="Committed";c.Save();return;}
+        if(phase.Text("Phase") is not("Applying" or "Applied" or "CredentialRecoveryRequired"))throw new OperationException("此事务不需要凭据修复，请先核对恢复状态。",true);
+        var before=await MayCommand(c,"Check");var secret=new JsonObject{["AgentToken"]=await ReadMayAgentToken(c)};
+        try
+        {
+            var after=await MayCommand(c,"RepairAgent",true,new(){["EXPECTED_HASH"]=before.Text("Hash"),["CONFIGURATION"]=configuration.ToJsonString(),["PRIVATE"]=secret.ToJsonString()});
+            if(after.Text("ConnectionVerification.Status")!="Verified")throw new OperationException("修复后仍缺少真实新上报。",true);
+            c.State["MayMonitorAgent"]=after;c.Plan["MayMonitorAgent"]=after["Configuration"]?.DeepClone();c.Secrets["MayMonitorAgent"]=secret.DeepClone();c.Pending["Phase"]="LocalPrepared";c.Save();
+            var committed=await MayCommand(c,"Commit",true);if(committed.Text("Phase")!="Committed")throw new OperationException("修复提交未确认。",true);
+            c.Pending["Phase"]="Committed";c.Pending["CompletedAt"]=DateTimeOffset.UtcNow;c.Save();
+        }
+        finally{secret.Clear();}
     }
 }

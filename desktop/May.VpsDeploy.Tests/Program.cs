@@ -29,6 +29,7 @@ else if (args.Contains("--udp-proxy-only")) await new BoundaryTests(repository).
 else if (args.Contains("--forwarded-nodes-only")) await new BoundaryTests(repository).RunForwardedNodeTests();
 else if (args.Contains("--monitor-read-only")) await new BoundaryTests(repository).RunMonitorReadTests();
 else if (args.Contains("--may-monitor-only")) await new BoundaryTests(repository).RunMayMonitorTests();
+else if(args.Contains("--monitor-maintenance-only"))await new BoundaryTests(repository).RunMonitorMaintenanceTests();
 else if (args.Contains("--monitor-access-only")) await new BoundaryTests(repository).RunMonitorAccessTests();
 else await new BoundaryTests(repository).Run();
 
@@ -72,6 +73,7 @@ internal sealed partial class BoundaryTests(string repository)
         await MonitoringArchiveExperience(f);
         using (var monitorRead = new Fixture(repository)) await MonitorReadExperience(monitorRead);
         using (var mayMonitor = new Fixture(repository)) await MayMonitorExperience(mayMonitor);
+        await MonitorMaintenanceExperience();
         using (var monitorAccess = new Fixture(repository)) await MonitorAccessExperience(monitorAccess);
         await ComponentUpdateExperience(f);
         await RecoveryExperience(f);

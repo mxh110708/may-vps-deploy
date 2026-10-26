@@ -50,9 +50,9 @@ public sealed class MonitorReadClient : IDisposable, IMonitorReadProbe
         try
         {
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) throw new OperationException("监测只读令牌无效、已过期或未被服务端启用；没有尝试管理员权限。");
-            if ((int)response.StatusCode is >= 300 and < 400) throw new OperationException("监测地址返回重定向，已停止，未向新地址发送令牌。");
-            if (response.StatusCode != HttpStatusCode.OK) throw new OperationException("监测服务未返回快照，请核对服务状态与只读接口版本。");
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) throw new OperationException("监测只读令牌无效、已过期或未被服务端启用；没有尝试管理员权限。", code: "MonitorCredentialRejected");
+            if ((int)response.StatusCode is >= 300 and < 400) throw new OperationException("监测地址返回重定向，已停止，未向新地址发送令牌。", code: "MonitorRedirect");
+            if (response.StatusCode != HttpStatusCode.OK) throw new OperationException("监测服务未返回快照，请核对服务状态与只读接口版本。", code: "MonitorHttpError");
             if (response.Content.Headers.ContentType?.MediaType != "application/json" || response.Content.Headers.ContentEncoding.Count != 0 || response.Content.Headers.ContentLength > MaxResponseBytes) throw new OperationException("监测响应类型或大小不符合只读接口约定。");
             await using var source = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
             using var buffer = new MemoryStream();
@@ -64,11 +64,18 @@ public sealed class MonitorReadClient : IDisposable, IMonitorReadProbe
                 if (buffer.Length + count > MaxResponseBytes) throw new OperationException("监测响应超过大小限制，已停止读取。");
                 buffer.Write(chunk, 0, count);
             }
-            return MonitorReadSnapshot.Parse(buffer.ToArray(), DateTimeOffset.UtcNow);
+            var snapshot = MonitorReadSnapshot.Parse(buffer.ToArray(), DateTimeOffset.UtcNow);
+            if (connection.ServerInstanceId is { } expected && snapshot.ServerInstanceId != expected)
+                throw new OperationException("监控服务安装身份不匹配；已拒绝此次快照，请核对接入地址与保存的安装 UUID。", code: "MonitorIdentityMismatch");
+            return snapshot;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception error) when (error is HttpRequestException or IOException or OperationCanceledException)
-        { throw new OperationException("监测连接失败或超时，请核对网络、TLS 与服务地址；最近快照不代表当前在线状态。"); }
+        catch (HttpRequestException error) when (error.HttpRequestError == HttpRequestError.SecureConnectionError)
+        { throw new OperationException("监测 TLS 校验失败，请核对证书、主机名与系统时间；不会忽略证书错误。", code: "MonitorTlsError"); }
+        catch (OperationCanceledException)
+        { throw new OperationException("监测读取超时；最近快照不代表当前在线状态。", code: "MonitorTimeout"); }
+        catch (Exception error) when (error is HttpRequestException or IOException)
+        { throw new OperationException("监控服务暂不可达，请核对网络与服务状态；最近快照不代表当前在线状态。", code: "MonitorUnreachable"); }
     }
     public void Dispose() => http.Dispose();
 }

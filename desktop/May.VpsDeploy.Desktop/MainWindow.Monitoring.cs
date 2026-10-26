@@ -66,6 +66,7 @@ public sealed partial class MainWindow
         if (!MonitorVisible || monitorSnapshot == null || monitorReadFailed) return;
         if (monitorRenderedAt - monitorSnapshot.ReceivedAt >= TimeSpan.FromSeconds(90)) return;
         var deadlines = new List<DateTimeOffset> { monitorSnapshot.ReceivedAt.AddSeconds(90) };
+        if (monitorSnapshot.CredentialExpiresAt is { } expiry) deadlines.Add(expiry);
         foreach (var node in monitorSnapshot.Nodes.Values)
             if (node.ReportAt is { } report && report > DateTimeOffset.UnixEpoch && report < monitorSnapshot.ReceivedAt.AddMinutes(2))
             { deadlines.Add(report.AddSeconds(90)); deadlines.Add(report.AddSeconds(-5)); }
@@ -86,8 +87,8 @@ public sealed partial class MainWindow
         catch (OperationException safe) { error = safe.Message; }
         if (connection?.Identity != monitorIdentity) { monitorSnapshot = null; monitorIdentity = connection?.Identity; monitorReadFailed = false; monitorMessage = "尚未读取。"; }
         if (connection == null) page.Children.Add(Card(Column(Text("May Monitor 只读监测", 18), Text("连接已部署的 May Monitor，查看明确绑定实例的最近状态。", 13, true), Action("配置只读连接", EditMonitorConnection, true))));
-        page.Children.Add(Card(Trailing(Column(Text("May Monitor 部署与维护", 17), Text("逐个实例迁移；保留现有 Komari，独立备份与恢复。", 12, true)), Action("部署与维护", ManageMayMonitorDialog))));
-        page.Children.Add(Card(Trailing(Column(Text("May HTTPS 接入与试迁移", 17), Text("规划独立网址，核对服务身份及单节点连续上报。", 12, true)), Action("接入与验收", MayMonitorAccessDialog))));
+        page.Children.Add(Card(Trailing(Column(Text("May Monitor 部署与维护", 17), Text("管理独立组件、凭据、备份与恢复。", 12, true)), Action("部署与维护", ManageMayMonitorDialog))));
+        page.Children.Add(Card(Trailing(Column(Text("May HTTPS 接入与验收", 17), Text("核对 HTTPS 入口、服务身份及节点连续上报。", 12, true)), Action("接入与验收", MayMonitorAccessDialog))));
         if (error != null) page.Children.Add(Card(Column(Text("监测连接需要核对", 17), Text(error, 13, true))));
         if (connection == null) return;
         var polling = new ToggleSwitch { Tag = "Monitor.Polling", IsOn = monitorPolling, OnContent = "", OffContent = "", MinWidth = 48 };
@@ -95,9 +96,10 @@ public sealed partial class MainWindow
         polling.Toggled += async (_, _) => { monitorPolling = polling.IsOn; UpdateMonitorVisibility(); if (monitorPolling && MonitorVisible) await RefreshMonitoring(); };
         var cancelRead = Action("取消读取", () => { monitorCancellation?.Cancel(); return Task.CompletedTask; }, allowDuringTask: true); cancelRead.Tag = "Monitor.Cancel";
         monitorStatus = Text(monitorMessage, 13, true); monitorStatus.Tag = "Monitor.Status";
-        page.Children.Add(Card(Column(Trailing(Text(connection.Endpoint.AbsoluteUri, 13, true), Row(Action("修改只读连接", EditMonitorConnection), Action("移除本机连接", RemoveMonitorConnection))),
+        page.Children.Add(Card(Column(Trailing(Text(connection.Endpoint.AbsoluteUri, 13, true), Row(Action("打开 May Web", async () => { await global::Windows.System.Launcher.LaunchUriAsync(connection.Endpoint); }), Action("修改只读连接", EditMonitorConnection), Action("移除本机连接", RemoveMonitorConnection))),
             Fields(Row(polling, Text("此页可见时每 30 秒刷新", 13)), Row(Action("刷新监测", RefreshMonitoring, true), cancelRead)),
             monitorStatus, Text("切换页面、最小化或关闭到托盘会暂停读取。离开后重新打开本页，自动刷新默认关闭。", 12, true))));
+        if (connection.ServerInstanceId == null) page.Children.Add(Text("未固定监控服务安装身份；可在修改只读连接中填写已核验的安装 UUID。打开 Web 只携带网址，需单独登录。", 12, true));
         monitorRows = new StackPanel { Spacing = 16 }; monitorRows.Tag = "Monitor.Rows"; page.Children.Add(monitorRows);
         RenderMonitorRows(connection);
         UpdateMonitorVisibility();
@@ -109,11 +111,13 @@ public sealed partial class MainWindow
         monitorRows.Children.Clear();
         var instances = store.ListInstances().ToDictionary(i => i.RelativePath, i => i.Plan, StringComparer.Ordinal);
         var now = DateTimeOffset.UtcNow;
+        if (monitorSnapshot?.CredentialExpiresAt is { } expiry)
+            monitorRows.Children.Add(Card(Text((expiry <= now ? "只读凭据已到期，请续期或更换后重新读取：" : expiry <= now.AddDays(7) ? "只读凭据即将到期：" : "只读凭据有效至 ") + expiry.ToLocalTime().ToString("yyyy-MM-dd HH:mm zzz"), 13, expiry > now.AddDays(7))));
         foreach (var (relative, uuid) in connection.Bindings)
         {
             var label = instances.TryGetValue(relative, out var plan) ? plan.Text("Provider") + " / " + plan.Text("Instance") : "已移除的实例 · 请重新绑定";
             var node = monitorSnapshot?.Nodes.GetValueOrDefault(uuid);
-            var state = monitorSnapshot == null ? "尚未读取" : node == null ? "未返回节点 · 核对授权与 UUID" : node.Status(now, monitorSnapshot.ReceivedAt, monitorReadFailed);
+            var state = monitorSnapshot == null ? "尚未读取" : node == null ? "未返回节点 · 核对授权与 UUID" : node.Status(now, monitorSnapshot.ReceivedAt, monitorReadFailed || monitorSnapshot.CredentialExpiresAt <= now);
             var card = Column(Text(label, 18), Text(state, 14, state != "在线"), Text("监测节点 " + uuid, 12, true));
             if (node?.Metrics is { } metrics)
             {
@@ -122,6 +126,7 @@ public sealed partial class MainWindow
                 card.Children.Add(Text($"累计上传 {MonitorBytes(metrics.UploadTotal)}   ·   累计下载 {MonitorBytes(metrics.DownloadTotal)}", 13, true));
             }
             if (node?.ReportAt is { } reported) card.Children.Add(Text("最近上报 " + reported.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz"), 12, true));
+            if (node?.Alerts is { } alerts) card.Children.Add(Text($"告警 {alerts.Active}   ·   静默 {alerts.Silenced}   ·   通知失败 {alerts.DeliveryFailed}" + (monitorReadFailed || now - monitorSnapshot!.ReceivedAt > TimeSpan.FromSeconds(90) ? "（最近快照）" : ""), 13, alerts.Active == 0));
             monitorRows.Children.Add(Card(card));
         }
         monitorRenderedAt = now; ScheduleMonitorExpiry();
@@ -189,10 +194,10 @@ public sealed partial class MainWindow
     {
         MonitorReadConnection? previous = null;
         try { previous = MonitorArchive.Load(); } catch (OperationException) { /* Repair only after explicit save. */ }
-        var model = new JsonObject { ["Endpoint"] = previous?.Endpoint.AbsoluteUri ?? "" };
+        var model = new JsonObject { ["Endpoint"] = previous?.Endpoint.AbsoluteUri ?? "", ["ServerInstanceId"] = previous?.ServerInstanceId ?? "" };
         var password = SecretField("专用只读令牌", previous?.Token ?? ""); password.Tag = "Monitor.Token";
         var bindings = new List<(string Relative, JsonObject Value)>();
-        var panel = Column(Field("May Monitor HTTPS 地址", model, "Endpoint"), password,
+        var panel = Column(Field("May Monitor HTTPS 地址", model, "Endpoint"), Field("已核验的服务安装 UUID（可选）", model, "ServerInstanceId"), password,
             Action("生成新只读令牌", () => { password.Password = MonitorReadConnection.NewToken(); return Task.CompletedTask; }),
             Text("逐项填写服务端已有节点的 UUID。留空的实例不接入监测；相同名称或 IP 不会自动绑定。", 13, true));
         foreach (var instance in store.ListInstances())
@@ -202,12 +207,12 @@ public sealed partial class MainWindow
             var field = Field("监测节点 UUID", value, "Uuid"); field.Tag = "Monitor.Binding." + instance.RelativePath;
             panel.Children.Add(Column(Text(instance.Plan.Text("Provider") + " / " + instance.Plan.Text("Instance"), 14), field));
         }
-        MonitorReadConnection Draft() => new(model.Text("Endpoint"), password.Password, bindings.Where(b => b.Value.Text("Uuid").Trim() != "").ToDictionary(b => b.Relative, b => b.Value.Text("Uuid").Trim(), StringComparer.Ordinal));
+        MonitorReadConnection Draft() => new(model.Text("Endpoint"), password.Password, bindings.Where(b => b.Value.Text("Uuid").Trim() != "").ToDictionary(b => b.Relative, b => b.Value.Text("Uuid").Trim(), StringComparer.Ordinal), model.Text("ServerInstanceId").Trim());
         var validation = Text("", 13, true); validation.Tag = "Monitor.Validation";
         var provisioning = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 100, Tag = "Monitor.Provisioning", PlaceholderText = "预览仅包含摘要、节点授权范围和 30 天有效期。" };
         panel.Children.Add(Action("预览服务端授权配置", () => { try { provisioning.Text = Draft().ProvisioningEnvironment(DateTimeOffset.UtcNow); validation.Text = ""; } catch (OperationException safe) { provisioning.Text = ""; validation.Text = safe.Message; } return Task.CompletedTask; }));
         panel.Children.Add(provisioning);
-        panel.Children.Add(Text("由服务端管理员在独立的环境配置中应用授权并重启服务。轮换或撤销也在服务端完成。本机保存使用加密私人归档。v0.1.0-rc.1 尚不含此只读接口，需要后续配套发行。", 12, true));
+        panel.Children.Add(Text("由服务端管理员应用只读授权并重启服务。可通过部署与维护查看到期、续期或撤销状态。本机连接保存在加密私人归档中。", 12, true));
         panel.Children.Add(validation);
         var dialog = OperationDialog("May Monitor 只读连接", panel, "保存连接");
         dialog.PrimaryButtonClick += (_, args) =>

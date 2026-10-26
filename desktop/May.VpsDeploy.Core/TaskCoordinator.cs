@@ -24,6 +24,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         }
         var summary = snapshot.Kind == OperationKind.UdpForward ? UdpForwarding.Prepare(store, snapshot).Summary : snapshot.Kind == OperationKind.TcpForward ? TcpForwarding.Prepare(store, snapshot).Summary : snapshot.Kind == OperationKind.ServerOutbound ? ServerOutboundRouting.Prepare(store, snapshot).Summary : OperationPolicy.Summary(snapshot, kernelCatalog);
         if (snapshot.Kind == OperationKind.MayMonitor) summary = MayMonitorLifecycle.Summary(snapshot, store.Paths);
+        if(snapshot.Kind==OperationKind.Recover&&snapshot.Options["MayAgentConfiguration"] is JsonObject repair)summary="恢复 May Agent 连接 · 显式输入新凭据\n目标 "+repair.Text("Endpoint")+"\n节点 "+repair.Text("ClientUUID")+"\n服务身份 "+repair.Text("ServerInstanceId")+"\n仅处理该实例未完成的 Agent 配置事务；重新核对归属、鉴权及实际新上报后提交。";
         if (snapshot.Kind == OperationKind.MayMonitorAccess) summary = MayMonitorAccess.Summary(store, snapshot);
         if (snapshot.Kind == OperationKind.TcpChain) summary = TcpChains.Prepare(store, snapshot).Summary;
         if (snapshot.Kind == OperationKind.Inbounds) { var preview = InboundCatalog.Prepare(store, snapshot); summary = preview.Summary; preview.Credentials.Clear(); preview.Payload["Configurations"]!.AsObject().Clear(); }
@@ -70,7 +71,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
             foreach (var rule in UdpForwarding.Rules(request.Options["Configuration"] as JsonObject).Where(r => r.Flag("Enabled") && r.Text("Validation.Type") == "Shadowsocks"))
                 files["UdpForwardSource:" + rule.Text("Id")] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, rule.Text("Validation.SchemeId")));
         }
-        if (request.Kind == OperationKind.MayMonitor)
+        if (request.Kind == OperationKind.MayMonitor || request.Kind==OperationKind.Recover&&request.Options.ContainsKey("MayAgentConfiguration"))
         {
             foreach (var asset in new[] { "config/may-monitor.json", "scripts/may-monitor-lifecycle.py", "assets/remote/may-monitor-lifecycle.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(asset));
             if (request.Options.Text("Action") == "ConfigureRead") files["MayReadSource"] = ClientSchemes.SourceFingerprint(store.Paths.Resolve("private/monitor-read.private.json"));
@@ -169,6 +170,7 @@ public static class OperationPolicy
         if (request.Kind == OperationKind.TcpForward) TcpForwarding.ValidateOptions(request.Options);
         if (request.Kind == OperationKind.UdpForward) UdpForwarding.ValidateOptions(request.Options);
         if (request.Kind == OperationKind.MayMonitor) MayMonitorLifecycle.Validate(request.Options);
+        if(request.Options.ContainsKey("MayAgentConfiguration")){if(request.Kind!=OperationKind.Recover||request.Options.Count!=1||request.Options["MayAgentConfiguration"] is not JsonObject repair||!repair.Flag("ReplaceToken"))throw new OperationException("May Agent 修复参数无效。");MayMonitorLifecycle.ValidateAgentConfiguration(repair);}
         if (request.Kind == OperationKind.MayMonitorAccess) MayMonitorAccess.Validate(request);
         if (request.Kind == OperationKind.BbrKernel) BbrKernels.Validate(request.Options);
         if (request.Kind == OperationKind.CheckComponentUpdate) ComponentUpdates.ValidateQuery(request.Options);

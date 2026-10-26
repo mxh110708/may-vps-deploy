@@ -28,6 +28,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         var secretsFile = SafePath.Resolve(directory, "secrets.dotnet.private.json");
         var secrets = File.Exists(secretsFile) ? store.ReadSecret(secretsFile) : File.Exists(SafePath.Resolve(directory, "deployment-secrets.private.json")) ? ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-secrets.private.json")) : new JsonObject();
         await using var context = new Context(this, request, taskId, directory, plan, state, secrets, progress, cancellationToken);
+        if(request.Options.ContainsKey("MayAgentConfiguration")&&(request.Kind!=OperationKind.Recover||context.Pending?.Text("Kind")!="MayMonitor"||context.Pending.Text("Role")!="Agent"||context.Pending["MayAgentConfiguration"] is not JsonObject||context.Pending.Text("Phase") is "Committed" or "RolledBack"))throw new OperationException("此实例没有可重配凭据的 May Agent 待恢复事务。",true);
         var kernelRecovery = request.Kind == OperationKind.Recover && BbrKernels.Pending(state);
         var nonKernelState = state.DeepClone().AsObject(); nonKernelState.Remove("KernelUpgrade");
         var otherPending = InstanceLifecycle.HasPending(nonKernelState, context.Pending);
@@ -72,6 +73,19 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         catch (Exception failure)
         {
             var interruptedStage = context.CurrentStage;
+            if(request.Kind==OperationKind.Recover&&request.Options.ContainsKey("MayAgentConfiguration"))
+            {
+                // An explicit credential repair is never replayed by generic
+                // error recovery. Only reconcile its existing transaction.
+                context.Cancellation=CancellationToken.None;
+                try
+                {
+                    var status=await MayCommand(context,"Transaction");
+                    if(status.Text("Phase")=="Committed"){context.Pending!["Phase"]="Committed";context.Save();context.Finish(TaskOutcome.CompletedWithWarnings);return TaskOutcome.CompletedWithWarnings;}
+                }
+                catch(Exception check)when(check is OperationException or IOException or System.Text.Json.JsonException){}
+                var repairError=new OperationException(failure is OperationCanceledException?"修复已取消；原 Agent 待恢复事务保留。":"Agent 修复未确认，保留当前事务；核对状态后再显式输入有效凭据。",true,"MayAgentRepairUnconfirmed","在 May Monitor 维护界面选择恢复 Agent 连接；不会自动重放修复。");context.Finish(TaskOutcome.NeedsRecovery,repairError);throw repairError;
+            }
             if (request.Kind == OperationKind.BbrKernel || kernelRecovery)
             {
                 var kernelError = SafeFailures.Describe(failure, BbrKernels.Pending(context.State));

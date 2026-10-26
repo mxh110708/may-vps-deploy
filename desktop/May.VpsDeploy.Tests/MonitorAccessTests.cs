@@ -24,7 +24,9 @@ internal sealed partial class BoundaryTests
         var source = new MonitorReadArchive(f.Store); source.Save(connection);
         foreach (var value in new[] { "http://may.example/", "https://may.example/path", "https://user:pass@may.example/", "https://may.example/?token=x", "https://127.0.0.1/" }) Refuses(() => MayMonitorAccess.SavePlan(f.Store,serverRelative,value),"unsafe publication plan accepted");
         var legacyPlan = f.Plan("Legacy-monitor"); legacyPlan.Put("Cloudflared.PublicUrl",JsonValue.Create("https://old.example/")); f.SaveInstance(legacyPlan);
-        Refuses(() => MayMonitorAccess.SavePlan(f.Store,serverRelative,"https://old.example/"),"legacy public hostname overwritten");
+        var legacyPlanBytes = File.ReadAllBytes(SafePath.Resolve(f.Store.Paths.Instance(serverRelative), "deployment-plan.json"));
+        Check(MayMonitorAccess.SavePlan(f.Store,serverRelative,"https://old.example/").Text("PublicUrl")=="https://old.example/","existing HTTPS origin cannot be planned for replacement");
+        Check(File.ReadAllBytes(SafePath.Resolve(f.Store.Paths.Instance(serverRelative), "deployment-plan.json")).SequenceEqual(legacyPlanBytes),"saving HTTPS plan changed legacy service configuration");
         var plan = MayMonitorAccess.SavePlan(f.Store,serverRelative,connection.Endpoint.AbsoluteUri);
         Check(plan.Text("ServerInstanceId") == origin && MayMonitorAccess.Guidance(plan).Contains("http://127.0.0.1:25775"),"origin plan lost local service or identity");
         var planFile = MayMonitorAccess.PlanFile(f.Store,serverRelative); var savedPlan = File.ReadAllBytes(planFile); MayMonitorAccess.SavePlan(f.Store,serverRelative,"https://may.example"); Check(File.ReadAllBytes(planFile).SequenceEqual(savedPlan),"unchanged plan rewrote archive");
@@ -58,7 +60,7 @@ internal sealed partial class BoundaryTests
             mode=failure; var outcome=await Run(Request()); Check(outcome.Outcome==TaskOutcome.Failed && MayMonitorAccess.State(f.Store,serverRelative).Text("MayMonitorAccess.Status")=="Failed","invalid origin/source remained healthy"); source.Save(connection);
         }
         mode="valid"; reads=0; Check((await Run(Pilot())).Outcome==TaskOutcome.Completed && reads==3,"pilot did not require three scoped samples");
-        Check(MayMonitorAccess.EvidenceLabel(f.Store,serverRelative).Contains("试迁移"),"pilot readiness evidence missing");
+        Check(MayMonitorAccess.EvidenceLabel(f.Store,serverRelative).Contains("节点接入"),"node readiness evidence missing");
         var managementPlanFile=SafePath.Resolve(f.Paths.Instance(nodeRelative),"deployment-plan.json"); var changedManagement=nodePlan.DeepClone().AsObject(); changedManagement.Put("Server.IPv4",JsonValue.Create("192.0.2.11")); ArchiveStore.WriteJson(managementPlanFile,changedManagement);
         Check(MayMonitorAccess.EvidenceLabel(f.Store,serverRelative).Contains("已变化"),"changed management target retained readiness"); ArchiveStore.WriteJson(managementPlanFile,nodePlan);
         Check(MayMonitorAccess.State(f.Store,serverRelative).Text("KomariSentinel")=="retained" && MayMonitorAccess.State(f.Store,nodeRelative).Text("KomariSentinel")=="retained","pilot changed legacy data");

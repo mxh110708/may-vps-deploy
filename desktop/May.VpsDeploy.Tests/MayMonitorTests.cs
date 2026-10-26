@@ -17,6 +17,10 @@ internal sealed partial class BoundaryTests
         foreach (var role in MayMonitorLifecycle.Roles)
             foreach (var action in new[] { "Check", "Install", "Upgrade", "Backup", "Enable", "Disable", "Remove" }) { MayMonitorLifecycle.Validate(Options(action, role)); Check(true, "valid May operation rejected"); }
         foreach (var bad in new[] { Options("ConfigureRead", "Agent"), Options("Restore"), Options("Upgrade", "Komari"), Options("Unknown") }) Refuses(() => MayMonitorLifecycle.Validate(bad), "unknown May action/scope accepted");
+        var themeOptions=Options("ConfigureTheme");themeOptions["Configuration"]!["ThemeLockSha256"]=new string('a',64);MayMonitorLifecycle.Validate(themeOptions);
+        Check(MayMonitorLifecycle.Summary(new(OperationKind.MayMonitor,"Example/Theme/May-VPS-Deploy",themeOptions)).Contains(new string('a',64)),"reviewed theme digest omitted from concrete review");
+        themeOptions["Role"]="Agent";Refuses(()=>MayMonitorLifecycle.Validate(themeOptions),"agent accepted static-theme configuration");
+        themeOptions["Role"]="Server";themeOptions["Configuration"]!["ThemeLockSha256"]="../outside";Refuses(()=>MayMonitorLifecycle.Validate(themeOptions),"theme path accepted as a digest");
         var invalid = Options("Install", "Agent"); invalid["Configuration"]!["Endpoint"] = "http://public.example/"; Refuses(() => MayMonitorLifecycle.Validate(invalid), "insecure public agent endpoint accepted");
         invalid = Options("Install"); invalid["Configuration"]!["AgentToken"] = "synthetic"; Refuses(() => MayMonitorLifecycle.Validate(invalid), "credential accepted in public options");
         invalid = Options("Check"); invalid["Scope"] = "KomariController"; Refuses(() => MayMonitorLifecycle.Validate(invalid), "legacy scope mixed into May options");
@@ -77,8 +81,18 @@ internal sealed class MayLifecycleRemote : IRemoteSessionFactory, IRemoteSession
     internal readonly FakeRemote Legacy = new();
     internal readonly List<string> Calls = [];
     internal bool LoseApply, LoseCommit, WrongTransactionIdentity;
+    internal bool RejectCandidate, ReportsPass=true, OldCredentialRevoked, FailRepair;
     private JsonObject current = new() { ["Installed"] = false, ["Version"] = "", ["Hash"] = "Absent", ["Active"] = false, ["Enabled"] = false, ["Configuration"] = new JsonObject() };
     private JsonObject before = new(); private string phase = "None", task = "", role = "";
+    internal JsonObject SeedAgent(string node,string origin)
+    {
+        current=new(){["Installed"]=true,["Active"]=true,["Enabled"]=true,["Version"]="0.1.0-rc.1",["Configuration"]=new JsonObject{["Endpoint"]="https://monitor.example/",["ClientUUID"]=node,["ServerInstanceId"]=origin}};current["Hash"]=ArchiveStore.Fingerprint(current);return current.DeepClone().AsObject();
+    }
+    internal JsonObject SeedServer(string origin)
+    {
+        current = new() { ["Installed"] = true, ["Active"] = true, ["Enabled"] = true, ["Version"] = "0.1.0-rc.4", ["Configuration"] = new JsonObject { ["Port"] = 25775, ["Username"] = "admin", ["InstanceId"] = origin } };
+        current["Hash"] = ArchiveStore.Fingerprint(current); return current.DeepClone().AsObject();
+    }
     public Task<IRemoteSession> OpenAsync(SshEndpoint endpoint, IUserInteraction user, CancellationToken ct) => Task.FromResult<IRemoteSession>(this);
     public Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken ct) => Legacy.RunAsync(command, timeout, ct);
     public Task<byte[]> ReadFileAsync(string path, CancellationToken ct) => Legacy.ReadFileAsync(path, ct);
@@ -91,6 +105,9 @@ internal sealed class MayLifecycleRemote : IRemoteSessionFactory, IRemoteSession
         switch (action)
         {
             case "Check": result = current.DeepClone().AsObject(); break;
+            case "ValidateAgentConfiguration":
+                var candidate=JsonNode.Parse(Parameter("CONFIGURATION"))!;if(RejectCandidate||candidate.Text("ClientUUID")!=current.Text("Configuration.ClientUUID")||candidate.Text("ServerInstanceId")!=current.Text("Configuration.ServerInstanceId"))throw new OperationException("synthetic candidate rejected");
+                result=new(){["StateHash"]=current.Text("Hash"),["Configuration"]=candidate.DeepClone()};break;
             case "Begin":
                 task = Parameter("TASK_ID"); role = Parameter("ROLE"); before = current.DeepClone().AsObject(); phase = "Armed";
                 result = new() { ["Backup"] = MayMonitorLifecycle.BackupPath(task), ["Sha256"] = ArchiveStore.Digest(Encoding.UTF8.GetBytes("fixture-archive")), ["Phase"] = phase }; break;
@@ -98,10 +115,17 @@ internal sealed class MayLifecycleRemote : IRemoteSessionFactory, IRemoteSession
                 var operation = Parameter("OPERATION");
                 if (operation == "Install") current = new() { ["Installed"] = true, ["Active"] = true, ["Enabled"] = true, ["Version"] = "0.1.0-rc.2", ["Configuration"] = JsonNode.Parse(Parameter("CONFIGURATION")) };
                 if (operation is "Enable" or "Disable") { current["Active"] = operation == "Enable"; current["Enabled"] = operation == "Enable"; }
+                if(operation=="ConfigureAgent"){var cfg=JsonNode.Parse(Parameter("CONFIGURATION"))!.AsObject();cfg.Remove("ReplaceToken");current["Configuration"]=cfg;current["ConnectionVerification"]=new JsonObject{["Status"]="Verified",["Samples"]=3};}
+                if(operation=="ConfigureRead")current["Configuration"]!["ReadAuthorization"]=JsonNode.Parse(Parameter("CONFIGURATION"))!["ReadAuthorization"]!.DeepClone();
+                if(operation=="RevokeRead")current["Configuration"]!.AsObject().Remove("ReadAuthorization");
                 current["Hash"] = ArchiveStore.Fingerprint(current); phase = "Applied"; result = current.DeepClone().AsObject();
+                if(operation=="ConfigureAgent"&&!ReportsPass)throw new IOException("synthetic live report failure");
                 if (LoseApply) { LoseApply = false; throw new IOException("synthetic acknowledgement lost"); } break;
             case "Commit": phase = "Committed"; result = new() { ["Phase"] = phase, ["State"] = current.DeepClone() }; if (LoseCommit) { LoseCommit = false; throw new IOException("synthetic commit acknowledgement lost"); } break;
-            case "Rollback": phase = "RolledBack"; current = before.DeepClone().AsObject(); result = new() { ["Phase"] = phase, ["State"] = current.DeepClone() }; break;
+            case "Rollback": current = before.DeepClone().AsObject();if(OldCredentialRevoked){phase="CredentialRecoveryRequired";throw new IOException("synthetic old credential revoked");}phase = "RolledBack"; result = new() { ["Phase"] = phase, ["State"] = current.DeepClone() }; break;
+            case "RepairAgent":
+                if(FailRepair){phase="Applying";throw new IOException("synthetic repair acknowledgement lost");}
+                var repaired=JsonNode.Parse(Parameter("CONFIGURATION"))!.AsObject();repaired.Remove("ReplaceToken");current["Configuration"]=repaired;current["ConnectionVerification"]=new JsonObject{["Status"]="Verified",["Samples"]=3};current["Hash"]=ArchiveStore.Fingerprint(current);phase="Applied";result=current.DeepClone().AsObject();break;
             case "Transaction": result = new() { ["Phase"] = phase, ["Role"] = role, ["TaskId"] = WrongTransactionIdentity ? Guid.NewGuid().ToString("N") : task }; break;
             default: throw new Exception("Unexpected May lifecycle command");
         }
