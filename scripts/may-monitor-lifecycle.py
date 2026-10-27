@@ -374,17 +374,21 @@ class Lifecycle:
         binary = backup / 'candidate-binary'
         if self.role == 'Server':
             with tarfile.open(path, 'r:gz') as archive:
-                seen = set()
+                seen, candidate = set(), None
+                metadata = ('LICENSE', 'SECURITY.md', 'CHANGELOG.md', 'RELEASE-' + spec['Version'] + '.md')
                 for member in archive:
                     limit = 128 * 1024 ** 2 if member.name == 'may-monitor-server' else 1024 ** 2
-                    if not member.isfile() or member.name not in ('may-monitor-server', 'LICENSE', 'SECURITY.md', 'CHANGELOG.md') or member.name in seen or not 0 < member.size <= limit:
+                    if not member.isfile() or member.name not in ('may-monitor-server', *metadata) or member.name in seen or not 0 < member.size <= limit:
                         raise ValueError('Unexpected May server archive layout.')
                     seen.add(member.name)
                     if member.name == 'may-monitor-server':
-                        with archive.extractfile(member) as source, binary.open('xb') as target:
-                            shutil.copyfileobj(source, target, 65536)
-                if 'may-monitor-server' not in seen:
+                        candidate = member
+                if candidate is None:
                     raise ValueError('Missing May server binary.')
+                # Validate every member before materializing or executing the
+                # candidate. Release notes must match this exact pinned version.
+                with archive.extractfile(candidate) as source, binary.open('xb') as target:
+                    shutil.copyfileobj(source, target, 65536)
         else:
             shutil.copyfile(path, binary)
         binary.chmod(0o700)
@@ -561,6 +565,20 @@ class Lifecycle:
             raise ValueError('Unsupported May monitoring action.')
         if action == 'Install' and current['Hash'] != 'Absent' or action not in ('Install', 'Restore') and not current['Installed']:
             raise ValueError('May monitoring installation state changed.')
+        if action in ('Install', 'Upgrade'):
+            # Reject incomplete controller input while the original service is
+            # still running, before entering the applying phase or stopping it.
+            if self.role == 'Server':
+                if not 1024 <= configuration.get('Port', 0) <= 65535 or not re.fullmatch('[A-Za-z0-9_.-]{1,64}', configuration.get('Username', '')):
+                    raise ValueError('Invalid May server configuration.')
+                setup = secrets.get('SetupToken', '')
+                if not re.fullmatch('[A-Za-z0-9_-]{32,128}', setup):
+                    raise ValueError('Missing private initialization token.')
+            else:
+                endpoint(configuration.get('Endpoint', ''))
+                token = secrets.get('AgentToken', '')
+                if not 12 <= len(token) <= 256 or any(ord(c) < 33 for c in token):
+                    raise ValueError('Invalid May agent credential.')
         candidate = self.asset(backup, spec) if action in ('Install', 'Upgrade') else None
         if action == 'Upgrade' and version(spec['Version']) <= version(current['Version']):
             raise ValueError('May downgrade or repeated upgrade refused.')
@@ -608,19 +626,12 @@ class Lifecycle:
             os.chmod(config_dir, 0o750 if self.role == 'Agent' else 0o700); os.chown(config_dir, 0, account.pw_gid if self.role == 'Agent' else 0)
             if action in ('Install', 'Upgrade'):
                 if self.role == 'Server':
-                    if not 1024 <= configuration.get('Port', 0) <= 65535 or not re.fullmatch('[A-Za-z0-9_.-]{1,64}', configuration.get('Username', '')):
-                        raise ValueError('Invalid May server configuration.')
-                    setup = secrets.get('SetupToken', '')
-                    if not re.fullmatch('[A-Za-z0-9_-]{32,128}', setup):
-                        raise ValueError('Missing private initialization token.')
                     theme = current['Configuration'].get('ThemeLockSha256')
                     theme_env = 'MAY_MONITOR_REVIEWED_THEME=' + theme + '\n' if theme else ''
                     self.write(backup, record, self.config + '/runtime.env', ('MAY_MONITOR_SETUP_TOKEN=' + setup + '\nMAY_MONITOR_INSTANCE_ID=' + configuration['InstanceId'] + '\n' + theme_env).encode())
                 else:
                     address = endpoint(configuration.get('Endpoint', ''))
                     token = secrets.get('AgentToken', '')
-                    if not 12 <= len(token) <= 256 or any(ord(c) < 33 for c in token):
-                        raise ValueError('Invalid May agent credential.')
                     agent_config = {'endpoint': address, 'token': token, 'interval': 3, 'info_report_interval': 5, 'reconnect_interval': 5, 'max_retries': -1, 'disable_web_ssh': True, 'disable_auto_update': True, 'ignore_unsafe_cert': False, 'get_ip_addr_from_nic': True}
                     self.write(backup, record, self.config + '/config.json', canonical(agent_config), 0o640, account.pw_gid)
                 self.write(backup, record, self.binary, candidate.read_bytes(), 0o755)
@@ -776,6 +787,21 @@ class Lifecycle:
         self.owned_transaction(task, ('Preparing', 'Armed', 'Applying', 'Applied', 'CredentialRecoveryRequired'))
         if not rollback and record['Phase'] not in ('Armed', 'Applied'):
             raise ValueError('Cannot commit an incomplete May operation.')
+        if rollback and record['Phase'] == 'Applying' and record.get('Operation') == 'Upgrade' and not record['Writes'] and record['Before']['Installed']:
+            # A stopped upgrade with no file writes must not rewind metrics to
+            # its earlier snapshot. Prove the entire original file identity,
+            # restore only its runtime flags, then release the owned transaction.
+            self.inspect()
+            meta = self.host.read_json(self.host.path(self.meta))
+            files = {name: digest(self.host.path(name)) if self.host.path(name).is_file() else None for name in self.files}
+            identity = hashlib.sha256(canonical({'Manifest': meta, 'Files': files, 'Active': record['Before']['Active'], 'Enabled': record['Before']['Enabled']})).hexdigest()
+            if identity != record['Before']['Hash']:
+                raise ValueError('External edits block automatic May recovery.')
+            for command, flag in (('enable', record['Before']['Enabled']), ('start', record['Before']['Active'])):
+                self.system(command if flag else ('disable' if command == 'enable' else 'stop'), self.unit, required=flag)
+            self.inspect(record['Before']['Hash'])
+            record['Phase'] = 'RolledBack'
+            rollback = False
         if rollback and record['Phase'] in ('Preparing', 'Armed') and not record['Writes']:
             self.inspect(record['Before']['Hash'])
             record['Phase'] = 'RolledBack'

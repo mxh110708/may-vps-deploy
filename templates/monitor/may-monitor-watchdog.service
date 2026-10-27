@@ -1,0 +1,42 @@
+# Independent read-only May Monitor check; SMTP remains opt-in.
+[Unit]
+Description=May Monitor independent Server check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=may-monitor-watchdog
+Group=may-monitor-watchdog
+WorkingDirectory=/var/lib/may-monitor-watchdog
+StateDirectory=may-monitor-watchdog
+StateDirectoryMode=0700
+EnvironmentFile=/etc/may-monitor-watchdog/read-access.env
+ExecStart=/usr/local/lib/may-monitor-watchdog/may-monitor-server watchdog --config /etc/may-monitor-watchdog/watchdog.json --state /var/lib/may-monitor-watchdog/state.json
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=15
+UMask=0077
+CPUAccounting=true
+MemoryAccounting=true
+CPUQuota=2%
+MemoryHigh=48M
+MemoryMax=64M
+TasksMax=32
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

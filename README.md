@@ -2,6 +2,10 @@
 
 面向个人 Debian VPS 的中文部署与运维工具，由 Windows 控制端统一管理部署计划、远端操作、私有归档和客户端配置。
 
+v0.9.38 配套 May Monitor Server／Agent／Web 0.1.0 正式版及 May Status .17，完成监控首阶段收尾、独立主机检查、邮件功能及正常升级恢复修正。真实发信按用户选择暂不配置；桌面由用户手动更新。当前状态和验收边界见[收尾记录](docs/MONITOR-CLOSEOUT-2026-10-27.zh-CN.md)与[监控路线图](docs/MONITOR-ROADMAP-2026-10-25.zh-CN.md)。
+
+下述轮次为实施历史；生产已完成 May 接管，旧 Komari 保持停用，不按旧阶段说明重新开启。
+
 v0.9.36 整合原计划第十一至十四轮及监控 M1–M3：转发节点、有限 TCP 跨实例编排、通用多入站、Hysteria2 和 May Monitor 接入维护。配套 Server v0.1.0-rc.3 保持预发布，用户手动更新与逐实例部署；详见[本次发行范围与验证](docs/TESTING-0.9.36.zh-CN.md)。
 
 **主线进度：** 原定[第十二轮跨实例 TCP 编排](docs/TCP-CHAIN-ROUND-12-2026-10-24.zh-CN.md)、[第十三轮通用多入站](docs/INBOUND-MODEL-ROUND-13-2026-10-25.zh-CN.md)及[第十四轮 Hysteria2](docs/HYSTERIA2-ROUND-14-2026-10-25.zh-CN.md)已补齐源码、对应隔离验收并纳入 v0.9.36。独立入站支持 Reality、AnyTLS、SS2022 和 Hysteria2，分别管理监听、用户、证书、出站和恢复范围，按用户生成 Clash/Mihomo 与 sing-box 节点；Hysteria2 包含真实 QUIC 鉴权、HTTPS、UDP 回显及 Debian 12／13 生命周期验证。旧服务保留原维护入口，TUIC 与更多服务器出站完成后续评估，尚未实现。May Monitor M1–M3 独立编号，完整状态以[主线路线图](docs/DEPLOY-ROADMAP-2026-10-24.zh-CN.md)为准。
@@ -24,7 +28,7 @@ v0.9.31 将项目与应用统一更名为 May VPS Deploy，采用独立安装身
 
 v0.9.30 统一新方案的城市/湾区命名：LA 入口与 SF 湾区入口分别建组，SF 包含 San Jose。IPv4、IPv6 落地出口可分别保存节点名，避免重新提取时恢复旧名称；改名保留原连接与凭据。详见[命名约定与归档同步](docs/CITY-NAMING-2026-10-19.zh-CN.md)。
 
-正式版为 [v0.9.36](https://github.com/mxh110708/may-vps-deploy/releases/tag/v0.9.36)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
+正式版为 [v0.9.38](https://github.com/mxh110708/may-vps-deploy/releases/tag/v0.9.38)，提供 Windows EXE 安装包。此前的 WPF 原生入口 v0.7.0 已撤销发行，源提交保留。
 
 v0.9.28 将 BBR v3 改用 Google 官方 `google/bbr` v3 源码。固定版由 May 在开发机预编译，内核包、通用配置和校验清单随应用提供，小 VPS 只接收、验证和安装；不提供最新提交选择或 VPS 在线编译，固定包随应用版本更新。审阅展示真实基础版本、日期、提交及包 SHA256，不标作 Google 官方二进制或最新 LTS。旧版 XanMod 来源及其事务兼容处理已移除；默认仍沿用 VPS 原有内核。详见[网络调优流程](docs/NETWORK-TUNING.zh-CN.md)、[预编译维护](docs/GOOGLE-BBR-PREBUILT.zh-CN.md)及[安装启动验证](docs/GOOGLE-BBR-PREBUILT-2026-10-16.zh-CN.md)。下方 v0.9.16–v0.9.18 的内核发行、签名与 LTS 描述属于当时的第三方实现。
 

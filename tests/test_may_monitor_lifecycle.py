@@ -250,7 +250,67 @@ class LifecycleTests(unittest.TestCase):
                 entry = tarfile.TarInfo('may-monitor-server'); entry.size = 3; archive.addfile(entry, io.BytesIO(b'bad'))
         asset['Sha256'] = module.digest(backup / 'artifact'); asset['Bytes'] = (backup / 'artifact').stat().st_size
         with self.assertRaises(ValueError): self.life.apply(task, 'Install', dict(self.configuration), self.secrets, asset)
+        self.assertFalse((backup / 'candidate-binary').exists())
         self.life.finish(task, True); self.assertEqual(self.life.inspect()['Hash'], 'Absent')
+
+    def test_published_server_layout_with_versioned_release_notes(self):
+        task, backup = self.begin(); asset = self.asset(backup, '0.1.0-rc.9')
+        payload = b'synthetic owned binary 0.1.0-rc.9'
+        with tarfile.open(backup / 'artifact', 'w:gz') as archive:
+            for name in ('may-monitor-server', 'LICENSE', 'SECURITY.md', 'CHANGELOG.md', 'RELEASE-0.1.0-rc.9.md'):
+                raw = payload if name == 'may-monitor-server' else b'reviewed release metadata'
+                entry = tarfile.TarInfo(name); entry.size = len(raw); archive.addfile(entry, io.BytesIO(raw))
+        asset['Sha256'] = module.digest(backup / 'artifact'); asset['Bytes'] = (backup / 'artifact').stat().st_size
+        result = self.life.apply(task, 'Install', dict(self.configuration), self.secrets, asset)
+        self.assertEqual(result['Version'], '0.1.0-rc.9'); self.assertTrue(result['Active'])
+        self.life.finish(task)
+
+    def test_missing_upgrade_credential_does_not_stop_original_service(self):
+        self.install(); task, backup = self.begin(); asset = self.asset(backup, '0.1.0-rc.9')
+        before = self.life.inspect(); calls = len(self.host.calls)
+        with self.assertRaisesRegex(ValueError, 'Missing private initialization token'):
+            self.life.apply(task, 'Upgrade', dict(before['Configuration']), {}, asset)
+        self.assertEqual(self.life.inspect()['Hash'], before['Hash'])
+        self.assertNotIn(('systemctl', 'stop', self.life.unit), self.host.calls[calls:])
+        self.assertEqual(self.life.transaction(task)[1]['Phase'], 'Armed')
+        self.life.finish(task, True)
+
+    def test_missing_agent_upgrade_credential_does_not_stop_original_service(self):
+        self.life = FixtureLifecycle(self.host, 'Agent')
+        task, backup = self.begin(); asset = self.asset(backup, role='Agent')
+        self.life.apply(task, 'Install', {'Endpoint': 'https://monitor.example/'}, {'AgentToken': 'synthetic-agent-token'}, asset); self.life.finish(task)
+        task, backup = self.begin(); before = self.life.inspect(); asset = self.asset(backup, '0.1.0-rc.4', role='Agent'); calls = len(self.host.calls)
+        with self.assertRaisesRegex(ValueError, 'Invalid May agent credential'):
+            self.life.apply(task, 'Upgrade', dict(before['Configuration']), {}, asset)
+        self.assertEqual(self.life.inspect()['Hash'], before['Hash'])
+        self.assertNotIn(('systemctl', 'stop', self.life.unit), self.host.calls[calls:])
+        self.life.finish(task, True)
+
+    def test_unwritten_upgrade_recovery_retains_metrics_since_snapshot(self):
+        self.install(); task, _ = self.begin(); before = self.life.inspect()
+        metric = self.host.path(self.life.data) / 'new-telemetry'; metric.write_bytes(b'created after snapshot')
+        backup, record = self.life.transaction(task); record['Phase'] = 'Applying'; record['Operation'] = 'Upgrade'; self.life.save_transaction(backup, record)
+        self.life.system('stop', self.life.unit)
+        result = self.life.finish(task, True)
+        self.assertEqual(result['Phase'], 'RolledBack'); self.assertEqual(result['State']['Hash'], before['Hash'])
+        self.assertEqual(metric.read_bytes(), b'created after snapshot')
+
+    def test_archive_unknown_notes_paths_and_links_refused_before_extraction(self):
+        for name, link in [('RELEASE-0.1.0-rc.1.md', False), ('docs/RELEASE-0.1.0-rc.9.md', False), ('../CHANGELOG.md', False), ('CHANGELOG.md', True)]:
+            with self.subTest(name=name, link=link):
+                task, backup = self.begin(); asset = self.asset(backup, '0.1.0-rc.9')
+                with tarfile.open(backup / 'artifact', 'w:gz') as archive:
+                    entry = tarfile.TarInfo('may-monitor-server'); entry.size = 3; archive.addfile(entry, io.BytesIO(b'bin'))
+                    entry = tarfile.TarInfo(name)
+                    if link:
+                        entry.type = tarfile.SYMTYPE; entry.linkname = 'may-monitor-server'; archive.addfile(entry)
+                    else:
+                        entry.size = 3; archive.addfile(entry, io.BytesIO(b'doc'))
+                asset['Sha256'] = module.digest(backup / 'artifact'); asset['Bytes'] = (backup / 'artifact').stat().st_size
+                with self.assertRaises(ValueError): self.life.asset(backup, asset)
+                self.assertFalse((backup / 'candidate-binary').exists())
+                self.assertFalse(self.host.path(self.life.binary).exists())
+                self.life.finish(task, True)
 
     def test_snapshot_scope_and_identity_rejected(self):
         self.install(); task, backup = self.begin()

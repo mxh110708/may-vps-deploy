@@ -1,17 +1,17 @@
 {
   "SchemaVersion": 1,
   "Server": {
-    "Version": "0.1.0-rc.8",
+    "Version": "0.1.0",
     "Name": "may-monitor-server-linux-amd64.tar.gz",
-    "Bytes": 16335803,
-    "Sha256": "dc4609ead5469c6e7487a3b31b9c1132f95a9188fbe5f5211afdd560f31458e5",
-    "Url": "https://github.com/mxh110708/may-monitor-server/releases/download/v0.1.0-rc.8/may-monitor-server-linux-amd64.tar.gz"
+    "Bytes": 16364948,
+    "Sha256": "dd29f418bac6e6106151fd4ee39e539a1c43df483cb5c4008e1d4bab11e5e93e",
+    "Url": "https://github.com/mxh110708/may-monitor-server/releases/download/v0.1.0/may-monitor-server-linux-amd64.tar.gz"
   },
   "Agent": {
-    "Version": "0.1.0-rc.4",
+    "Version": "0.1.0",
     "Name": "may-monitor-agent-linux-amd64",
     "Bytes": 8941728,
-    "Sha256": "6689eddb66d23e2ef1af74e9959ac6a126322bd31e21906bd3fda8411a532e59",
-    "Url": "https://github.com/mxh110708/may-monitor-agent/releases/download/v0.1.0-rc.4/may-monitor-agent-linux-amd64"
+    "Sha256": "df1fc5993faba19116f5d2555bd0f0cae1091ead9763b886c12a1f028a442e84",
+    "Url": "https://github.com/mxh110708/may-monitor-agent/releases/download/v0.1.0/may-monitor-agent-linux-amd64"
   }
 }
