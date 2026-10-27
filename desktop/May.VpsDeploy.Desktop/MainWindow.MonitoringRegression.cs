@@ -31,6 +31,7 @@ public sealed partial class MainWindow
         var history = new TaskHistory(store).Read().Count;
         var added = new List<string>(); Task? pending = null;
         var ids = Enumerable.Range(0, 3).Select(_ => Guid.NewGuid().ToString("D")).ToArray();
+        var serverInstanceId = Guid.NewGuid().ToString("D");
         var requests = 0; var failing = false; var hold = false; TaskCompletionSource? deferred = null;
         monitorTestHandler = () => new SyntheticMonitorHandler(async (_, ct) =>
         {
@@ -40,7 +41,7 @@ public sealed partial class MainWindow
             if (failing) return new HttpResponseMessage(HttpStatusCode.Unauthorized);
             var nodes = new JsonArray();
             foreach (var id in ids) nodes.Add(new JsonObject { ["uuid"] = id, ["online"] = true, ["report_at"] = DateTimeOffset.UtcNow.ToString("O"), ["alerts"] = new JsonObject { ["active"] = 2, ["silenced"] = 1, ["delivery_failed"] = 1 }, ["metrics"] = new JsonObject { ["cpu_percent"] = 12.5, ["memory_used"] = 128L * 1024 * 1024, ["memory_total"] = 1024L * 1024 * 1024, ["upload_per_sec"] = 1024L, ["download_per_sec"] = 2048L, ["upload_total"] = 4096L, ["download_total"] = 8192L } });
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(new JsonObject { ["schema_version"] = 1, ["server_version"] = "0.1.0-rc.1+read-api", ["captured_at"] = DateTimeOffset.UtcNow.ToString("O"), ["nodes"] = nodes }.ToJsonString(), Encoding.UTF8, "application/json") };
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(new JsonObject { ["schema_version"] = 1, ["server_version"] = "0.1.0-rc.7", ["server_instance_id"] = serverInstanceId, ["captured_at"] = DateTimeOffset.UtcNow.ToString("O"), ["nodes"] = nodes }.ToJsonString(), Encoding.UTF8, "application/json") };
         });
         try
         {
@@ -61,6 +62,7 @@ public sealed partial class MainWindow
             await RegressionPress(form, "PrimaryButton");
             Require(activeTestDialog == form && Find<TextBlock>(form).Single(t => t.Tag as string == "Monitor.Validation").Text != "", "无效连接关闭对话框或没有反馈。");
             await RegressionFill(Find<TextBox>(form).Single(t => t.Header as string == "May Monitor HTTPS 地址"), "https://monitor.example/");
+            await RegressionFill(Find<TextBox>(form).Single(t => t.Header as string == "已核验的服务安装 UUID"), serverInstanceId);
             Invoke(Find<Button>(form).Single(b => b.Content as string == "生成新只读令牌"));
             var secret = Find<PasswordBox>(form).Single(p => p.Tag as string == "Monitor.Token"); var token = secret.Password;
             for (var i = 0; i < added.Count; i++) await RegressionFill(Find<TextBox>(form).Single(t => t.Tag as string == "Monitor.Binding." + added[i]), ids[i]);
@@ -104,7 +106,7 @@ public sealed partial class MainWindow
             deferred = new(TaskCreationOptions.RunContinuationsAsynchronously);
             Invoke(Find<Button>(shell).Single(b => b.Content as string == "刷新监测")); await Wait(() => monitorCancellation != null);
             var original = MonitorArchive.Load()!;
-            MonitorArchive.Save(new("https://changed.example/", original.Token, original.Bindings));
+            MonitorArchive.Save(new("https://changed.example/", original.Token, original.Bindings, original.ServerInstanceId));
             deferred.SetResult(); await Wait(() => monitorCancellation == null);
             Require(monitorSnapshot == null && monitorRows?.Children.Count == 0 && monitorMessage.Contains("连接已变化"), "旧来源响应进入了新连接。");
             deferred = null; SelectPage("monitoring");
