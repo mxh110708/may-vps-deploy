@@ -34,8 +34,11 @@ public sealed partial class MainWindow
             dialog.UpdateLayout(); await Task.Delay(150);
             var url=Find<TextBox>(dialog).Single(t=>t.Tag as string=="MayAccess.Url");
             await RegressionPress(dialog,"PrimaryButton"); Require(activeTestDialog==dialog,"缺少计划时进入了执行。");
-            await RegressionFill(url,"https://old.example/"); Invoke(Find<Button>(dialog).Single(b=>b.Content as string=="保存计划与生成指引")); await Task.Delay(100);
-            var planFile=MayMonitorAccess.PlanFile(store,added[0]); Require(!File.Exists(planFile) && Find<TextBlock>(dialog).Single(t=>t.Tag as string=="MayAccess.Validation").Text.Contains("独立主机名"),"允许覆盖旧监控网址。");
+            await RegressionFill(url,"http://may.example/"); Invoke(Find<Button>(dialog).Single(b=>b.Content as string=="保存计划与生成指引")); await Task.Delay(100);
+            var planFile=MayMonitorAccess.PlanFile(store,added[0]); Require(!File.Exists(planFile) && Find<TextBlock>(dialog).Single(t=>t.Tag as string=="MayAccess.Validation").Text.Contains("HTTPS"),"非 HTTPS 接入计划没有被拒绝。");
+            var deploymentFile=SafePath.Resolve(paths.Instance(added[0]),"deployment-plan.json");var deploymentBefore=File.ReadAllBytes(deploymentFile);
+            await RegressionFill(url,"https://old.example/");Invoke(Find<Button>(dialog).Single(b=>b.Content as string=="保存计划与生成指引"));await Task.Delay(100);
+            Require(File.Exists(planFile) && ArchiveStore.ReadJson(planFile).Text("PublicUrl")=="https://old.example/" && File.ReadAllBytes(deploymentFile).SequenceEqual(deploymentBefore) && new TaskHistory(store).Read().Count==history,"保存复用入口计划修改了原部署或启动了远端任务。");
             await RegressionFill(url,"https://may.example/"); Invoke(Find<Button>(dialog).Single(b=>b.Content as string=="保存计划与生成指引")); await Task.Delay(100);
             Require(File.Exists(planFile) && Find<TextBlock>(dialog).Single(t=>t.Tag as string=="MayAccess.Guidance").Text.Contains("http://127.0.0.1:25775"),"未保存本地接入计划或缺少正确服务地址。");
             var saved=File.ReadAllBytes(planFile); await RegressionFill(url,"https://draft.example/");
@@ -48,7 +51,7 @@ public sealed partial class MainWindow
             dialog.UpdateLayout(); await Task.Delay(100); await Capture(SafePath.Resolve(outputDirectory,"may-monitor-access.png"),dialog);
             await RegressionPress(dialog,"CloseButton"); await pending;
             Require(taskCancellation==null && new TaskHistory(store).Read().Count==history,"关闭表单提交了远端任务。");
-            return new(){["entry_without_connection"]=true,["missing_plan_blocked"]=true,["old_hostname_blocked"]=true,["local_plan_and_guide"]=true,["scope_change_keeps_edit"]=true,["saved_guide_persists"]=true,["installed_agents_only"]=true,["missing_connection_blocked"]=true,["unsaved_edit_no_write"]=true,["close_no_remote_task"]=true,["production_connections"]=0};
+            return new(){["entry_without_connection"]=true,["missing_plan_blocked"]=true,["non_https_blocked"]=true,["reuse_plan_keeps_existing_deployment"]=true,["local_plan_and_guide"]=true,["scope_change_keeps_edit"]=true,["saved_guide_persists"]=true,["installed_agents_only"]=true,["missing_connection_blocked"]=true,["unsaved_edit_no_write"]=true,["close_no_remote_task"]=true,["production_connections"]=0};
         }
         finally
         {

@@ -6,7 +6,7 @@
 
 ## 当前基线
 
-上一公开基线为 Deploy v0.9.36、Server RC3、Agent／Web RC1。本轮发行集合为 Deploy v0.9.37、Server v0.1.0-rc.7、Agent v0.1.0-rc.4、Web v0.1.0-rc.3、May Status v2.2.2-may.16；监控组件继续明确标记为候选版。基础能力包括：
+上一公开基线为 Deploy v0.9.36、Server RC3、Agent／Web RC1。本轮发行集合为 Deploy v0.9.37、Server v0.1.0-rc.8、Agent v0.1.0-rc.4、Web v0.1.0-rc.4、May Status v2.2.2-may.17；监控组件继续明确标记为候选版。基础能力包括：
 
 - M1：专用只读指标、实例绑定、Deploy 监测页、范围／有效期和失效保护。
 - M2：独立 Server／Agent 的固定版本部署、升级、备份、恢复、启停和确认丢失核对。

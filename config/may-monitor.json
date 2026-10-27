@@ -1,11 +1,11 @@
 {
   "SchemaVersion": 1,
   "Server": {
-    "Version": "0.1.0-rc.7",
+    "Version": "0.1.0-rc.8",
     "Name": "may-monitor-server-linux-amd64.tar.gz",
-    "Bytes": 15670397,
-    "Sha256": "26dc4acee2fb28258e7a869da85021ed620aeccea295455af39ac64a6826cf40",
-    "Url": "https://github.com/mxh110708/may-monitor-server/releases/download/v0.1.0-rc.7/may-monitor-server-linux-amd64.tar.gz"
+    "Bytes": 16335803,
+    "Sha256": "dc4609ead5469c6e7487a3b31b9c1132f95a9188fbe5f5211afdd560f31458e5",
+    "Url": "https://github.com/mxh110708/may-monitor-server/releases/download/v0.1.0-rc.8/may-monitor-server-linux-amd64.tar.gz"
   },
   "Agent": {
     "Version": "0.1.0-rc.4",
