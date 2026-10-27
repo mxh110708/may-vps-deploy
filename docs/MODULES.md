@@ -1,5 +1,8 @@
 # May VPS Deploy 模块与内部结构
 
+> 文档定位：保留的 PowerShell CLI／模块技术参考，不是当前 WinUI 桌面导航。桌面操作见[使用手册](USER-GUIDE.zh-CN.md)。
+
+
 本文面向维护脚本的人。普通使用者应先阅读 [中文完整使用手册](USER-GUIDE.zh-CN.md)。
 
 ## 原生应用边界

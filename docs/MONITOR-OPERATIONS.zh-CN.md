@@ -2,7 +2,7 @@
 
 适用范围：Windows 上的 May VPS Deploy 控制端、Debian 12／13 amd64 的独立 May Server／Agent，以及经过审查的 May Status 静态主题。仅交叉编译的平台不等于完成运行验收。本手册使用占位符；真实地址、端口、UUID 和凭据只保存于私人归档。
 
-当前正式版本与交接见[首阶段收尾](MONITOR-CLOSEOUT-2026-10-27.zh-CN.md)，早期实施状态与资产见 [M8／M9 实施记录](MONITOR-M8-M9-2026-10-26.zh-CN.md)，功能与验收边界见 [M4／M5](MONITOR-M4-M5-2026-10-25.zh-CN.md) 和 [M6／M7](MONITOR-M6-M7-2026-10-26.zh-CN.md)。在正式候选发布及配套 Deploy 安装前，旧桌面可能尚无文中新增动作，不能据此直接拼接远端命令绕过归属检查。
+当前正式版本与交接见[首阶段收尾](MONITOR-CLOSEOUT-2026-10-27.zh-CN.md)，早期实施状态与资产见 [M8／M9 实施记录](MONITOR-M8-M9-2026-10-26.zh-CN.md)，功能与验收边界见 [M4／M5](MONITOR-M4-M5-2026-10-25.zh-CN.md) 和 [M6／M7](MONITOR-M6-M7-2026-10-26.zh-CN.md)。当前基线为 Deploy 0.9.38、Server／Agent／Web 0.1.0、May Status 2.2.2-may.17；更旧桌面可能没有相应动作，不能拼接远端命令绕过归属检查。
 
 ## 先辨认组件与归属
 
@@ -52,10 +52,10 @@ Deploy 使用限定节点、带到期时间的集成只读令牌，不保存管�
 
 ## 启用和更新受审主题
 
-主题说明见独立仓库 `docs/MAY-MONITOR-2026-10-26.zh-CN.md`。只使用已审阅来源和核对摘要的 ZIP：
+主题当前说明见[May Status 使用教程](https://github.com/mxh110708/may-monitor-theme-status/blob/main/docs/USER-GUIDE.zh-CN.md)。以下脚本属于主题仓库，须与同提交的 Python 辅助脚本一起使用，不能在 Server 仓库照抄路径。只使用已审阅来源和核对摘要的 ZIP：
 
-```text
-sudo bash scripts/install-may-theme-update.sh <package.zip> <package-sha256>
+```bash
+sudo bash scripts/install-may-theme-update.sh '<package.zip>' '<package-sha256>'
 ```
 
 这一步只暂存不可覆盖的静态资源并输出锁摘要，不启停服务。文件位于固定的 `/usr/local/share/may-monitor/themes/<lock-sha256>`，root 归属，普通服务账户不可写。
@@ -70,9 +70,9 @@ sudo bash scripts/install-may-theme-update.sh <package.zip> <package-sha256>
 
 新告警默认关闭。按节点、地区和实际探测协议选择阈值、确认次数、恢复条件、窗口、冷却和静默；目标改变后旧样本不得混入新窗口。缺失、过期、无权限和无效值显示未知，不计成健康或真实丢包。
 
-通知可选择不发送、本地 HTTP 或邮件。本地 HTTP 仍仅接受字面回环地址；邮件使用私密 SMTP 配置、加密连接和固定事件重试。用户本次明确暂不配置真实发信，因此邮件不会外发；配置及收信验收见[邮件手册](https://github.com/mxh110708/may-monitor-server/blob/main/docs/EMAIL.zh-CN.md)。
+通知可选择不发送、本地 HTTP 或邮件。本地 HTTP 仍仅接受字面回环地址；邮件使用私密 SMTP 配置、加密连接和固定事件重试。默认未配置 SMTP 或未启用渠道时不会外发；配置就绪不等于已经收到真实邮件，配置及收信验收见[邮件手册](https://github.com/mxh110708/may-monitor-server/blob/main/docs/EMAIL.zh-CN.md)。
 
-独立 watchdog 是另一进程，可运行在另一台受管主机。用专用只读令牌核对 Server UUID、响应时间和新鲜度，先证明健康，再累计失联；鉴权、TLS 和身份错误各自记录。同机检查无法覆盖整台宿主机故障。已在与 Server 不同的受管主机部署，限定资源并核对真实 HTTPS、故障／恢复夹具与状态互斥；具体范围和续期见[独立检查手册](MONITOR-WATCHDOG.zh-CN.md)。
+独立 watchdog 是另一进程，可运行在另一台受管主机。用专用只读令牌核对 Server UUID、响应时间和新鲜度，先证明健康，再累计失联；鉴权、TLS 和身份错误各自记录。同机检查无法覆盖整台宿主机故障。正式部署应选择与 Server 不同的主机、限定资源，并核对真实 HTTPS、故障／恢复及状态互斥；具体范围和续期见[独立检查手册](MONITOR-WATCHDOG.zh-CN.md)。
 
 ## 数据保留和容量
 

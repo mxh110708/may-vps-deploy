@@ -1,5 +1,8 @@
 # 方案工作台与事务恢复
 
+> 文档定位：包含 WinUI 策略与保留 CLI 的实现沿革。当前桌面顺序见[配置与线路](CLIENT-AND-LINES.zh-CN.md)，恢复入口及范围见[维护手册](MAINTENANCE.zh-CN.md)；下文旧菜单／Komari 恢复说明不替代 May Monitor 独立生命周期。
+
+
 ## WinUI 配置设计的当前策略
 
 原生应用在“配置设计”的“连接与分组 → 业务分组 → 设置”选择各业务出口。Google Services 位于 Academic Research 之后、Microsoft Services 之前；普通谷歌服务和 YouTube 使用此组，Gemini 与已归类的 Google AI 后端仍使用 AI Services。地区入口、链式落地、Default Exit 和 Direct Route 都可作为业务出口。

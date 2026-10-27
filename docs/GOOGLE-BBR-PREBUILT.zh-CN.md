@@ -1,6 +1,6 @@
 # Google BBR v3 预编译包维护
 
-固定版在维护者的 Linux 构建机统一编译，完整 Debian amd64 镜像随应用源码和安装包提供。用户 VPS 只接收、校验、安装和重启验收，不下载完整内核源码或安装编译工具。Windows 维护者可使用 WSL2 中的 Debian 构建环境；BERO 也可作为构建机。生成的是 MXH 从官方源码构建的内核，不是 Google 发布的官方二进制。
+固定版在维护者的 Linux 构建机统一编译，完整 Debian amd64 镜像随应用源码和安装包提供。用户 VPS 只接收、校验、安装和重启验收，不下载完整内核源码或安装编译工具。Windows 维护者可使用 WSL2 中的 Debian 构建环境；BERO 也可作为构建机。生成的是 May 项目从官方源码构建的内核，不是 Google 发布的官方二进制。
 
 ## 构建输入与隔离
 
@@ -16,8 +16,8 @@
 
 ```bash
 sudo python3 scripts/build-kernel-prebuilt.py start --config /boot/config-$(uname -r)
-sudo python3 scripts/build-kernel-prebuilt.py status --id <返回的构建ID>
-sudo python3 scripts/build-kernel-prebuilt.py export --id <构建ID> --output <尚不存在的导出目录>
+sudo python3 scripts/build-kernel-prebuilt.py status --id '<返回的构建ID>'
+sudo python3 scripts/build-kernel-prebuilt.py export --id '<构建ID>' --output '<尚不存在的导出目录>'
 ```
 
 启动之后只读取状态，不重复执行 start。导出校验源码、配置、Debian 包身份和产物摘要，并确认宿主运行内核与启动身份未变化。导出失败不覆盖已有目录。
