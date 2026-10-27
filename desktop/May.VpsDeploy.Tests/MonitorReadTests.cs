@@ -14,9 +14,11 @@ internal sealed partial class BoundaryTests
         Console.WriteLine($"PASS: {assertions} read-only monitoring, encrypted archive, response boundary, cancellation and loopback assertions; no production connections.");
     }
 
+    private static readonly string MonitorTestOrigin = Guid.NewGuid().ToString("D");
+
     private static JsonObject MonitorSample(string id, DateTimeOffset? now = null) => new()
     {
-        ["schema_version"] = 1, ["server_version"] = "0.1.0-rc.1+read-api", ["captured_at"] = (now ?? DateTimeOffset.UtcNow).ToString("O"),
+        ["server_instance_id"] = MonitorTestOrigin, ["schema_version"] = 1, ["server_version"] = "0.1.0-rc.1+read-api", ["captured_at"] = (now ?? DateTimeOffset.UtcNow).ToString("O"),
         ["nodes"] = new JsonArray(new JsonObject
         {
             ["uuid"] = id, ["online"] = true, ["report_at"] = (now ?? DateTimeOffset.UtcNow).ToString("O"),
@@ -30,16 +32,20 @@ internal sealed partial class BoundaryTests
         var id = Guid.NewGuid().ToString("D");
         var token = MonitorReadConnection.NewToken();
         var bindings = new Dictionary<string, string> { [relative] = id };
-        var connection = new MonitorReadConnection("https://monitor.example/prefix", token, bindings);
+        var connection = new MonitorReadConnection("https://monitor.example/prefix", token, bindings, MonitorTestOrigin);
         Check(connection.Endpoint.AbsoluteUri == "https://monitor.example/prefix/", "base prefix was lost");
         Check(!connection.ToString().Contains(token), "connection display leaked credential");
-        Refuses(() => new MonitorReadConnection("https://monitor.example/", "synthetic-admin-key", bindings), "admin key accepted for monitoring");
+        Refuses(() => new MonitorReadConnection("https://monitor.example/", "synthetic-admin-key", bindings, MonitorTestOrigin), "admin key accepted for monitoring");
         foreach (var endpoint in new[] { "http://monitor.example/", "https://user:pass@monitor.example/", "https://monitor.example/?token=secret", "https://monitor.example/#secret", "file:///tmp", "https://monitor.example/%2fprivate" })
-            Refuses(() => new MonitorReadConnection(endpoint, token, bindings), "unsafe endpoint accepted");
-        foreach (var endpoint in new[] { "http://127.0.0.1:12345/", "http://[::1]:12345/" }) Check(new MonitorReadConnection(endpoint, token, bindings).Endpoint.IsLoopback, "loopback test endpoint rejected");
-        Refuses(() => new MonitorReadConnection(connection.Endpoint.AbsoluteUri, token, new Dictionary<string, string>()), "unscoped connection accepted");
-        Refuses(() => new MonitorReadConnection(connection.Endpoint.AbsoluteUri, token, new Dictionary<string, string> { [relative] = id, ["Example/Other/May-VPS-Deploy"] = id }), "ambiguous duplicate binding accepted");
-        Refuses(() => new MonitorReadConnection(connection.Endpoint.AbsoluteUri, token, new Dictionary<string, string> { ["../escape"] = id }), "binding path escaped");
+            Refuses(() => new MonitorReadConnection(endpoint, token, bindings, MonitorTestOrigin), "unsafe endpoint accepted");
+        foreach (var endpoint in new[] { "http://127.0.0.1:12345/", "http://[::1]:12345/" }) Check(new MonitorReadConnection(endpoint, token, bindings, MonitorTestOrigin).Endpoint.IsLoopback, "loopback test endpoint rejected");
+        Refuses(() => new MonitorReadConnection(connection.Endpoint.AbsoluteUri, token, new Dictionary<string, string>(), MonitorTestOrigin), "unscoped connection accepted");
+        Refuses(() => new MonitorReadConnection(connection.Endpoint.AbsoluteUri, token, new Dictionary<string, string> { [relative] = id, ["Example/Other/May-VPS-Deploy"] = id }, MonitorTestOrigin), "ambiguous duplicate binding accepted");
+        Refuses(() => new MonitorReadConnection(connection.Endpoint.AbsoluteUri, token, new Dictionary<string, string> { ["../escape"] = id }, MonitorTestOrigin), "binding path escaped");
+        foreach (var invalidOrigin in new[] { "", Guid.Empty.ToString("D"), "not-an-installation-id" })
+            Refuses(() => new MonitorReadConnection(connection.Endpoint.AbsoluteUri, token, bindings, invalidOrigin), "unpinned connection accepted");
+        var unpinnedArchive = connection.ToJson(); unpinnedArchive.Remove("ServerInstanceId");
+        Refuses(() => MonitorReadConnection.FromJson(unpinnedArchive), "unpinned archived connection accepted");
         var archive = new MonitorReadArchive(f.Store);
         Check(archive.Load() == null, "missing connection became configured"); archive.Save(connection);
         var file = f.Paths.Resolve("private/monitor-read.private.json");
@@ -60,7 +66,7 @@ internal sealed partial class BoundaryTests
         Check(Parse(withAlerts).CredentialExpiresAt == now.AddDays(2), "credential expiry was not surfaced");
         withAlerts["nodes"]![0]!["alerts"]!["silenced"] = 3;
         Refuses(() => Parse(withAlerts), "impossible alert counts accepted");
-        var origin = Guid.NewGuid().ToString("D");
+        var origin = MonitorTestOrigin;
         var pinned = new MonitorReadConnection(connection.Endpoint.AbsoluteUri, token, bindings, origin);
         Check(MonitorReadConnection.FromJson(pinned.ToJson()).ServerInstanceId == origin, "server identity did not round trip");
         Check(node.Status(now, now, false) == "在线" && node.Metrics?.CpuPercent == 12.5, "valid snapshot lost values");
@@ -96,7 +102,8 @@ internal sealed partial class BoundaryTests
             try { await client.FetchAsync(connection, default); throw new Exception("invalid response accepted"); }
             catch (OperationException safe) { Check(!safe.Message.Contains(token) && !safe.Message.Contains("synthetic-server-secret"), "server error leaked secret"); }
         }
-        using (var client = new MonitorReadClient(new MonitorHandler((_, _) => Task.FromResult(MonitorResponse(sample)))))
+        var missingOrigin = sample.DeepClone().AsObject(); missingOrigin.Remove("server_instance_id");
+        using (var client = new MonitorReadClient(new MonitorHandler((_, _) => Task.FromResult(MonitorResponse(missingOrigin)))))
         {
             try { await client.FetchAsync(pinned, default); throw new Exception("missing origin accepted"); }
             catch (OperationException safe) { Check(safe.Code == "MonitorIdentityMismatch", "identity failure lacks actionable status"); }
@@ -161,7 +168,7 @@ internal sealed partial class BoundaryTests
             }
         }, timeout.Token);
         using var client = new MonitorReadClient();
-        var loopback = new MonitorReadConnection($"http://127.0.0.1:{endpoint.Port}/", connection.Token, bindings);
+        var loopback = new MonitorReadConnection($"http://127.0.0.1:{endpoint.Port}/", connection.Token, bindings, MonitorTestOrigin);
         Check((await client.FetchAsync(loopback, timeout.Token)).Nodes.Count == 1, "real loopback response failed");
         await RefusesAsync(() => client.FetchAsync(loopback, timeout.Token), "real HTTP redirect followed");
         await server; Check(!redirected.Pending(), "redirect destination received a connection");

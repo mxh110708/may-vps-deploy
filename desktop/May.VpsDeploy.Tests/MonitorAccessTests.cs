@@ -20,7 +20,7 @@ internal sealed partial class BoundaryTests
         var agent = new JsonObject { ["Installed"] = true, ["Active"] = true, ["Hash"] = new string('b',64), ["Configuration"] = new JsonObject { ["Endpoint"] = "https://may.example/", ["ClientUUID"] = nodeId } };
         var state = ArchiveStore.ReadJson(serverFile); state["MayMonitorServer"] = server; state["KomariSentinel"] = "retained"; ArchiveStore.WriteJson(serverFile,state);
         state = ArchiveStore.ReadJson(nodeFile); state["MayMonitorAgent"] = agent; state["KomariSentinel"] = "retained"; ArchiveStore.WriteJson(nodeFile,state);
-        var connection = new MonitorReadConnection("https://may.example/",MonitorReadConnection.NewToken(), new Dictionary<string,string> { [nodeRelative] = nodeId });
+        var connection = new MonitorReadConnection("https://may.example/",MonitorReadConnection.NewToken(), new Dictionary<string,string> { [nodeRelative] = nodeId }, origin);
         var source = new MonitorReadArchive(f.Store); source.Save(connection);
         foreach (var value in new[] { "http://may.example/", "https://may.example/path", "https://user:pass@may.example/", "https://may.example/?token=x", "https://127.0.0.1/" }) Refuses(() => MayMonitorAccess.SavePlan(f.Store,serverRelative,value),"unsafe publication plan accepted");
         var legacyPlan = f.Plan("Legacy-monitor"); legacyPlan.Put("Cloudflared.PublicUrl",JsonValue.Create("https://old.example/")); f.SaveInstance(legacyPlan);
@@ -36,7 +36,7 @@ internal sealed partial class BoundaryTests
         {
             reads++; Check(value.Identity == connection.Identity,"probe changed scoped source");
             if (mode == "network-failure") throw new OperationException("synthetic safe network failure");
-            if (mode == "source-change") source.Save(new("https://changed.example/",connection.Token,connection.Bindings));
+            if (mode == "source-change") source.Save(new("https://changed.example/",connection.Token,connection.Bindings,origin));
             if (mode == "cancel") userCancel!.Cancel();
             var now = DateTimeOffset.UtcNow;
             var at = mode == "stalled" ? first : mode == "stale" ? now.AddMinutes(-2) : now;

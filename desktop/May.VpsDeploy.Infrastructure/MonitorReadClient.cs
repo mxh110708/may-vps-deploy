@@ -65,7 +65,7 @@ public sealed class MonitorReadClient : IDisposable, IMonitorReadProbe
                 buffer.Write(chunk, 0, count);
             }
             var snapshot = MonitorReadSnapshot.Parse(buffer.ToArray(), DateTimeOffset.UtcNow);
-            if (connection.ServerInstanceId is { } expected && snapshot.ServerInstanceId != expected)
+            if (snapshot.ServerInstanceId != connection.ServerInstanceId)
                 throw new OperationException("监控服务安装身份不匹配；已拒绝此次快照，请核对接入地址与保存的安装 UUID。", code: "MonitorIdentityMismatch");
             return snapshot;
         }

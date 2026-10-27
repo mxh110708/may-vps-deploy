@@ -48,9 +48,9 @@ internal sealed partial class BoundaryTests
                 return handler;
             }
             var bindings=new Dictionary<string,string>{[relative]=node};
-            using(var client=new MonitorReadClient(Handler(true))) {var snapshot=await client.FetchAsync(new("https://may.example/",token,bindings),default);Check(snapshot.ServerInstanceId==origin&&snapshot.Nodes.ContainsKey(node),"real TLS snapshot lost authenticated origin");}
-            using(var client=new MonitorReadClient(Handler(true)))await RefusesAsync(()=>client.FetchAsync(new("https://wrong.example/",token,bindings),default),"TLS hostname mismatch accepted");
-            using(var client=new MonitorReadClient(Handler(false)))await RefusesAsync(()=>client.FetchAsync(new("https://may.example/",token,bindings),default),"untrusted TLS issuer accepted");
+            using(var client=new MonitorReadClient(Handler(true))) {var snapshot=await client.FetchAsync(new("https://may.example/",token,bindings,origin),default);Check(snapshot.ServerInstanceId==origin&&snapshot.Nodes.ContainsKey(node),"real TLS snapshot lost authenticated origin");}
+            using(var client=new MonitorReadClient(Handler(true)))await RefusesAsync(()=>client.FetchAsync(new("https://wrong.example/",token,bindings,origin),default),"TLS hostname mismatch accepted");
+            using(var client=new MonitorReadClient(Handler(false)))await RefusesAsync(()=>client.FetchAsync(new("https://may.example/",token,bindings,origin),default),"untrusted TLS issuer accepted");
             Check(ArchiveStore.ReadJson(hits).Number("Requests")==1,"credentials sent after TLS validation failed");
         }
         finally {if(!process.HasExited)process.Kill(true);await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));await errors;}

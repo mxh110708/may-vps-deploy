@@ -19,7 +19,7 @@ public static class MayMonitorAccess
     {
         OperationPolicy.Validate(new(OperationKind.HealthAudit, relative, new()));
         var endpoint = NormalizeUrl(publicUrl); var state = State(store, relative); var server = state["MayMonitorServer"];
-        if (server == null || !server.Flag("Installed") || server.Number("Configuration.Port") is < 1024 or > 65535) throw new OperationException("先安装并核对这台 May 服务端，再保存接入计划。");
+        if (server == null || !server.Flag("Installed") || server.Number("Configuration.Port") is < 1024 or > 65535 || !CanonicalId(server.Text("Configuration.InstanceId"))) throw new OperationException("先安装并核对这台 May 服务端及安装身份，再保存接入计划。");
         // Saving a local plan does not switch an origin. An operator may reuse
         // an existing HTTPS entry during a deliberate replacement; the later
         // SSH/HTTPS identity comparison still has to confirm this May server.
@@ -33,7 +33,7 @@ public static class MayMonitorAccess
         var file = PlanFile(store, relative);
         if (!File.Exists(file)) throw new OperationException("先保存 May HTTPS 接入计划。");
         var plan = ArchiveStore.ReadJson(file);
-        if (plan.Count != 5 || plan.Number("SchemaVersion") != 1 || plan.Text("ServerInstance") != relative || NormalizeUrl(plan.Text("PublicUrl")) != plan.Text("PublicUrl") || plan.Number("Port") is < 1024 or > 65535 || plan.Text("ServerInstanceId") != "" && !CanonicalId(plan.Text("ServerInstanceId"))) throw new OperationException("May 接入计划无效，请重新核对目标实例和网址。");
+        if (plan.Count != 5 || plan.Number("SchemaVersion") != 1 || plan.Text("ServerInstance") != relative || NormalizeUrl(plan.Text("PublicUrl")) != plan.Text("PublicUrl") || plan.Number("Port") is < 1024 or > 65535 || !CanonicalId(plan.Text("ServerInstanceId"))) throw new OperationException("May 接入计划无效，请重新核对目标实例和网址。");
         return plan;
     }
     public static void Validate(OperationRequest request)

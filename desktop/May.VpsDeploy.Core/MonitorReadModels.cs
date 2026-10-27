@@ -15,14 +15,14 @@ public sealed class MonitorReadConnection
     public string Token { get; }
     public IReadOnlyDictionary<string, string> Bindings { get; }
     public string Identity { get; }
-    public string? ServerInstanceId { get; }
+    public string ServerInstanceId { get; }
 
-    public MonitorReadConnection(string endpoint, string token, IReadOnlyDictionary<string, string> bindings, string? serverInstanceId = null)
+    public MonitorReadConnection(string endpoint, string token, IReadOnlyDictionary<string, string> bindings, string serverInstanceId)
     {
         Endpoint = ValidateEndpoint(endpoint);
-        if (!string.IsNullOrEmpty(serverInstanceId) && (!Guid.TryParseExact(serverInstanceId, "D", out var origin) || origin == Guid.Empty || origin.ToString("D") != serverInstanceId))
+        if (!Guid.TryParseExact(serverInstanceId, "D", out var origin) || origin == Guid.Empty || origin.ToString("D") != serverInstanceId)
             throw new OperationException("监控服务身份须为有效的安装 UUID。");
-        ServerInstanceId = string.IsNullOrEmpty(serverInstanceId) ? null : serverInstanceId;
+        ServerInstanceId = serverInstanceId;
         if (!Regex.IsMatch(token, @"^may_read_[A-Za-z0-9_-]{43}$", RegexOptions.CultureInvariant))
             throw new OperationException("请使用 May Monitor 专用只读令牌，不能使用管理员 API Key 或 Agent Token。");
         var encoded = token[9..];

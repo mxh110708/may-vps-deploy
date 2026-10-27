@@ -99,7 +99,6 @@ public sealed partial class MainWindow
         page.Children.Add(Card(Column(Trailing(Text(connection.Endpoint.AbsoluteUri, 13, true), Row(Action("打开 May Web", async () => { await global::Windows.System.Launcher.LaunchUriAsync(connection.Endpoint); }), Action("修改只读连接", EditMonitorConnection), Action("移除本机连接", RemoveMonitorConnection))),
             Fields(Row(polling, Text("此页可见时每 30 秒刷新", 13)), Row(Action("刷新监测", RefreshMonitoring, true), cancelRead)),
             monitorStatus, Text("切换页面、最小化或关闭到托盘会暂停读取。离开后重新打开本页，自动刷新默认关闭。", 12, true))));
-        if (connection.ServerInstanceId == null) page.Children.Add(Text("未固定监控服务安装身份；可在修改只读连接中填写已核验的安装 UUID。打开 Web 只携带网址，需单独登录。", 12, true));
         monitorRows = new StackPanel { Spacing = 16 }; monitorRows.Tag = "Monitor.Rows"; page.Children.Add(monitorRows);
         RenderMonitorRows(connection);
         UpdateMonitorVisibility();
@@ -197,7 +196,7 @@ public sealed partial class MainWindow
         var model = new JsonObject { ["Endpoint"] = previous?.Endpoint.AbsoluteUri ?? "", ["ServerInstanceId"] = previous?.ServerInstanceId ?? "" };
         var password = SecretField("专用只读令牌", previous?.Token ?? ""); password.Tag = "Monitor.Token";
         var bindings = new List<(string Relative, JsonObject Value)>();
-        var panel = Column(Field("May Monitor HTTPS 地址", model, "Endpoint"), Field("已核验的服务安装 UUID（可选）", model, "ServerInstanceId"), password,
+        var panel = Column(Field("May Monitor HTTPS 地址", model, "Endpoint"), Field("已核验的服务安装 UUID", model, "ServerInstanceId"), password,
             Action("生成新只读令牌", () => { password.Password = MonitorReadConnection.NewToken(); return Task.CompletedTask; }),
             Text("逐项填写服务端已有节点的 UUID。留空的实例不接入监测；相同名称或 IP 不会自动绑定。", 13, true));
         foreach (var instance in store.ListInstances())
