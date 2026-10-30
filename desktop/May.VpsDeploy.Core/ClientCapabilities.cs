@@ -12,13 +12,21 @@ public static class ClientCapabilities
             foreach (var client in ClientSchemes.Formats(effective))
             {
                 var clash = client == "Clash"; var config = node[clash ? "clash" : "sing_box"] as JsonObject;
+                if (VlessXhttp.IsNode(node))
+                {
+                    if (config == null) { rows.Add(new(node.Text("name"), client, "VLESS / XHTTP", false, "缺少此客户端的完整原生配置；请重新读取来源，或仅选择可等价表达的客户端。")); continue; }
+                    try { if(clash) _=VlessXhttp.RequireClash(node);else _=VlessXhttp.RequireNative(node); rows.Add(new(node.Text("name"),client,"VLESS / XHTTP",true,clash?"Mihomo 原生参数；需固定核心实际连接验收。":"需要配套 May Core 的 XHTTP 扩展；上游 sing-box 不支持此配置。")); }
+                    catch(OperationException ex) {rows.Add(new(node.Text("name"),client,"VLESS / XHTTP",false,ex.Message));}
+                    continue;
+                }
                 if (config == null) { rows.Add(new(node.Text("name"), client, "缺少参数", false, "缺少此客户端的原生配置；不会从另一客户端猜测转换或静默省略节点。")); continue; }
                 var protocol = config.Text("type"); var valid = protocol != "" && config.Text(clash ? "name" : "tag") == node.Text("name") && config.Text("server") != "" && config.Number(clash ? "port" : "server_port") is >= 1 and <= 65535;
                 var tls = clash ? config.Flag("tls") || protocol is "anytls" or "trojan" or "hysteria2" or "tuic" : config.Flag("tls.enabled");
                 var reality = clash ? config["reality-opts"] != null : config.Flag("tls.reality.enabled");
                 var ech = clash ? config.Flag("ech-opts.enable") : config.Flag("tls.ech.enabled");
                 var udp = clash && config["udp"] != null ? config.Flag("udp") ? "UDP 显式开启" : "UDP 显式关闭" : "UDP 沿用协议及核心默认值";
-                rows.Add(new(node.Text("name"), client, protocol, valid, (valid ? "原生参数保留；待固定核心校验" : "服务器、端口或节点标识不完整") + " · " + (reality ? "Reality" : tls ? "TLS" : "未启用独立 TLS") + (ech ? " + ECH" : "") + " · " + udp + (node.Text("kind") == "landing" ? " · 客户端链式 " + (clash ? "dialer-proxy" : "detour") : "")));
+                var transport = config.Text(clash ? "network" : "transport.type");
+                rows.Add(new(node.Text("name"), client, protocol, valid, (valid ? "原生参数保留；待固定核心校验" : "服务器、端口或节点标识不完整") + (transport is "ws" or "grpc" or "xhttp" ? " · 传输 " + transport : "") + " · " + (reality ? "Reality" : tls ? "TLS" : "未启用独立 TLS") + (ech ? " + ECH" : "") + " · " + udp + (node.Text("kind") == "landing" ? " · 客户端链式 " + (clash ? "dialer-proxy" : "detour") : "")));
             }
         return rows;
     }

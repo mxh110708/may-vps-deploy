@@ -1,7 +1,8 @@
 """Bounded loopback fixture channel across the Windows/WSL boundary.
 
-Datagrams retain Hysteria2's real QUIC/TLS/authentication. Only the host-side
-fixture hop is framed over TCP; the guest still receives actual UDP packets.
+Datagrams retain the original proxy encryption and authentication, including
+QUIC and SS2022. Only the host-side fixture hop is framed over TCP; the guest
+still receives actual UDP packets.
 No production endpoints, host routing rules or firewall changes are accepted.
 """
 import hmac

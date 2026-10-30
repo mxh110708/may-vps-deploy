@@ -42,6 +42,11 @@ public static class UdpForwarding
                         !Regex.IsMatch(validation.Text("SchemeId"), "^[a-f0-9]{32}$") || !Regex.IsMatch(validation.Text("NodeId"), "^[a-f0-9]{32}$") || !Regex.IsMatch(validation.Text("NodeFingerprint"), "^[a-f0-9]{64}$")) throw new OperationException("请重新选择 UDP 代理来源并核对出口 DNS 地址及端口。");
                 }
             }
+            else if (validation.Text("Type") == "TcpChain")
+            {
+                if (validation.Count != 3 || validation.Any(p => p.Key is not ("Type" or "ChainId" or "FrontInstance"))) throw new OperationException("UDP 线路引用无效。");
+                _ = TcpChains.Id(validation.Text("ChainId")); OperationPolicy.Validate(new(OperationKind.HealthAudit, validation.Text("FrontInstance"), new()));
+            }
             else if (validation.Text("Type") != "Echo" || validation.Count != 1) throw new OperationException("UDP 验收支持 DNS、原样回显或 Shadowsocks／SS2022；目标须提供所选服务。");
             if (!extras.TryAdd(rule.Text("Id"), new JsonObject { ["SessionTimeoutSeconds"] = rule["SessionTimeoutSeconds"]!.DeepClone(), ["MaximumSessions"] = rule["MaximumSessions"]!.DeepClone(), ["Validation"] = validation.DeepClone() })) throw new OperationException("UDP 规则身份重复。");
             rule.Remove("SessionTimeoutSeconds"); rule.Remove("MaximumSessions"); rule["Validation"] = new JsonObject { ["Type"] = "Ssh" };
@@ -93,15 +98,11 @@ public static class UdpForwarding
         if (expected == "Absent" && action != "Apply") throw new OperationException("此实例尚未配置受管 UDP 转发。");
         var config = Normalize(request.Options["Configuration"]!.AsObject());
         if (action == "Check" && ArchiveStore.Fingerprint(config) != ArchiveStore.Fingerprint(plan["UdpForwarding"] ?? Empty())) throw new OperationException("只读检查只能核对已保存的 UDP 转发配置。");
-        var ports = Rules(config).Select(r => r.Number("ListenPort")).ToHashSet();
+        if (Rules(config).Any(r => r.Text("Validation.Type") == "TcpChain")) throw new OperationException("跨实例 UDP 规则只能由跨实例编排统一管理。");
+        ValidateCandidate(plan, config);
         foreach (var rule in Rules(config))
         {
-            if (InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").Any(i => i.Number("Listener.Port") == rule.Number("ListenPort"))) throw new OperationException("UDP 转发与已保留的独立入站端口冲突。");
             if (rule.Flag("Enabled") && rule.Text("Validation.Type") == "Shadowsocks") _ = ProxyNode(store, rule, request.InstanceRelativePath);
-            if (plan.Flag("ProtocolInventory.ShadowsocksLanding.Installed", DeploymentPlans.Uses(plan, "ShadowsocksLanding")) && rule.Number("ListenPort") == plan.Number("Ports.LandingShadowsocks")) throw new OperationException("UDP 转发与已安装 Shadowsocks 的 UDP 端口冲突。");
-            _ = TcpForwarding.ProbeAddresses(plan, rule);
-            var target = IPAddress.Parse(rule.Text("TargetAddress"));
-            if (ports.Contains(rule.Number("TargetPort")) && (IPAddress.IsLoopback(target) || new[] { plan.Text("Server.IPv4"), plan.Text("Server.IPv6") }.Contains(target.ToString()))) throw new OperationException("UDP 目标指向本组件监听，可能形成环路。");
         }
         var summary = action == "Remove" ? "移除全部受管 UDP 转发、独立白名单和相关 UDP 端口放行。" : action == "Check" ? "只读核对已保存配置、UDP 监听、白名单及实际往返响应。" : string.Join("\n", Rules(config).Select(r => r.Text("Name") + " · " + (r.Flag("Enabled") ? "启用" : "停用") + " · " + r.Text("ListenFamily") + ":" + r.Number("ListenPort") + " → " + new IPEndPoint(IPAddress.Parse(r.Text("TargetAddress")), r.Number("TargetPort")) + "\n允许来源：" + string.Join("，", r.Strings("AllowedSources")) + "；会话超时 " + r.Number("SessionTimeoutSeconds") + " 秒，上限 " + r.Number("MaximumSessions") + "；验收 " + r.Text("Validation.Type")));
         summary += "\n\n仅 UDP；各来源 IP／端口独立会话，不传递原客户端 IP。超时回收会话，达到上限丢弃新会话数据报，保留已有会话；无会话 60 秒后工作进程退出，监听仍可用。";
@@ -110,6 +111,18 @@ public static class UdpForwarding
         if (action != "Check") summary += "\n保存会重启当前 UDP 转发并清空原会话，可能丢包；目标变化不复用旧会话。不改 TCP 转发、代理、SSH 或监控。" + (plan.Text("Firewall.Mode") == "PreserveExisting" ? "保留既有防火墙，UDP 端口须事先放行。" : "同步受管防火墙 UDP 端口。") + "失败或取消恢复本组件及本次防火墙范围。";
         return new(config, expected, summary);
     }
+    public static void ValidateCandidate(JsonObject plan, JsonObject config)
+    {
+        var ports = Rules(config).Select(r => r.Number("ListenPort")).ToHashSet();
+        foreach (var rule in Rules(config))
+        {
+            if (InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").SelectMany(Hysteria2Ports.ListenerPorts).Contains(rule.Number("ListenPort"))) throw new OperationException("UDP 转发与已保留的独立入站或跳跃端口冲突。");
+            if (plan.Flag("ProtocolInventory.ShadowsocksLanding.Installed", DeploymentPlans.Uses(plan, "ShadowsocksLanding")) && rule.Number("ListenPort") == plan.Number("Ports.LandingShadowsocks")) throw new OperationException("UDP 转发与已安装 Shadowsocks 的 UDP 端口冲突。");
+            _ = TcpForwarding.ProbeAddresses(plan, rule);
+            var target = IPAddress.Parse(rule.Text("TargetAddress"));
+            if (ports.Contains(rule.Number("TargetPort")) && (IPAddress.IsLoopback(target) || new[] { plan.Text("Server.IPv4"), plan.Text("Server.IPv6") }.Contains(target.ToString()))) throw new OperationException("UDP 目标指向本组件监听，可能形成环路。");
+        }
+    }
     public static void RequireValidation(JsonObject plan, JsonObject config, JsonObject result)
     {
         var rules = Rules(config).Where(r => r.Flag("Enabled")).ToArray(); var items = (result["Items"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? [];
@@ -117,6 +130,11 @@ public static class UdpForwarding
         foreach (var rule in rules)
         {
             var matches = items.Where(i => i.Text("Id") == rule.Text("Id")).ToArray();
+            if (rule.Text("Validation.Type") == "TcpChain")
+            {
+                if (matches.Length != 1 || matches[0].Text("Status") != "Passed" || matches[0].Text("From") != "Controller" || matches[0].Text("Scope") != "TcpChainEndToEnd" || matches[0]["Checks"] is not JsonArray { Count: 1 } chainChecks || chainChecks[0].Text("Address") != TcpForwarding.ProbeAddress(plan, rule) || chainChecks[0].Text("ChainId") != rule.Text("Validation.ChainId") || chainChecks[0].Text("Result.Status") != "Passed" || !chainChecks[0].Flag("Result.Result.UdpValidation.ResponseMatched") || chainChecks[0].Text("Result.Result.UdpValidation.Transport") != "UDP") throw new OperationException("UDP 规则缺少当前整链应用回程证据。");
+                continue;
+            }
             if (matches.Length != 1 || matches[0].Text("Status") != "Passed" || matches[0].Text("From") != "Controller" || matches[0].Text("Scope") != "ForwardedDatagramApplication") throw new OperationException("缺少经 UDP 转发的往返验收结果。", code: "UdpForwardValidationIncomplete");
             var checks = (matches[0]["Checks"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? [];
             var addresses = TcpForwarding.ProbeAddresses(plan, rule);

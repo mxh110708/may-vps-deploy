@@ -185,7 +185,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
             details.Children.Add(GroupLabel("日常维护"));
             var forwarding = TcpForwarding.Rules(plan["TcpForwarding"] as JsonObject).ToArray();
             details.Children.Add(SettingsGroup(SettingRow("独立 TCP 端口转发", forwarding.Length == 0 ? "按需激活、来源白名单与实际转发验收" : forwarding.Count(r => r.Flag("Enabled")) + " 条已启用 · " + forwarding.Length + " 条已保存；实际状态需核对", Symbol.Forward, Action("管理转发", () => TcpForwardSheet(relative, plan)))));
-            details.Children.Add(SettingsGroup(SettingRow("跨实例 TCP 编排", "前置 → 中转 → 落地 · 统一依赖、验收与恢复", Symbol.Link, Action("管理线路", () => TcpChainSheet(relative, plan)))));
+            details.Children.Add(SettingsGroup(SettingRow("跨实例线路编排", "前置 → 中转 → 落地 · 统一依赖、验收与恢复", Symbol.Link, Action("管理线路", () => TcpChainSheet(relative, plan)))));
             details.Children.Add(SettingsGroup(SettingRow("通用多入站", "独立身份、监听、用户、证书、出站与恢复范围", Symbol.AllApps, Action("管理入站", () => InboundsSheet(relative, plan)))));
             var udpForwarding = UdpForwarding.Rules(plan["UdpForwarding"] as JsonObject).ToArray();
             details.Children.Add(SettingsGroup(SettingRow("独立 UDP 端口转发", udpForwarding.Length == 0 ? "独立会话、来源白名单与真实 UDP 往返验收" : udpForwarding.Count(r => r.Flag("Enabled")) + " 条已启用 · " + udpForwarding.Length + " 条已保存；实际状态需核对", Symbol.Forward, Action("管理 UDP 转发", () => UdpForwardSheet(relative, plan)))));

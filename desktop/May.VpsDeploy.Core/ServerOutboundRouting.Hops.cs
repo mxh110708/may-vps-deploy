@@ -47,6 +47,8 @@ public static partial class ServerOutboundRouting
                 if (origin.Text("Instance") == instance) throw new OperationException("服务器下一跳不能指回当前实例。");
                 ManagedNodeSources.Verify(store, new JsonArray(origin.DeepClone()));
             }
+            if (node.Text("InboundOrigin.Instance") == instance) throw new OperationException("下一跳不能引用当前实例的独立入站。");
+            InboundSources.VerifyNodes(store, [node]);
             return node;
         }
         finally { source.Clear(); }
@@ -54,6 +56,7 @@ public static partial class ServerOutboundRouting
     private static JsonObject ToOutbound(string role, JsonObject native, string tag)
     {
         if (role == "AnyTlsEntry") { var result = native.DeepClone().AsObject(); result["tag"] = tag; return result; }
+        if (IsQuic(native)) return XrayHysteria(native, tag);
         return new JsonObject { ["tag"] = tag, ["protocol"] = "shadowsocks", ["settings"] = new JsonObject { ["servers"] = new JsonArray(new JsonObject { ["address"] = native.Text("server"), ["port"] = native.Number("server_port"), ["method"] = native.Text("method"), ["password"] = native.Text("password") }) } };
     }
     public static JsonObject XrayNextHop(JsonObject native)
@@ -109,6 +112,11 @@ public static partial class ServerOutboundRouting
     public static void RequireHopValidation(JsonArray requests, JsonObject result)
     {
         var items = (result["Items"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? [];
-        if (result.Text("Status") != "Passed" || items.Length != requests.Count || requests.OfType<JsonObject>().Any(request => items.Count(item => item.Text("Id") == request.Text("Id") && item.Text("Status") == "Passed" && item.Text("From") == "EntryServer" && item.Text("Network") == "TCP" && IPAddress.TryParse(item.Text("Egress"), out var egress) && egress.Equals(Address(request.Text("ExpectedAddress")))) != 1)) throw new OperationException("附加落地的 TCP、TLS 或实际出口验收未全部完成，恢复本次范围。", code: "ServerHopValidationIncomplete");
+        if (result.Text("Status") != "Passed" || items.Length != requests.Count || requests.OfType<JsonObject>().Any(request => items.Count(item => item.Text("Id") == request.Text("Id") && item.Text("Status") == "Passed" && item.Text("From") == "EntryServer" && item.Text("Network") == "TCP" && ProbeProtocolMatches(request["Outbound"]!, item) && IPAddress.TryParse(item.Text("Egress"), out var egress) && egress.Equals(Address(request.Text("ExpectedAddress")))) != 1)) throw new OperationException("附加落地的协议、TLS 或实际出口验收未全部完成，恢复本次范围。", code: "ServerHopValidationIncomplete");
+    }
+    private static bool ProbeProtocolMatches(JsonNode outbound, JsonObject item)
+    {
+        var protocol = outbound.Text("protocol") == "hysteria" ? "hysteria2" : outbound.Text("type");
+        return protocol is not ("hysteria2" or "tuic") || item.Text("Transport") == "QUIC" && item.Text("ValidatedProtocol") == protocol;
     }
 }

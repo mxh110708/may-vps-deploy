@@ -1,0 +1,78 @@
+using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using System.Text.Json.Nodes;
+using May.VpsDeploy.Core;
+using May.VpsDeploy.Infrastructure;
+
+internal sealed partial class BoundaryTests
+{
+    public async Task RunServerQuicVmTests(string manifestFile)
+    {
+        if (!Path.GetFullPath(manifestFile).Contains(Path.DirectorySeparatorChar + ".codex-tmp" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new Exception("Disposable fixture path required.");
+        var host = ArchiveStore.ReadJson(manifestFile);
+        if (!host.Flag("SyntheticOnly") || host.Text("Name") != "Inbound" || host.Number("Debian") is not (12 or 13)) throw new Exception("Explicit disposable Debian fixture required.");
+        var f = new Fixture(repository); using var budget = new CancellationTokenSource(TimeSpan.FromMinutes(12)); var ct = budget.Token; var user = new FakeUser(); var factory = new TcpChainVmFactory(f.Store, new JsonObject { ["Inbound"] = host.DeepClone() });
+        async Task<IRemoteSession> Connect() => await factory.OpenAsync(new(host.Text("Address"), 22, "root", host.Text("KeyFile")), user, ct);
+        async Task<string> Read(string command) { await using var remote = await Connect(); var result = await remote.RunAsync(command, TimeSpan.FromSeconds(30), ct); result.RequireSuccess("Disposable round 17 observation failed."); return result.Output.Trim(); }
+        var identity = (await Read("python3 -c \"from pathlib import Path; print(Path('/etc/may-inbound-fixture').read_text().strip()); print(Path('/sys/class/dmi/id/product_uuid').read_text().strip())\"")).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        Check(identity.Length == 2 && identity.All(i => i.Equals(host.Text("FixtureId"), StringComparison.OrdinalIgnoreCase)), "VM marker/DMI mismatch; no changes allowed");
+        Console.WriteLine("Round 17 VM evidence: " + f.Root);
+        var plan = f.Plan("ServerQuic-Debian" + host.Number("Debian")); plan["Role"] = "MonitorOnly"; plan["Roles"] = new JsonArray("MonitorOnly"); plan["AdminUser"] = "root"; plan["ActiveEntry"] = "";
+        plan.Put("Import.Status", JsonValue.Create("Completed")); plan.Put("Import.SshAuthenticationPreserved", JsonValue.Create(true)); plan.Put("Server.IPv4", JsonValue.Create(host.Text("Address"))); plan.Put("Server.IPv6", JsonValue.Create("")); plan.Put("Server.BootstrapSshPort", JsonValue.Create(22)); plan.Put("Ports.SshPrimary", JsonValue.Create(22)); plan.Put("Ports.SshRescue", JsonValue.Create(2222)); plan.Put("SshKey.SourcePrivateKeyPath", JsonValue.Create(host.Text("KeyFile"))); plan.Put("Firewall.Mode", JsonValue.Create("ManagedNftables")); plan["ProtocolInventory"] = new JsonObject(); foreach (var role in DeploymentPlans.Roles[..3]) plan["ProtocolInventory"]![role] = new JsonObject { ["Installed"] = false, ["Enabled"] = false, ["Active"] = false }; f.SaveInstance(plan);
+        using var key = RSA.Create(2048); var csr = new CertificateRequest("CN=next.example.test", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1); var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("next.example.test"); san.AddIpAddress(IPAddress.Loopback); csr.CertificateExtensions.Add(san.Build()); csr.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true)); using var ca = csr.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(2));
+        const string fixture = "/opt/may-server-quic-fixture";
+        var web = "import http.server,ssl,socket,threading\ndef dns_loop():\n s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(('127.0.0.1',5353))\n while True:\n  query,peer=s.recvfrom(4096)\n  if len(query)<17:continue\n  answer=bytearray(query);answer[2]=129;answer[3]=128;answer[7]=1;answer.extend(bytes.fromhex('c00c000100010000000000047f000001'));s.sendto(answer,peer)\nthreading.Thread(target=dns_loop,daemon=True).start()\nclass Handler(http.server.BaseHTTPRequestHandler):\n def do_GET(self):\n  body=b'198.51.100.22';self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)\n def log_message(self,*args):pass\ns=http.server.HTTPServer(('127.0.0.1',9443),Handler)\nc=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);c.load_cert_chain('" + fixture + "/https.pem','" + fixture + "/key.pem');s.socket=c.wrap_socket(s.socket,server_side=True);s.serve_forever()\n";
+        var sourceModel = InboundCatalog.Empty(); var sourceSecrets = InboundCatalog.EmptyCredentials(); var sourceCert = InboundCatalog.ImportCertificate(sourceModel, sourceSecrets, "Fixture TLS", ca.ExportCertificatePem(), key.ExportPkcs8PrivateKeyPem()); var sourceNodes = new List<JsonObject>(); var files = new Dictionary<string, string> { ["https.py"] = web, ["https.pem"] = ca.ExportCertificatePem(), ["key.pem"] = key.ExportPkcs8PrivateKeyPem() }; var sourceConfigs = new List<(string Name, string Configuration)>();
+        foreach (var protocol in new[] { "Hysteria2", "TuicV5" })
+        {
+            var input = InboundCatalog.AddInbound(sourceModel, sourceSecrets, protocol); input["CertificateId"] = sourceCert.Text("Id"); input["Options"]!["ServerName"] = "next.example.test"; input["Listener"]!["Port"] = protocol == "Hysteria2" ? 24000 : 24001;
+            if (protocol == "TuicV5") input["Options"]!["UdpRelayMode"] = "quic";
+            var config = InboundRendering.Configuration(f.Store, plan, sourceModel, sourceSecrets, input); var name = protocol.ToLowerInvariant(); files[name + ".json"] = config.ToJsonString(); sourceConfigs.Add((name, fixture + "/" + name + ".json"));
+            var node = InboundRendering.Nodes(f.Store, f.Relative(plan), plan, sourceModel, sourceSecrets).First(n => n.Text("InboundOrigin.InboundId") == input.Text("Id")); node.Remove("InboundOrigin"); node["sing_box"]!["tls"]!["certificate"] = new JsonArray(ca.ExportCertificatePem()); sourceNodes.Add(node);
+        }
+        await using (var remote = await Connect())
+        {
+            var setup = "set -euo pipefail\numask 077\ninstall -d -m 0700 " + fixture + "\n";
+            foreach (var pair in files) setup += "printf '%s' '" + Convert.ToBase64String(Encoding.UTF8.GetBytes(pair.Value)) + "' | base64 -d > " + fixture + "/" + pair.Key + "\n";
+            var binary = InboundRendering.CorePath(InboundRendering.Core(f.Paths));
+            foreach (var (name, config) in sourceConfigs.Prepend(("https", fixture + "/https.py"))) setup += "cat > /etc/systemd/system/may-round17-" + name + ".service <<'MAY_TEST'\n[Service]\nExecStart=" + (name == "https" ? "/usr/bin/python3 " + config : binary + " run -c " + config) + "\n[Install]\nWantedBy=multi-user.target\nMAY_TEST\n";
+            setup += "systemctl daemon-reload\nsystemctl enable may-round17-https.service may-round17-hysteria2.service may-round17-tuicv5.service\nsystemctl restart may-round17-https.service may-round17-hysteria2.service may-round17-tuicv5.service\n";
+            (await remote.RunScriptAsync(setup, TimeSpan.FromSeconds(30), true, ct)).RequireSuccess("Disposable QUIC sources failed to start.");
+            (await remote.RunScriptAsync(new RemoteAssets(f.Paths).Payload("nftables-apply.sh", new Dictionary<string, string> { ["TCP_PORTS"] = "22,2222", ["UDP_PORTS"] = "" }), TimeSpan.FromSeconds(30), true, ct)).RequireSuccess("Disposable firewall baseline failed.");
+        }
+        var model = InboundCatalog.Empty(); var credentials = InboundCatalog.EmptyCredentials(); var sibling = InboundCatalog.AddInbound(model, credentials, "Shadowsocks2022"); sibling["Listener"]!["Port"] = 22000; var entryCert = InboundCatalog.ImportCertificate(model, credentials, "Entry TLS", ca.ExportCertificatePem(), key.ExportPkcs8PrivateKeyPem()); var scheme = ClientSchemes.New(f.Paths); scheme["Nodes"] = new JsonArray(sourceNodes.Select(n => n.DeepClone()).ToArray()); f.Store.WriteSecret(ServerOutboundRouting.SchemeFile(f.Paths, scheme.Text("Id")), scheme);
+        for (var index = 0; index < sourceNodes.Count; index++)
+        {
+            var input = InboundCatalog.AddInbound(model, credentials, index == 0 ? "AnyTLS" : "Shadowsocks2022"); input["Listener"]!["Port"] = 22001 + index;
+            if (index == 0) { input["CertificateId"] = entryCert.Text("Id"); input["Options"]!["ServerName"] = "next.example.test"; }
+            var outbound = InboundCatalog.AddDirect(model, "QUIC hop " + index); outbound["Kind"] = "Proxy"; outbound["ExpectedAddress"] = "198.51.100.22"; outbound["Source"] = new JsonObject { ["SchemeId"] = scheme.Text("Id"), ["NodeId"] = sourceNodes[index].Text("Id"), ["Fingerprint"] = ArchiveStore.Fingerprint(sourceNodes[index]) }; input["OutboundId"] = outbound.Text("Id");
+        }
+        var assets = new ValidationAssets(new AppPaths(repository), "windows-amd64"); var tools = new ExternalToolRunner(); var target = new Uri("https://127.0.0.1:9443"); var endpoints = new ClientDiagnosticEndpoints(target, target, target) { Udp4 = new(IPAddress.Loopback, 5353) }; var validator = new HysteriaVmValidation(f.Store, new ClientRouteDiagnostics(assets, tools, endpoints, ca), host); var coordinator = new TaskCoordinator(f.Store, new WorkflowEngine(f.Store, factory, new FakeKeys(), user, new FakeValidation(), inboundValidation: validator)); var stateFile = SafePath.Resolve(f.Paths.Instance(f.Relative(plan)), "deployment-state.json");
+        var phase = ""; var progress = new InlineProgress<TaskProgress>(p => { if (phase != p.Stage) { phase = p.Stage; Console.WriteLine("Round 17 VM: " + phase); } });
+        OperationRequest Request(string action) => new(OperationKind.Inbounds, f.Relative(plan), InboundCatalog.Options(ArchiveStore.ReadJson(stateFile), action, model, credentials));
+        async Task<TaskRecord> Execute(string action = "Apply") { await Task.Delay(1100, ct); var request = Request(action); return await coordinator.ExecuteAsync(coordinator.Review(request), request, progress, ct); }
+        Check((await Execute()).Outcome == TaskOutcome.Completed, "Managed AnyTLS -> Hysteria2 / SS2022 -> TUIC apply failed");
+        var state = ArchiveStore.ReadJson(stateFile); Check(state["Inbounds"]!["ValidationById"]!.AsObject().Count == 3, "Not all managed inbounds received evidence");
+        foreach (var input in InboundCatalog.Items(model, "Inbounds").Where(i => i.Text("Id") != sibling.Text("Id"))) Check(state["Inbounds"]!["ValidationById"]![input.Text("Id")]!["Items"]!.AsArray().All(i => i!.Flag("Result.UdpValidation.ResponseMatched")), "QUIC next hop was committed without application UDP");
+        async Task<string> Invocation(string id) => await Read("systemctl show " + InboundRendering.Unit(id) + " -p InvocationID --value"); var siblingId = await Invocation(sibling.Text("Id")); var inputToChange = InboundCatalog.Items(model, "Inbounds").Single(i => i.Number("Listener.Port") == 22002);
+        var oldRegistry = await Read("sha256sum /etc/may-inbounds/model.json"); var oldFirewall = await Read("sha256sum /etc/nftables.conf");
+        await Read("nft add table inet may_round17_block; nft 'add chain inet may_round17_block out { type filter hook output priority -110; policy accept; }'; nft add rule inet may_round17_block out udp dport 24001 drop");
+        try { credentials["Users"]![inputToChange.Strings("UserIds")[0]]!["Value"] = ServerConfigurations.RandomKey(16); Check((await Execute()).Outcome == TaskOutcome.Failed && await Read("sha256sum /etc/may-inbounds/model.json") == oldRegistry && await Read("sha256sum /etc/nftables.conf") == oldFirewall && await Invocation(sibling.Text("Id")) == siblingId, "Blocked server next-hop UDP did not restore the exact affected scope"); }
+        finally { await Read("nft delete table inet may_round17_block"); }
+        credentials = f.Store.ReadSecret(SafePath.Resolve(f.Paths.Instance(f.Relative(plan)), "secrets.dotnet.private.json"))["Inbounds"]!.DeepClone().AsObject(); Check((await Execute("Check")).Outcome == TaskOutcome.Completed, "QUIC path did not recover after transport restoration");
+        inputToChange["Enabled"] = false; Check((await Execute()).Outcome == TaskOutcome.Completed, "Disabling a chained inbound failed"); inputToChange["Enabled"] = true; Check((await Execute()).Outcome == TaskOutcome.Completed, "Re-enabling a chained inbound failed");
+        var wrong = sourceNodes[1].DeepClone().AsObject(); wrong["sing_box"]!["tls"]!["server_name"] = "wrong.example.test"; scheme["Nodes"]![1] = wrong.DeepClone(); f.Store.WriteSecret(ServerOutboundRouting.SchemeFile(f.Paths, scheme.Text("Id")), scheme); var changedOutbound = InboundCatalog.Items(model, "Outbounds").Single(o => o.Text("Id") == inputToChange.Text("OutboundId")); changedOutbound["Source"]!["Fingerprint"] = ArchiveStore.Fingerprint(wrong);
+        Check((await Execute()).Outcome == TaskOutcome.Failed && await Invocation(sibling.Text("Id")) == siblingId, "Wrong next-hop SNI committed or restarted an unrelated inbound"); scheme["Nodes"]![1] = sourceNodes[1].DeepClone(); f.Store.WriteSecret(ServerOutboundRouting.SchemeFile(f.Paths, scheme.Text("Id")), scheme); changedOutbound["Source"]!["Fingerprint"] = ArchiveStore.Fingerprint(sourceNodes[1]);
+        credentials = f.Store.ReadSecret(SafePath.Resolve(f.Paths.Instance(f.Relative(plan)), "secrets.dotnet.private.json"))["Inbounds"]!.DeepClone().AsObject(); Check((await Execute("Check")).Outcome == TaskOutcome.Completed, "Original source could not be checked after scoped recovery");
+        factory.Fault = "inbound-commit-ack"; inputToChange["Name"] = "TUIC chain renamed"; Check((await Execute()).Outcome == TaskOutcome.CompletedWithWarnings && factory.LostAcknowledgements == 1, "Lost commit acknowledgement was replayed rather than reconciled");
+        var boot = await Read("cat /proc/sys/kernel/random/boot_id"); await using (var remote = await Connect()) { try { await remote.RunAsync("systemctl reboot", TimeSpan.FromSeconds(5), ct); } catch (IOException) { } }
+        var restarted = false; for (var n = 0; n < 90; n++) { await Task.Delay(1500, ct); try { if (await Read("cat /proc/sys/kernel/random/boot_id") != boot) { restarted = true; break; } } catch (Exception error) when (error is IOException or OperationException or Renci.SshNet.Common.SshException or System.Net.Sockets.SocketException) { } }
+        Check(restarted && (await Execute("Check")).Outcome == TaskOutcome.Completed, "Chained services did not recover after guest reboot");
+        foreach (var input in InboundCatalog.Items(model, "Inbounds").ToArray()) InboundCatalog.RemoveEntity(model, credentials, "Inbounds", input.Text("Id")); Check((await Execute()).Outcome == TaskOutcome.Completed, "Managed chained inbound removal failed");
+        Check(await Read("test -z \"$(find /etc/systemd/system -maxdepth 1 -name 'may-inbound-????????????????????????????????.service' -print -quit)\" && systemctl is-active --quiet may-round17-hysteria2.service may-round17-tuicv5.service && printf CLEAN") == "CLEAN", "Removing managed inbounds removed source services or left owned services");
+        await Read("systemctl disable --now may-round17-https.service may-round17-hysteria2.service may-round17-tuicv5.service");
+        ArchiveStore.WriteJson(Path.Combine(Path.GetDirectoryName(manifestFile)!, "server-quic-result.json"), new JsonObject { ["SyntheticOnly"] = true, ["Status"] = "Passed", ["Debian"] = host.Number("Debian"), ["Assertions"] = assertions, ["EvidenceDirectory"] = f.Root, ["At"] = DateTimeOffset.UtcNow }); credentials.Clear(); sourceSecrets.Clear(); Console.WriteLine($"PASS: {assertions} Debian {host.Number("Debian")} real QUIC server next-hop lifecycle assertions.");
+    }
+}

@@ -13,9 +13,9 @@ public interface ITcpChainValidation
 
 public sealed record TcpChainPreview(JsonObject Configuration, JsonObject? Record, JsonObject FrontConfiguration, JsonObject RelayConfiguration, string Summary);
 
-// A deliberately bounded topology: two owned transparent TCP listeners and one
-// existing managed proxy. No remote daemon, arbitrary graph, or UDP implication.
-public static class TcpChains
+// Two owned transparent listeners and one existing managed proxy. Persistent
+// identity stays stable; transport/family are explicit for newly created chains.
+public static partial class TcpChains
 {
     public static string FileName(AppPaths paths, string id) => paths.Resolve("private/tcp-chains/" + Id(id) + ".json");
     public static string Id(string id) => Regex.IsMatch(id, "^[a-f0-9]{32}$") ? id : throw new OperationException("跨实例线路身份无效。");
@@ -37,7 +37,7 @@ public static class TcpChains
     public static string PhaseLabel(JsonObject record) => record.Text("Phase") switch { "Active" => "已应用", "Removed" => "已移除", "RolledBack" => "已恢复", _ => "待恢复" };
     public static JsonObject New(string front) => new()
     {
-        ["Version"] = 1, ["Id"] = Guid.NewGuid().ToString("N"), ["Name"] = "TCP 跨实例线路", ["FrontInstance"] = front,
+        ["Version"] = 1, ["Id"] = Guid.NewGuid().ToString("N"), ["Name"] = "跨实例线路", ["FrontInstance"] = front, ["Family"] = "IPv4", ["Transport"] = "TCP",
         ["RelayInstance"] = "", ["LandingInstance"] = "", ["FrontPort"] = 18443, ["RelayPort"] = 18444,
         ["FrontSources"] = new JsonArray(), ["FrontSourceAddress"] = "", ["Landing"] = new JsonObject()
     };
@@ -48,7 +48,9 @@ public static class TcpChains
         Fields(request.Options, "Action", "Configuration");
         if (request.Options.Text("Action") is not ("Apply" or "Check" or "Remove" or "Recover")) throw new OperationException("跨实例线路操作无效。");
         var c = request.Options["Configuration"] as JsonObject ?? throw new OperationException("缺少线路配置。");
-        Fields(c, "Version", "Id", "Name", "FrontInstance", "RelayInstance", "LandingInstance", "FrontPort", "RelayPort", "FrontSources", "FrontSourceAddress", "Landing");
+        var shape = c.DeepClone().AsObject(); shape.Remove("Family"); shape.Remove("Transport");
+        Fields(shape, "Version", "Id", "Name", "FrontInstance", "RelayInstance", "LandingInstance", "FrontPort", "RelayPort", "FrontSources", "FrontSourceAddress", "Landing");
+        _ = Family(c); _ = Transport(c);
         if (c["Version"] is not JsonValue version || !version.TryGetValue<int>(out var schema) || schema != 1 || c.Text("Name").Length is < 1 or > 60 || c.Text("Name").Any(char.IsControl)) throw new OperationException("线路版本或名称无效。");
         _ = Id(c.Text("Id"));
         var instances = Instances(c);
@@ -57,29 +59,33 @@ public static class TcpChains
         foreach (var port in new[] { "FrontPort", "RelayPort" })
             if (c[port] is not JsonValue value || !value.TryGetValue<int>(out var n) || n is < 1 or > 65535) throw new OperationException("线路端口须为 1–65535 的整数。");
         var sources = c["FrontSources"] as JsonArray ?? throw new OperationException("请填写前置允许来源。");
-        if (sources.Any(s => s is not JsonValue v || !v.TryGetValue<string>(out var text) || text.Contains(':'))) throw new OperationException("IPv4 前置监听请填写 IPv4 来源或 CIDR。");
-        var test = Rule(c, true, "192.0.2.2", 443);
+        if (sources.Any(s => s is not JsonValue v || !v.TryGetValue<string>(out var text) || !IPAddress.TryParse(text.Split('/')[0], out var ip) || (ip.AddressFamily == AddressFamily.InterNetworkV6) != (Family(c) == "IPv6"))) throw new OperationException("前置允许来源必须与所选地址族一致。");
+        var test = Rule(c, true, Family(c) == "IPv6" ? "2001:db8::2" : "192.0.2.2", 443);
         test["AllowedSources"] = sources.DeepClone();
-        var normalized = TcpForwarding.Normalize(new JsonObject { ["Version"] = 1, ["Rules"] = new JsonArray(test) });
+        var normalized = NormalizeForwarding(c, new JsonObject { ["Version"] = 1, ["Rules"] = new JsonArray(test) });
         if (!JsonNode.DeepEquals(normalized["Rules"]![0]!["AllowedSources"], sources)) throw new OperationException("来源须使用规范的 IP 或网络地址 CIDR，不能重复。");
-        _ = Address(c.Text("FrontSourceAddress"));
+        _ = Address(c.Text("FrontSourceAddress"), Family(c));
         var landing = c["Landing"] as JsonObject ?? throw new OperationException("请选择已保存的受管落地节点。");
         Fields(landing, "SchemeId", "NodeId", "NodeFingerprint");
         foreach (var key in new[] { "SchemeId", "NodeId" }) _ = Id(landing.Text(key));
         if (!Regex.IsMatch(landing.Text("NodeFingerprint"), "^[a-f0-9]{64}$")) throw new OperationException("落地来源摘要无效。");
     }
-    public static string Address(string address)
+    public static string Address(string address, string family = "IPv4")
     {
-        if (!IPAddress.TryParse(address, out var ip) || ip.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any) || ip.GetAddressBytes()[0] is 0 or >= 224 || ip.Equals(IPAddress.Broadcast)) throw new OperationException("本轮跨实例线路需要明确的 IPv4 单播地址。");
+        if (family is not ("IPv4" or "IPv6") || !IPAddress.TryParse(address, out var ip) || ip.IsIPv4MappedToIPv6 || address.Contains('%') || IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any) || ip.IsIPv6Multicast || ip.IsIPv6LinkLocal || (ip.AddressFamily == AddressFamily.InterNetworkV6) != (family == "IPv6") || ip.AddressFamily == AddressFamily.InterNetwork && (ip.GetAddressBytes()[0] is 0 or >= 224 || ip.Equals(IPAddress.Broadcast))) throw new OperationException("线路需要所选地址族的明确单播地址；不接受回环、链路本地、映射地址或区域标识。");
         return ip.ToString();
     }
-    public static JsonObject Rule(JsonObject c, bool front, string target, int port) => new()
+    public static JsonObject Rule(JsonObject c, bool front, string target, int port)
     {
+        var rule = new JsonObject {
         ["Id"] = RuleId(c, front), ["Name"] = c.Text("Name") + (front ? " · 前置" : " · 中转"), ["Enabled"] = true,
-        ["ListenFamily"] = "IPv4", ["ListenPort"] = c.Number(front ? "FrontPort" : "RelayPort"), ["TargetAddress"] = target, ["TargetPort"] = port,
-        ["AllowedSources"] = front ? c["FrontSources"]!.DeepClone() : new JsonArray(c.Text("FrontSourceAddress") + "/32"),
+        ["ListenFamily"] = Family(c), ["ListenPort"] = c.Number(front ? "FrontPort" : "RelayPort"), ["TargetAddress"] = Address(target, Family(c)), ["TargetPort"] = port,
+        ["AllowedSources"] = front ? c["FrontSources"]!.DeepClone() : new JsonArray(Address(c.Text("FrontSourceAddress"), Family(c)) + Prefix(c)),
         ["Validation"] = new JsonObject { ["Type"] = "TcpChain", ["ChainId"] = c.Text("Id"), ["FrontInstance"] = c.Text("FrontInstance") }
-    };
+        };
+        if (Transport(c) == "UDP") { rule["SessionTimeoutSeconds"] = 120; rule["MaximumSessions"] = 256; }
+        return rule;
+    }
     public static JsonObject Plan(ArchiveStore store, string instance)
     {
         var plan = ArchiveStore.ReadJson(SafePath.Resolve(store.Paths.Instance(instance), "deployment-plan.json"));
@@ -93,17 +99,22 @@ public static class TcpChains
         try
         {
             var node = source["Nodes"]!.AsArray().OfType<JsonObject>().SingleOrDefault(n => n.Text("Id") == reference.Text("NodeId")) ?? throw new OperationException("落地节点已移除。");
-            if (ArchiveStore.Fingerprint(node) != reference.Text("NodeFingerprint") || node.Text("ManagedOrigin.Instance") != c.Text("LandingInstance") || node["ForwardedOrigin"] != null || node["TcpChainOrigin"] != null) throw new OperationException("请选择来自落地实例、尚未转发的原始受管节点；来源变化后须重新审阅。");
-            var credentials = store.ReadSecret(SafePath.Resolve(store.Paths.Instance(c.Text("LandingInstance")), "secrets.dotnet.private.json"));
-            try
+            if (ArchiveStore.Fingerprint(node) != reference.Text("NodeFingerprint") || SourceOrigin(node)?.Text("Instance") != c.Text("LandingInstance") || !Supports(node, Transport(c), Family(c))) throw new OperationException("请选择对应地址族的原始受管落地；TCP 支持原生 TCP 代理，UDP 支持固定端口 Hysteria2／TUIC 独立入站。");
+            if (node["InboundOrigin"] is JsonObject inboundOrigin)
             {
-                var actual = ManagedNodeSources.Resolve(node["ManagedOrigin"]!.AsObject(), plan, credentials);
-                if (actual == null || ManagedNodeSources.Fingerprint(actual) != node.Text("ManagedOrigin.Fingerprint")) throw new OperationException("落地协议参数与来源归档不同。");
+                InboundSources.VerifyNodes(store, [node]);
+                var model = plan["InboundModel"]!.AsObject();
+                var inbound = InboundCatalog.Items(model, "Inbounds").Single(i => i.Text("Id") == inboundOrigin.Text("InboundId"));
+                if (InboundCatalog.Items(model, "Outbounds").Single(o => o.Text("Id") == inbound.Text("OutboundId")).Text("Kind") != "Direct") throw new OperationException("本轮线路落地使用直连出站，不叠加未审阅的服务器下一跳。");
             }
-            finally { credentials.Clear(); }
-            if (node.Text("sing_box.type") is not ("vless" or "anytls" or "shadowsocks") || node.Text("clash.type") != (node.Text("sing_box.type") == "shadowsocks" ? "ss" : node.Text("sing_box.type"))
-                || Address(node.Text("sing_box.server")) != Address(plan.Text("Server.IPv4")) || node.Text("clash.server") != node.Text("sing_box.server") || node.Number("clash.port") != node.Number("sing_box.server_port")
-                || node.Text("sing_box.detour") != "" || node.Text("clash.dialer-proxy") != "" || node.Text("sing_box.network") == "udp") throw new OperationException("落地必须为原生双客户端参数一致、直接可达的 IPv4 TCP 代理节点。");
+            else
+            {
+                var credentials = store.ReadSecret(SafePath.Resolve(store.Paths.Instance(c.Text("LandingInstance")), "secrets.dotnet.private.json"));
+                try { var actual = ManagedNodeSources.Resolve(node["ManagedOrigin"]!.AsObject(), plan, credentials); if (actual == null || ManagedNodeSources.Fingerprint(actual) != node.Text("ManagedOrigin.Fingerprint")) throw new OperationException("落地协议参数与来源归档不同。"); }
+                finally { credentials.Clear(); }
+            }
+            if (node.Text("clash.type") != (node.Text("sing_box.type") == "shadowsocks" ? "ss" : node.Text("sing_box.type")) || Address(node.Text("sing_box.server"), Family(c)) != ServerAddress(plan, c) || Address(node.Text("clash.server"), Family(c)) != ServerAddress(plan, c) || node.Number("clash.port") != node.Number("sing_box.server_port")
+                || node.Text("sing_box.detour") != "" || node.Text("clash.dialer-proxy") != "") throw new OperationException("落地须为原生双客户端参数一致、直接可达的所选地址族节点。");
             _ = ClientTopology.DiagnosticRoute(new JsonObject { ["Nodes"] = new JsonArray(node.DeepClone()), ["Layout"] = new JsonObject { ["region_groups"] = new JsonArray(node.Text("region_group")) } }, node.Text("name"));
             return node.DeepClone().AsObject();
         }
@@ -112,13 +123,13 @@ public static class TcpChains
     public static JsonObject Project(ArchiveStore store, JsonObject c, string region)
     {
         var node = Source(store, c); var front = Plan(store, c.Text("FrontInstance"));
-        foreach (var key in new[] { "ManagedOrigin", "ForwardedOrigin", "Source", "AuthorityName" }) node.Remove(key);
+        foreach (var key in new[] { "ManagedOrigin", "InboundOrigin", "ForwardedOrigin", "Source", "AuthorityName" }) node.Remove(key);
         var clash = node["clash"]!.AsObject(); var sing = node["sing_box"]!.AsObject();
         if (sing["tls"] is JsonObject tls && tls.Flag("enabled") && tls.Text("server_name") == "") tls["server_name"] = sing.Text("server");
         var sni = clash.Text("type") == "anytls" ? "sni" : "servername";
         if ((clash.Text("type") == "anytls" || clash.Flag("tls")) && clash.Text(sni) == "") clash[sni] = clash.Text("server");
         node["Id"] = c.Text("Id"); node["name"] = c.Text("Name"); node["kind"] = "entry"; node["region_group"] = region; node["transit_group"] = region;
-        clash["server"] = Address(front.Text("Server.IPv4")); clash["port"] = c.Number("FrontPort"); clash["name"] = node.Text("name");
+        clash["server"] = ServerAddress(front, c); clash["port"] = c.Number("FrontPort"); clash["name"] = node.Text("name");
         sing["server"] = clash.Text("server"); sing["server_port"] = c.Number("FrontPort"); sing["tag"] = node.Text("name");
         if (sing.Text("type") == "shadowsocks") { clash["udp"] = false; sing["network"] = "tcp"; }
         node["TcpChainOrigin"] = new JsonObject { ["Id"] = c.Text("Id"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(c), ["ConnectionFingerprint"] = ClientNodeImport.ConnectionFingerprint(node) };
@@ -135,7 +146,8 @@ public static class TcpChains
             {
                 var plan = Plan(store, instance); var state = ArchiveStore.ReadJson(SafePath.Resolve(store.Paths.Instance(instance), "deployment-state.json"));
                 if (InstanceLifecycle.Read(store, instance, plan).NeedsRecovery || plan.Text("TcpChain.Id") != c.Text("Id")) throw new OperationException("线路参与实例状态已变化，请先核对整条线路。");
-                if (instance != c.Text("LandingInstance") && (state.Text("TcpForwarding.RemoteHash") != record.Text(instance == c.Text("FrontInstance") ? "FrontHash" : "RelayHash") || state.Text("TcpForwarding.ConfigurationFingerprint") != ArchiveStore.Fingerprint(plan["TcpForwarding"]!))) throw new OperationException("线路转发摘要已变化，请先检查整条线路。");
+                var component = Component(c);
+                if (instance != c.Text("LandingInstance") && (state.Text(component + ".RemoteHash") != record.Text(instance == c.Text("FrontInstance") ? "FrontHash" : "RelayHash") || state.Text(component + ".ConfigurationFingerprint") != ArchiveStore.Fingerprint(plan[component]!))) throw new OperationException("线路转发摘要已变化，请先检查整条线路。");
             }
             var current = Project(store, c, node.Text("region_group"));
             if (node.Text("TcpChainOrigin.ConnectionFingerprint") != ClientNodeImport.ConnectionFingerprint(node) || node.Text("TcpChainOrigin.ConnectionFingerprint") != current.Text("TcpChainOrigin.ConnectionFingerprint")) throw new OperationException("跨实例线路连接参数已变化，请重新添加节点。");
@@ -145,6 +157,7 @@ public static class TcpChains
     {
         if (result.Text("Status") != "Passed" || result.Text("From") != "Controller" || result.Text("Scope") != "TcpChainProxyHttps" || result.Text("ConnectionFingerprint") != ClientNodeImport.ConnectionFingerprint(node)
             || result.Text("ConfigurationFingerprint") != ArchiveStore.Fingerprint(configuration) || result.Text("Result.Status") != "Reachable") throw new OperationException("整条线路未完成代理协议与 HTTPS 出口验收，不能提交。", code: "TcpChainValidationIncomplete");
+        if (Transport(configuration) == "UDP" && (result.Text("Result.ValidatedProtocol") != node.Text("sing_box.type") || !result.Flag("Result.UdpValidation.ResponseMatched") || result.Text("Result.UdpValidation.Transport") != "UDP")) throw new OperationException("UDP 线路须完成所选 QUIC 协议与应用 UDP 回程，不能以 TCP、直连 DNS 或单向发包替代。", code: "TcpChainValidationIncomplete");
     }
     public static void VerifyOrigins(ArchiveStore store, JsonArray origins)
     {
@@ -174,7 +187,7 @@ public static class TcpChains
         {
             var lifecycle = InstanceLifecycle.Read(store, instance, plan);
             if (!lifecycle.Managed || action != "Recover" && lifecycle.NeedsRecovery) throw new OperationException("请先完成参与实例的部署、接入或待恢复事务。");
-            _ = Address(plan.Text("Server.IPv4"));
+            _ = ServerAddress(plan, c);
             if (action == "Apply" && plan["TcpChain"] != null || action is "Check" or "Remove" && plan.Text("TcpChain.Id") != c.Text("Id")) throw new OperationException("本轮每台实例只参与一条跨实例线路，请先核对或移除已有线路。");
             if (action == "Recover")
             {
@@ -182,28 +195,29 @@ public static class TcpChains
                 if (state["TcpChainTransaction"] != null && state.Text("TcpChainTransaction.TaskId") != record!.Text("Transaction.TaskId") || plan["TcpChain"] != null && plan.Text("TcpChain.Id") != c.Text("Id") || pending != null && pending.Text("Phase") is not ("Committed" or "RolledBack") && pending.Text("TaskId") != record!.Text("Transaction.TaskId")) throw new OperationException("参与实例出现其他任务归属，未开始恢复。", true, "TcpChainRecoveryIdentity");
             }
         }
-        if (plans.Select(p => Address(p.Plan.Text("Server.IPv4"))).Distinct().Count() != 3) throw new OperationException("三台参与实例的 IPv4 地址不能相同。");
+        if (plans.Select(p => ServerAddress(p.Plan, c)).Distinct().Count() != 3) throw new OperationException("三台参与实例的所选地址族地址不能相同。");
         var front = plans[0].Plan; var relay = plans[1].Plan;
         var source = action is "Apply" or "Check" ? Source(store, c) : null;
         JsonObject Candidate(JsonObject plan, bool isFront)
         {
-            var config = TcpForwarding.Normalize(plan["TcpForwarding"]?.AsObject() ?? TcpForwarding.Empty());
+            var component = Component(c);
+            var config = NormalizeForwarding(c, plan[component]?.AsObject() ?? TcpForwarding.Empty());
             if (action is "Check" or "Remove")
             {
                 var state = ArchiveStore.ReadJson(SafePath.Resolve(store.Paths.Instance(isFront ? c.Text("FrontInstance") : c.Text("RelayInstance")), "deployment-state.json"));
-                if (state.Text("TcpForwarding.RemoteHash") != record!.Text(isFront ? "FrontHash" : "RelayHash") || state.Text("TcpForwarding.ConfigurationFingerprint") != ArchiveStore.Fingerprint(config)) throw new OperationException("线路转发归档与最后一次整链验收不同，请先核对记录。");
+                if (state.Text(component + ".RemoteHash") != record!.Text(isFront ? "FrontHash" : "RelayHash") || state.Text(component + ".ConfigurationFingerprint") != ArchiveStore.Fingerprint(config)) throw new OperationException("线路转发归档与最后一次整链验收不同，请先核对记录。");
             }
             if (action == "Apply")
             {
                 if (TcpForwarding.Rules(config).Any(r => r.Text("Validation.Type") == "TcpChain")) throw new OperationException("参与实例含有其他线路规则，请先核对归属。");
-                config["Rules"]!.AsArray().Add(Rule(c, isFront, isFront ? relay.Text("Server.IPv4") : plans[2].Plan.Text("Server.IPv4"), isFront ? c.Number("RelayPort") : source!.Number("sing_box.server_port")));
+                config["Rules"]!.AsArray().Add(Rule(c, isFront, isFront ? ServerAddress(relay, c) : ServerAddress(plans[2].Plan, c), isFront ? c.Number("RelayPort") : source!.Number("sing_box.server_port")));
             }
             else if (action == "Remove")
             {
                 var rule = TcpForwarding.Rules(config).SingleOrDefault(r => r.Text("Id") == RuleId(c, isFront) && r.Text("Validation.ChainId") == c.Text("Id")) ?? throw new OperationException("线路规则归属不完整，未移除任何内容。");
                 config["Rules"]!.AsArray().Remove(rule);
             }
-            config = TcpForwarding.Normalize(config); TcpForwarding.ValidateCandidate(plan, config, ArchiveStore.ReadJson(SafePath.Resolve(store.Paths.Instance(isFront ? c.Text("FrontInstance") : c.Text("RelayInstance")), "deployment-state.json")));
+            config = NormalizeForwarding(c, config); ValidateForwarding(c, plan, config, ArchiveStore.ReadJson(SafePath.Resolve(store.Paths.Instance(isFront ? c.Text("FrontInstance") : c.Text("RelayInstance")), "deployment-state.json")));
             return config;
         }
         var fc = Candidate(front, true); var rc = Candidate(relay, false); var landingPort = source?.Number("sing_box.server_port") ?? record?.Number("LandingPort") ?? 0; source?.Clear();
@@ -215,10 +229,10 @@ public static class TcpChains
             _ => "按原任务身份读取各台实际事务状态，先恢复前置再恢复中转；已提交参与实例也按同一快照范围补偿。身份或资源漂移时保留待恢复记录。"
         };
         var actionLabel = action switch { "Apply" => "新建并验收", "Check" => "只读检查", "Remove" => "移除线路", _ => "恢复整条线路" };
-        string FirewallLabel(JsonObject plan) => plan.Text("Firewall.Mode") == "PreserveExisting" ? "保留既有规则，需自行放行端口" : action == "Check" ? "当前使用受管规则" : "同步本次 TCP 端口的受管放行规则";
-        var summary = $"{c.Text("Name")} · {actionLabel}\n前置：{c.Text("FrontInstance")} IPv4:{c.Number("FrontPort")}\n↓ TCP\n中转：{c.Text("RelayInstance")} IPv4:{c.Number("RelayPort")}\n↓ TCP\n落地：{c.Text("LandingInstance")} · IPv4:{(landingPort > 0 ? landingPort.ToString() : "原归档端口")}\n\n前置允许来源：{string.Join("，", c.Strings("FrontSources"))}\n中转仅允许前置出口：{c.Text("FrontSourceAddress")}/32\n前置防火墙：{FirewallLabel(front)}\n中转防火墙：{FirewallLabel(relay)}\n落地防火墙沿用当前配置，请确认允许中转出口。\n\n{procedure}\n落地代理、鉴权及 TLS 参数沿用原配置。";
-        if (action != "Check") summary += "\n现有本组件 TCP 连接会短暂中断，其他转发规则保留。失败或取消按两台的本次快照恢复；部分提交或连接中断时按任务身份核对，无法安全完成则保留待恢复记录。";
-        summary += "\n本轮仅 IPv4 TCP。外部防火墙仍须放行；前置经 NAT 时须填写真实出口地址。每台实例限参与一条线路。";
+        string FirewallLabel(JsonObject plan) => plan.Text("Firewall.Mode") == "PreserveExisting" ? "保留既有规则，需自行放行端口" : action == "Check" ? "当前使用受管规则" : "同步本次 " + Transport(c) + " 端口的受管放行规则";
+        var summary = $"{c.Text("Name")} · {actionLabel}\n前置：{c.Text("FrontInstance")} {Family(c)}:{c.Number("FrontPort")}\n↓ {Transport(c)}\n中转：{c.Text("RelayInstance")} {Family(c)}:{c.Number("RelayPort")}\n↓ {Transport(c)}\n落地：{c.Text("LandingInstance")} · {Family(c)}:{(landingPort > 0 ? landingPort.ToString() : "原归档端口")}\n\n前置允许来源：{string.Join("，", c.Strings("FrontSources"))}\n中转仅允许前置出口：{c.Text("FrontSourceAddress")}{Prefix(c)}\n前置防火墙：{FirewallLabel(front)}\n中转防火墙：{FirewallLabel(relay)}\n落地防火墙沿用当前配置，请确认允许中转出口。\n\n{procedure}\n落地代理、鉴权及 TLS 参数沿用原配置。";
+        if (action != "Check") summary += "\n现有本组件连接或数据报会话会短暂中断，其他转发规则保留。失败或取消按两台的本次快照恢复；部分提交或连接中断时按任务身份核对，无法安全完成则保留待恢复记录。";
+        summary += "\n仅三台、同一地址族与一种传输。UDP 限固定端口 Hysteria2／TUIC，必须完成应用 UDP 回程；分段 UDP 仅检查路由。外部防火墙须放行，前置经 NAT 时须填真实出口。每台实例限一条线路。";
         return new(c, record, fc, rc, summary);
     }
     public static void GuardOperation(ArchiveStore store, OperationRequest request)
@@ -231,7 +245,11 @@ public static class TcpChains
         if (state["TcpChainTransaction"] != null) throw new OperationException("此实例参与未完成的跨实例线路，请从跨实例编排页面恢复整条线路。", true, "TcpChainPending");
         var plan = ArchiveStore.ReadJson(planFile);
         if (List(store).Any(r => Pending(r) && Instances(r["Configuration"]!.AsObject()).Contains(request.InstanceRelativePath, StringComparer.OrdinalIgnoreCase))) throw new OperationException("此实例参与未完成的跨实例线路，请从跨实例编排页面恢复整条线路。", true, "TcpChainPending");
-        if (plan["TcpChain"] != null && request.Kind is OperationKind.TcpForward or OperationKind.Decommission or OperationKind.ProtocolState or OperationKind.RotateCredentials or OperationKind.Restore or OperationKind.ServerOutbound)
-            throw new OperationException("此实例正被跨实例线路依赖，请先从跨实例编排移除线路，再修改其转发或代理身份。");
+        if (plan["TcpChain"] != null)
+        {
+            var bound = ArchiveStore.ReadJson(FileName(store.Paths, plan.Text("TcpChain.Id")))["Configuration"]!.AsObject();
+            if (request.Kind == OperationKind.TcpForward && Transport(bound) == "TCP" || request.Kind == OperationKind.UdpForward && Transport(bound) == "UDP" || request.Kind is OperationKind.Decommission or OperationKind.ProtocolState or OperationKind.RotateCredentials or OperationKind.Restore or OperationKind.ServerOutbound or OperationKind.Inbounds)
+                throw new OperationException("此实例正被跨实例线路依赖，请先从跨实例编排移除线路，再修改其转发或代理身份。");
+        }
     }
 }

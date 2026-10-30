@@ -57,7 +57,7 @@ def core_path(value):
 
 def selected_core(payload, identifier):
     item=next(i for i in payload['Model']['Inbounds'] if i['Id']==identifier)
-    return payload['Core']['Reality'] if item['Protocol']=='Reality' else payload['Core']
+    return payload['Core']['Reality'] if item['Protocol'] in ('Reality','VLESS') else payload['Core']
 
 
 def unit_name(identifier):
@@ -72,9 +72,95 @@ def unit_path(identifier):
     return '/etc/systemd/system/' + unit_name(identifier)
 
 
+def udp_only(item):
+    return item['Protocol'] in ('Hysteria2','TuicV5') or item['Protocol']=='VLESS' and item['Options']['Transport'].get('HTTPVersion','2')=='3'
+
+
+def listener_ports(item, binding):
+    options = item.get('Options', {})
+    if item['Protocol'] != 'Hysteria2' or 'HopPorts' not in options and 'HopIntervalSeconds' not in options:
+        return [binding['Port']]
+    text, interval = options.get('HopPorts'), options.get('HopIntervalSeconds')
+    if not isinstance(text, str) or not 1 <= len(text) <= 1024 or len(text.split(',')) > 32 or type(interval) is not int or not 5 <= interval <= 3600:
+        raise ValueError('Invalid Hysteria port hopping parameters.')
+    ports = set()
+    for part in text.split(','):
+        match = re.fullmatch(r'([0-9]{1,5})(?:-([0-9]{1,5}))?', part)
+        if not match: raise ValueError('Invalid Hysteria port range.')
+        start, end = int(match[1]), int(match[2] or match[1])
+        if not 1 <= start <= end <= 65535 or end-start+1 > 256: raise ValueError('Hysteria port range exceeds its bound.')
+        ports.update(range(start, end+1))
+        if len(ports) > 256: raise ValueError('Too many Hysteria listener ports.')
+    if binding['Port'] not in ports or len(ports) < 2: raise ValueError('Hopping ports must include the owned listener and an alternative.')
+    return sorted(ports)
+
+
 def unit(identifier, core):
     argument='-config' if core['Engine']=='xray' else '-c'
     return HEADER + '[Unit]\nDescription=May inbound ' + identity(identifier) + '\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nLoadCredential=config.json:' + config_path(identifier) + '\nExecStart=' + core_path(core) + ' run '+argument+' %d/config.json\nRestart=on-failure\nRestartSec=3s\nDynamicUser=yes\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=yes\nRestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nTimeoutStopSec=15s\n\n[Install]\nWantedBy=multi-user.target\n'
+
+
+
+def validate_xhttp_extra(extra):
+    ranges={'xPaddingBytes','scMaxEachPostBytes','scMinPostsIntervalMs','scStreamUpServerSecs','uplinkChunkSize'}
+    switches={'noGRPCHeader','noSSEHeader','xPaddingObfsMode'}
+    integers={'scMaxBufferedPosts','serverMaxHeaderBytes'}
+    strings={'xPaddingKey','xPaddingHeader','xPaddingPlacement','xPaddingMethod','uplinkHTTPMethod','sessionPlacement','sessionKey','seqPlacement','seqKey','uplinkDataPlacement','uplinkDataKey'}
+    def bounds(value):
+        if type(value) is int: result=(value,value)
+        elif isinstance(value,str) and re.fullmatch(r'\d+(?:-\d+)?',value):
+            parts=value.split('-');result=(int(parts[0]),int(parts[-1]))
+        elif isinstance(value,dict) and set(value)=={'from','to'} and all(type(v) is int for v in value.values()): result=(value['from'],value['to'])
+        else: raise ValueError('Invalid XHTTP range.')
+        if not 0<=result[0]<=result[1]<=2147483647: raise ValueError('Invalid XHTTP range bounds.')
+        return result
+    if not isinstance(extra,dict) or set(extra)-ranges-switches-integers-strings-{'headers','xmux'}: raise ValueError('Unknown XHTTP extra.')
+    for key,value in extra.items():
+        if key in ranges and bounds(value)[1]>16*1024*1024: raise ValueError('XHTTP range exceeds its resource bound.')
+        if key in switches and type(value) is not bool: raise ValueError('Invalid XHTTP switch.')
+        if key in integers and (type(value) is not int or value<0): raise ValueError('Invalid XHTTP server limit.')
+        if key in strings and (not isinstance(value,str) or any(ord(c)<32 for c in value)): raise ValueError('Invalid XHTTP text.')
+        if key=='headers':
+            if not isinstance(value,dict) or len(value)>64 or len({k.lower() for k in value})!=len(value): raise ValueError('Invalid XHTTP headers.')
+            for k,v in value.items():
+                if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+",k) or k.lower() in ('host','content-length','transfer-encoding','connection') or not isinstance(v,str) or any(c in v for c in '\r\n\x00'): raise ValueError('Unsafe XHTTP header.')
+        if key=='xmux':
+            fields={'maxConcurrency','maxConnections','cMaxReuseTimes','hMaxRequestTimes','hMaxReusableSecs','hKeepAlivePeriod'}
+            if not isinstance(value,dict) or set(value)-fields: raise ValueError('Invalid XHTTP XMux.')
+            for k,v in value.items():
+                if k=='hKeepAlivePeriod':
+                    if type(v) is not int: raise ValueError('Invalid XMux keepalive.')
+                else: bounds(v)
+            if bounds(value.get('maxConcurrency',0))[1]>0 and bounds(value.get('maxConnections',0))[1]>0: raise ValueError('Conflicting XMux limits.')
+
+
+def validate_xhttp(model, item, source):
+    outbound = [o for o in model['Outbounds'] if o['Id'] == item['OutboundId']]
+    if len(outbound) != 1 or outbound[0].get('Kind') != 'Direct':
+        raise ValueError('Bounded XHTTP requires a direct server outbound.')
+    options = item['Options']; transport = options.get('Transport', {})
+    if set(options) != {'ServerName','Security','Transport','Reality'} or not {'Type','Path','Host','Mode'} <= set(transport) or set(transport)-{'Type','Path','Host','Mode','HTTPVersion','Extra'} or transport['Type']!='XHTTP' or transport['Mode'] not in ('auto','stream-one','stream-up','packet-up') or not isinstance(transport['Path'],str) or len(transport['Path'])>8192 or any(ord(c)<32 for c in transport['Path']):
+        raise ValueError('Unsupported XHTTP model.')
+    version=transport.get('HTTPVersion','2')
+    validate_xhttp_extra(transport.get('Extra',{}))
+    if version not in ('1.1','2','3') or options['Security']=='Reality' and version!='2':
+        raise ValueError('XHTTP HTTP version is incompatible with transport security.')
+    expected={'path':transport['Path'],'host':transport['Host'],'mode':transport['Mode']}
+    if transport.get('Extra'): expected['extra']=transport['Extra']
+    stream=source.get('streamSettings',{}); security=options['Security']
+    if security not in ('TLS','Reality') or set(stream)!={'network','security','xhttpSettings','tlsSettings' if security=='TLS' else 'realitySettings'} or stream['network']!='xhttp' or stream['security']!=security.lower() or stream['xhttpSettings']!=expected:
+        raise ValueError('XHTTP protocol, transport or security differs.')
+    settings=source.get('settings',{})
+    if set(settings)!={'clients','decryption'} or settings['decryption']!='none' or sorted(c.get('email','') for c in settings['clients'])!=sorted(item['UserIds']) or any(set(c)!={'id','email'} or not re.fullmatch(r'[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}',c['id']) for c in settings['clients']):
+        raise ValueError('XHTTP users or flow differ.')
+    if security=='TLS':
+        tls=stream['tlsSettings']
+        if options['Reality']!={} or not item['CertificateId'] or set(tls)!={'serverName','minVersion','maxVersion','alpn','certificates'} or tls['serverName']!=options['ServerName'] or tls['minVersion']!='1.3' or tls['maxVersion']!='1.3' or tls['alpn']!=[{'1.1':'http/1.1','2':'h2','3':'h3'}[version]] or not isinstance(tls['certificates'],list) or len(tls['certificates'])!=1 or set(tls['certificates'][0])!={'certificate','key'}:
+            raise ValueError('XHTTP TLS must retain inline identity and h2.')
+    else:
+        r=options['Reality']; actual=stream['realitySettings']
+        if item['CertificateId'] or set(r)!={'HandshakeServer','HandshakePort','PublicKey','ShortId'} or set(actual)!={'show','target','xver','serverNames','privateKey','shortIds'} or actual['show'] is not False or actual['xver']!=0 or actual['serverNames']!=[options['ServerName']] or actual['target']!=r['HandshakeServer']+':'+str(r['HandshakePort']) or actual['shortIds']!=[r['ShortId']] or not re.fullmatch('[A-Za-z0-9_-]{43}',actual['privateKey']):
+            raise ValueError('XHTTP Reality identity differs.')
 
 
 def normalize(payload):
@@ -99,12 +185,16 @@ def normalize(payload):
         data = base64.b64decode(payload['Configurations'][identifier], validate=True)
         if len(data) > 1048576 or digest(data) != binding['Sha256']:
             raise ValueError('Rendered configuration hash does not match.')
-        config = json.loads(data); item = next(i for i in model['Inbounds'] if i['Id'] == identifier); reality=item['Protocol']=='Reality'
+        config = json.loads(data); item = next(i for i in model['Inbounds'] if i['Id'] == identifier); reality=item['Protocol'] in ('Reality','VLESS')
+        hops = listener_ports(item, binding)
+        if ports.intersection(p for p in hops if p != binding['Port']): raise ValueError('Hysteria port range overlaps another inbound.')
+        ports.update(hops)
         if set(config) != ({'log','inbounds','outbounds','routing'} if reality else {'log', 'dns', 'inbounds', 'outbounds', 'route'}) or len(config['inbounds']) != 1:
             raise ValueError('Only one independently scoped inbound is supported per service.')
         source = config['inbounds'][0]
-        if item['Protocol'] not in ('Reality', 'AnyTLS', 'Shadowsocks2022','Hysteria2') or source.get('protocol' if reality else 'type') != {'Reality':'vless','AnyTLS':'anytls','Shadowsocks2022':'shadowsocks','Hysteria2':'hysteria2'}[item['Protocol']] or source.get('tag') != identifier or source.get('listen') != binding['Address'] or source.get('port' if reality else 'listen_port') != binding['Port'] or item['Enabled'] != binding['Enabled'] or binding['Udp'] != (item['Protocol'] in ('Shadowsocks2022','Hysteria2')):
+        if item['Protocol'] not in ('Reality', 'AnyTLS', 'Shadowsocks2022','Hysteria2','TuicV5','VLESS') or source.get('protocol' if reality else 'type') != {'Reality':'vless','VLESS':'vless','AnyTLS':'anytls','Shadowsocks2022':'shadowsocks','Hysteria2':'hysteria2','TuicV5':'tuic'}[item['Protocol']] or source.get('tag') != identifier or source.get('listen') != binding['Address'] or source.get('port' if reality else 'listen_port') != binding['Port'] or item['Enabled'] != binding['Enabled'] or binding['Udp'] != (item['Protocol'] in ('Shadowsocks2022','Hysteria2','TuicV5') or item['Protocol']=='VLESS' and item['Options']['Transport'].get('HTTPVersion','2')=='3'):
             raise ValueError('Rendered inbound differs from the catalogue.')
+        if item['Protocol']=='VLESS': validate_xhttp(model, item, source)
         if reality and ('Reality' not in payload['Core'] or selected_core(payload,identifier)['Engine']!='xray'): raise ValueError('Reality requires its pinned Xray core.')
     return payload
 
@@ -205,14 +295,17 @@ class Host:
         local = json.loads(self.command(['ip','-j','address','show']).stdout)
         addresses = {a['local'] for item in local for a in item.get('addr_info',[])}
         for b in payload['Bindings']:
-            if not b['Enabled'] or b['Id'] in old and old[b['Id']]['Port'] == b['Port'] and old[b['Id']]['Address'] == b['Address'] and before['Runtime'][b['Id']]['Active']: continue
+            if not b['Enabled']: continue
             address = ipaddress.ip_address(b['Address'])
             if not address.is_unspecified and str(address) not in addresses: raise ValueError('Inbound address is not assigned to this host.')
-            protocol=next(i['Protocol'] for i in payload['Model']['Inbounds'] if i['Id']==b['Id'])
-            for transport in ([socket.SOCK_DGRAM] if protocol=='Hysteria2' else [socket.SOCK_STREAM] + ([socket.SOCK_DGRAM] if b['Udp'] else [])):
-                with socket.socket(socket.AF_INET6 if address.version == 6 else socket.AF_INET, transport) as listener:
-                    if transport == socket.SOCK_STREAM: listener.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-                    listener.bind((str(address),b['Port']))
+            item=next(i for i in payload['Model']['Inbounds'] if i['Id']==b['Id']); protocol=item['Protocol']
+            owned_active=b['Id'] in old and old[b['Id']]['Port'] == b['Port'] and old[b['Id']]['Address'] == b['Address'] and before['Runtime'][b['Id']]['Active']
+            for transport in ([socket.SOCK_DGRAM] if udp_only(item) else [socket.SOCK_STREAM] + ([socket.SOCK_DGRAM] if b['Udp'] else [])):
+                for port in listener_ports(item,b):
+                    if owned_active and port==b['Port']: continue
+                    with socket.socket(socket.AF_INET6 if address.version == 6 else socket.AF_INET, transport) as listener:
+                        if transport == socket.SOCK_STREAM: listener.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+                        listener.bind((str(address),port))
         return before
 
     def write(self, absolute, data, mode=0o600):
@@ -315,7 +408,7 @@ class Host:
 
     def wait_ready(self, binding):
         model=json.loads(self.regular(REGISTRY).read_text())['Model']
-        quic=next(i['Protocol'] for i in model['Inbounds'] if i['Id']==binding['Id'])=='Hysteria2'
+        quic=udp_only(next(i for i in model['Inbounds'] if i['Id']==binding['Id']))
         address=ipaddress.ip_address(binding['Address'])
         host=('127.0.0.1' if address.version==4 else '::1') if address.is_unspecified else str(address)
         for _ in range(60):

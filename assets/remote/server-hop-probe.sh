@@ -76,6 +76,94 @@ def query(port, host, timeout):
                 connection.close()
 
 
+def fields(value, required, optional=()):
+    if not isinstance(value, dict) or not set(required) <= set(value) or set(value) - set(required) - set(optional):
+        raise ValueError('Unsupported next-hop fields')
+
+
+def tls_parameters(value, xray=False):
+    if xray:
+        fields(value, ('serverName', 'allowInsecure', 'minVersion', 'alpn'), ('certificates', 'disableSystemRoot'))
+        if value['allowInsecure'] is not False or value['minVersion'] != '1.3' or value['alpn'] != ['h3']:
+            raise ValueError('Invalid Xray TLS trust')
+        name = value['serverName']
+        if 'certificates' in value:
+            if value.get('disableSystemRoot') is not True or not isinstance(value['certificates'], list) or len(value['certificates']) != 1:
+                raise ValueError('Invalid Xray trust scope')
+            cert = value['certificates'][0]
+            fields(cert, ('usage', 'certificate'))
+            if cert['usage'] != 'verify':
+                raise ValueError('Invalid trust usage')
+            pem = cert['certificate']
+        else:
+            if 'disableSystemRoot' in value:
+                raise ValueError('Invalid trust scope')
+            pem = None
+    else:
+        fields(value, ('enabled', 'server_name'), ('insecure', 'min_version', 'alpn', 'certificate'))
+        if value['enabled'] is not True or value.get('insecure', False) is not False or value.get('min_version', '1.3') != '1.3' or value.get('alpn', ['h3']) != ['h3']:
+            raise ValueError('Invalid sing-box TLS trust')
+        name, pem = value['server_name'], value.get('certificate')
+    if not isinstance(name, str) or not 1 <= len(name) <= 253 or not re.fullmatch(r'[A-Za-z0-9.-]+', name):
+        raise ValueError('Invalid SNI')
+    if pem is not None:
+        if isinstance(pem, list) and all(isinstance(line, str) for line in pem):
+            pem = '\n'.join(pem)
+        if not isinstance(pem, str) or not 1 <= len(pem) <= 65536 or 'PRIVATE KEY' in pem:
+            raise ValueError('Invalid public trust certificate')
+        ssl.create_default_context().load_verify_locations(cadata=pem)
+
+
+def quic_parameters(native, xray):
+    if xray:
+        fields(native, ('tag', 'protocol', 'settings', 'streamSettings'))
+        settings, stream = native['settings'], native['streamSettings']
+        fields(settings, ('version', 'address', 'port'))
+        fields(stream, ('network', 'security', 'tlsSettings', 'hysteriaSettings', 'finalmask'))
+        fields(stream['hysteriaSettings'], ('version', 'auth'))
+        if settings['version'] != 2 or stream['network'] != 'hysteria' or stream['security'] != 'tls' or stream['hysteriaSettings']['version'] != 2:
+            raise ValueError('Invalid Hysteria transport')
+        tls_parameters(stream['tlsSettings'], True)
+        mask = stream['finalmask']; fields(mask, ('quicParams',), ('udp',))
+        params = mask['quicParams']; fields(params, ('congestion',), ('brutalUp', 'brutalDown', 'udpHop'))
+        if params['congestion'] not in ('bbr', 'brutal'):
+            raise ValueError('Invalid Hysteria congestion')
+        for rate in ('brutalUp', 'brutalDown'):
+            if rate in params and (not isinstance(params[rate], str) or not re.fullmatch(r'[1-9][0-9]{0,5} Mbps', params[rate])):
+                raise ValueError('Invalid Hysteria rate')
+        if 'udpHop' in params:
+            fields(params['udpHop'], ('ports', 'interval'))
+            if not isinstance(params['udpHop']['ports'], str) or not re.fullmatch(r'[0-9,-]{1,1024}', params['udpHop']['ports']):
+                raise ValueError('Invalid hopping ports')
+            interval = params['udpHop']['interval']
+            if isinstance(interval, bool) or not isinstance(interval, (int, str)) or not re.fullmatch(r'[0-9]{1,4}(?:-[0-9]{1,4})?', str(interval)):
+                raise ValueError('Invalid hopping interval')
+        if 'udp' in mask:
+            if not isinstance(mask['udp'], list) or len(mask['udp']) != 1:
+                raise ValueError('Invalid UDP mask')
+            fields(mask['udp'][0], ('type', 'settings')); fields(mask['udp'][0]['settings'], ('password',))
+            if mask['udp'][0]['type'] != 'salamander':
+                raise ValueError('Invalid UDP mask type')
+        host, port, password = settings['address'], settings['port'], stream['hysteriaSettings']['auth']
+    else:
+        tuic = native['type'] == 'tuic'
+        fields(native, ('tag', 'type', 'server', 'server_port', 'password', 'tls'),
+               ('uuid', 'congestion_control', 'udp_relay_mode', 'heartbeat', 'zero_rtt_handshake') if tuic else ('up_mbps', 'down_mbps', 'obfs', 'server_ports', 'hop_interval', 'hop_interval_max'))
+        tls_parameters(native['tls'])
+        if tuic:
+            import uuid
+            if not uuid.UUID(native['uuid']).int or native.get('zero_rtt_handshake', False) is not False or native.get('congestion_control', 'cubic') not in ('cubic', 'new_reno', 'bbr') or native.get('udp_relay_mode', 'native') not in ('native', 'quic'):
+                raise ValueError('Invalid TUIC v5')
+        elif 'obfs' in native:
+            fields(native['obfs'], ('type', 'password'))
+            if native['obfs']['type'] != 'salamander':
+                raise ValueError('Invalid obfuscation')
+        host, port, password = native['server'], native['server_port'], native['password']
+    if not isinstance(password, str) or not 1 <= len(password) <= 4096 or any(ord(char) < 32 for char in password):
+        raise ValueError('Invalid next-hop authentication')
+    return host, port
+
+
 def validate(probes, role):
     if role not in ('RealityEntry', 'AnyTlsEntry') or not isinstance(probes, list) or not 1 <= len(probes) <= 7:
         raise ValueError('Invalid probe scope')
@@ -90,20 +178,30 @@ def validate(probes, role):
         if not isinstance(native, dict):
             raise ValueError('Invalid outbound')
         if role == 'RealityEntry':
-            if set(native) != {'tag', 'protocol', 'settings'} or native['protocol'] != 'shadowsocks' or set(native['settings']) != {'servers'} or len(native['settings']['servers']) != 1:
+            if native.get('protocol') == 'hysteria':
+                host, port = quic_parameters(native, True)
+                server = None
+            elif set(native) != {'tag', 'protocol', 'settings'} or native['protocol'] != 'shadowsocks' or set(native['settings']) != {'servers'} or len(native['settings']['servers']) != 1:
                 raise ValueError('Invalid Xray outbound')
-            server = native['settings']['servers'][0]
-            if set(server) != {'address', 'port', 'method', 'password'}:
-                raise ValueError('Invalid Xray server')
-            host, port = server['address'], server['port']
+            else:
+                server = native['settings']['servers'][0]
+                if set(server) != {'address', 'port', 'method', 'password'}:
+                    raise ValueError('Invalid Xray server')
+                host, port = server['address'], server['port']
         else:
-            if set(native) != {'tag', 'type', 'server', 'server_port', 'method', 'password'} or native['type'] != 'shadowsocks':
+            if native.get('type') in ('hysteria2', 'tuic'):
+                host, port = quic_parameters(native, False)
+                server = None
+            elif set(native) != {'tag', 'type', 'server', 'server_port', 'method', 'password'} or native['type'] != 'shadowsocks':
                 raise ValueError('Invalid sing-box outbound')
-            server = native
-            host, port = server['server'], server['server_port']
+            else:
+                server = native
+                host, port = server['server'], server['server_port']
         ipaddress.ip_address(host)
-        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535 or server['method'] not in methods or not isinstance(server['password'], str) or not 1 <= len(server['password']) <= 4096:
-            raise ValueError('Invalid Shadowsocks parameters')
+        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+            raise ValueError('Invalid server port')
+        if server is not None and (server['method'] not in methods or not isinstance(server['password'], str) or not 1 <= len(server['password']) <= 4096):
+            raise ValueError('Invalid Shadowsocks authentication')
         if native['tag'] != 'may-hop-' + item['Id']:
             raise ValueError('Unowned outbound tag')
 
@@ -137,7 +235,8 @@ def run_probe(binary, role, item):
             actual = query(port, PROBE_HOST_V6 if expected.version == 6 else PROBE_HOST_V4, min(10, deadline - time.monotonic()))
             if actual != str(expected):
                 raise ValueError('Egress mismatch')
-            return {'Id': item['Id'], 'Status': 'Passed', 'Egress': actual, 'From': 'EntryServer', 'Network': 'TCP'}
+            protocol = ('hysteria2' if outbound.get('protocol') == 'hysteria' else 'shadowsocks') if role == 'RealityEntry' else outbound['type']
+            return {'Id': item['Id'], 'Status': 'Passed', 'Egress': actual, 'From': 'EntryServer', 'Network': 'TCP', 'Transport': 'QUIC' if protocol in ('hysteria2', 'tuic') else 'TCP', 'ValidatedProtocol': protocol}
         finally:
             if process.poll() is None:
                 process.terminate()

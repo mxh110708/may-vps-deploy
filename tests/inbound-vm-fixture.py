@@ -14,6 +14,7 @@ import uuid
 import ipaddress
 import secrets
 import zipfile
+import re
 
 
 def main():
@@ -25,6 +26,7 @@ def main():
     parser.add_argument('--project', required=True, type=Path)
     parser.add_argument('--debian', required=True, type=int, choices=(12, 13))
     parser.add_argument('--quic', action='store_true')
+    parser.add_argument('--offline-packages', type=Path)
     args = parser.parse_args()
     root = args.output.resolve()
     if os.geteuid() != 0 or not Path('/dev/kvm').exists() or '/Pywork/.codex-tmp/' not in str(root):
@@ -57,7 +59,8 @@ def main():
     identity = str(uuid.uuid4()); key = root/'id_ed25519'
     command(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', key])
     (root/'meta-data').write_text('instance-id: may-inbounds-'+identity+'\nlocal-hostname: may-inbound-fixture\n')
-    (root/'user-data').write_text('#cloud-config\ndisable_root: false\nssh_pwauth: false\nssh_authorized_keys:\n  - '+key.with_suffix('.pub').read_text().strip()+'\npackages: [nftables, python3, iproute2]\nwrite_files:\n  - path: /etc/may-inbound-fixture\n    permissions: "0600"\n    content: '+identity+'\n  - path: /etc/ssh/sshd_config.d/30-may-test-ports.conf\n    content: |\n      Port 22\n      Port 2222\nruncmd:\n  - [systemctl, restart, ssh]\n')
+    package_config='' if args.offline_packages else 'packages: [nftables, python3, iproute2]\n'
+    (root/'user-data').write_text('#cloud-config\ndisable_root: false\nssh_pwauth: false\nssh_authorized_keys:\n  - '+key.with_suffix('.pub').read_text().strip()+'\n'+package_config+'write_files:\n  - path: /etc/may-inbound-fixture\n    permissions: "0600"\n    content: '+identity+'\n  - path: /etc/ssh/sshd_config.d/30-may-test-ports.conf\n    content: |\n      Port 22\n      Port 2222\nruncmd:\n  - [systemctl, restart, ssh]\n')
     command([qemu/'usr/bin/genisoimage', '-quiet', '-output', root/'seed.iso', '-volid', 'cidata', '-joliet', '-rock', root/'user-data', root/'meta-data'], env=env)
     command([qemu/'usr/bin/qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2', '-b', args.runtime/'images'/f'debian-{args.debian}-genericcloud-amd64.qcow2', root/'disk.qcow2', '5G'], env=env)
     ssh_port, rescue = port(), port(); applications = {str(n):port() for n in range(22000, 22008)}
@@ -87,6 +90,21 @@ def main():
         command(ssh+['cloud-init status --wait'],timeout=420)
         proof = command(ssh+["python3 -c \"from pathlib import Path; print(Path('/etc/may-inbound-fixture').read_text().strip()); print(Path('/sys/class/dmi/id/product_uuid').read_text().strip())\""]).stdout.lower().split()
         if proof != [identity,identity]: raise RuntimeError('Fixture identity mismatch; no mutation allowed.')
+        if args.offline_packages:
+            source=args.offline_packages.resolve()
+            if '/Pywork/.codex-tmp/' not in str(source) or source.is_symlink(): raise RuntimeError('Workspace-only disposable dependencies required.')
+            files=json.loads((source/'checksums.json').read_text())
+            if not isinstance(files,dict) or not 1<=len(files)<=32: raise RuntimeError('Invalid offline dependency manifest.')
+            bundle=root/'dependencies.tar'
+            with tarfile.open(bundle,'w') as archive:
+                for name,digest in files.items():
+                    if not re.fullmatch(r'[A-Za-z0-9_.+%:~\-]+\.deb',name) or not re.fullmatch(r'[a-f0-9]{64}',digest): raise RuntimeError('Invalid dependency entry.')
+                    package=source/name
+                    if package.is_symlink() or not package.is_file() or package.stat().st_size>20000000 or hashlib.sha256(package.read_bytes()).hexdigest()!=digest: raise RuntimeError('Offline dependency checksum mismatch.')
+                    archive.add(package,arcname=name)
+            command(['scp','-q','-P',str(ssh_port),'-i',str(key),'-o','StrictHostKeyChecking=accept-new','-o','UserKnownHostsFile='+str(root/'known_hosts'),bundle,'root@127.0.0.1:/tmp/may-fixture-dependencies.tar'],timeout=60)
+            command(ssh+['mkdir /tmp/may-fixture-dependencies && tar -xf /tmp/may-fixture-dependencies.tar -C /tmp/may-fixture-dependencies && dpkg -i /tmp/may-fixture-dependencies/*.deb'],timeout=120)
+            command(ssh+['command -v nft && command -v python3 && command -v ip'],timeout=10)
         with tarfile.open(fileobj=io.BytesIO(content)) as archive:
             binary = archive.extractfile(next(m for m in archive.getmembers() if m.isfile() and m.name.endswith('/sing-box'))).read()
         with zipfile.ZipFile(io.BytesIO(xray_content)) as archive:xray_binary=archive.read('xray')

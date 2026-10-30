@@ -15,7 +15,8 @@ public sealed partial class MainWindow
         var boxes = new List<(CheckBox Box, JsonObject Node)>();
         foreach (var choice in choices)
         {
-            var box = new CheckBox { Content = Column(Text(choice.Label,16),Text(choice.Detail,14,true)), IsEnabled = choice.Node != null, HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "ClientInbounds.Choice" };
+            var incompatible = choice.Node!=null&&ClientSchemes.Formats(selected).Any(format=>choice.Node[format=="Clash"?"clash":"sing_box"]==null);
+            var box = new CheckBox { Content = Column(Text(choice.Label,16),Text(choice.Detail + (incompatible ? " · 所选生成目标缺少完整参数，请核对客户端能力。" : ""),14,true)), IsEnabled = choice.Node != null && !incompatible, HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "ClientInbounds.Choice" };
             panel.Children.Add(box); if (choice.Node != null) boxes.Add((box,choice.Node));
         }
         var error = Text("",14,true); error.Tag = "ClientInbounds.Error"; panel.Children.Add(error);

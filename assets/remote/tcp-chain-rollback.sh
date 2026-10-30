@@ -12,7 +12,7 @@ flock -w 30 9 || exit 1
 [[ "$(cat "$backup/control-task-id")" == "$VPS_PARAM_CONTROL_TASK_ID" ]]
 [[ "$(cat "$backup/tcp-chain-id")" == "$VPS_PARAM_TCP_CHAIN_ID" ]]
 components="$(cat "$backup/components")"
-[[ "$components" == TcpForwarding || "$components" == TcpForwarding,Firewall ]]
+[[ "$components" == TcpForwarding || "$components" == TcpForwarding,Firewall || "$components" == UdpForwarding || "$components" == UdpForwarding,Firewall ]]
 for file in tcp-chain-rollback tcp-chain-rollback.sha256; do [[ -f "$backup/$file" && ! -L "$backup/$file" ]]; done
 (cd "$backup" && sha256sum -c tcp-chain-rollback.sha256 >/dev/null)
 owner=/var/lib/may-vps-deploy/transaction.owner

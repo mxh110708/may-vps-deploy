@@ -1,6 +1,6 @@
 # Third-party test cores
 
-This directory contains unmodified official Windows amd64 release archives used only for local configuration and real-protocol acceptance tests. MXH-VPS-Deploy verifies each archive with SHA-256 before extracting it into the ignored `.cache/client-cores/` directory.
+This directory contains pinned Windows amd64 command-line cores used only for local configuration and real-protocol acceptance tests. May VPS Deploy verifies each archive with SHA-256 before extracting it into the ignored `.cache/client-cores/` directory. The official archives remain unmodified; the separately named May Core is a development source build.
 
 ## Mihomo
 
@@ -13,13 +13,24 @@ This directory contains unmodified official Windows amd64 release archives used 
 ## sing-box
 
 - Project: <https://github.com/SagerNet/sing-box>
-- Client validation release: `v1.14.2`, matching the official core version used by May Route `1.14.2-mxh.7`.
+- Official client validation release: `v1.14.2`; it does not contain May's XHTTP extension.
 - Current client archive: `sing-box-1.14.2-windows-amd64.zip`.
 - Obsolete Windows validation ZIPs are not included. Linux 1.14.0 is downloaded only into ignored temporary directories when running the upgrade regression.
 - License: GNU General Public License v3.0 or later with the upstream name-use restriction; the upstream license is included inside the official archive.
 - Corresponding source: <https://github.com/SagerNet/sing-box/tree/v1.14.2> (tag archive: <https://github.com/SagerNet/sing-box/archive/refs/tags/v1.14.2.zip>).
 
 The corresponding download URLs and SHA-256 digests are recorded in `checksums.json` and `config/versions.json`. These archives are command-line cores, not GUI applications. Runtime validation never reads Clash Verge AppData and never changes the system proxy or TUN state.
+
+## May Core XHTTP development snapshot
+
+- Project: <https://github.com/mxh110708/may-route-core>.
+- Version: `1.14.2-may.xhttp20.0`, an unreleased working-tree snapshot; not an official sing-box release or a clean released commit.
+- Binary archive: `may-core-1.14.2-may.xhttp20.0-windows-amd64.zip`.
+- Complete corresponding source: `may-core-1.14.2-may.xhttp20.0-source.zip`, including a per-file `SOURCE-FILES.sha256` manifest.
+- License: the root sing-box GPLv3-or-later license and upstream name-use restriction remain in place. XHTTP wire helpers adapt MetaCubeX/mihomo `v1.19.32`; the binary and source archives include their attribution and GPLv3 license.
+- `checksums.json` pins both archives, binary hash, base revision, actual source-tree digest, Go toolchain, build tags and link options. `scripts/Build-MayXhttpValidationAsset.ps1` builds from the copied source snapshot.
+
+Only native configurations containing XHTTP select this core. Ordinary native configurations still use official sing-box. No GUI installer or second persistent proxy service is included.
 
 ## Mihomo GeoData
 

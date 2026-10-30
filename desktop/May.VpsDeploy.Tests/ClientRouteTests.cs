@@ -21,7 +21,7 @@ internal sealed partial class BoundaryTests
         var key = Convert.ToBase64String(Enumerable.Repeat((byte)7, 16).ToArray());
         var ss = "ss://2022-blake3-aes-128-gcm:" + Uri.EscapeDataString(key + ":" + key) + "@[2001:db8::20]:8443#Landing";
         var any = "anytls://synthetic%40password@any.example/?sni=tls.example#AnyTLS";
-        var input = TestRealityLink + "\n" + any + "\n" + ss + "\n" + TestRealityLink.Replace("#Entry", "#AnotherName") + "\n" + any.Replace("synthetic%40password", "different-password") + "\nhy2://unsupported@invalid.example:443";
+        var input = TestRealityLink + "\n" + any + "\n" + ss + "\n" + TestRealityLink.Replace("#Entry", "#AnotherName") + "\n" + any.Replace("synthetic%40password", "different-password") + "\nhy2://unsupported@invalid.example:443?unsupported=1";
         var initial = ArchiveStore.Fingerprint(scheme); var preview = ClientNodeImport.Preview(input, scheme, "US-West-LA Entry");
         Check(preview.Accepted == 4 && preview.Rows.Count(r => r.Status == "Duplicate") == 1 && preview.Rows.Count(r => r.Status == "Rejected") == 1, "batch dropped errors or deduplicated only by endpoint");
         Check(ArchiveStore.Fingerprint(scheme) == initial, "preview mutated the scheme");

@@ -15,6 +15,7 @@ import subprocess
 import tarfile
 import time
 import uuid
+import secrets
 
 
 def main():
@@ -23,6 +24,8 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--core-archive', required=True, type=Path)
     parser.add_argument('--project', required=True, type=Path)
+    parser.add_argument('--round21', action='store_true')
+    parser.add_argument('--lifetime', type=int, default=3600, choices=range(180,3601))
     args = parser.parse_args()
     if os.geteuid() != 0 or not Path('/dev/kvm').exists():
         raise RuntimeError('Explicit disposable KVM fixture requires WSL root and KVM.')
@@ -49,7 +52,7 @@ def main():
             return listener.getsockname()[1]
 
     link12, link23 = port(), port()
-    nodes, processes = {}, []
+    nodes, processes, channels = {}, [], []
     specs = [
         ('Landing', 13, '198.51.100.30', [('52:54:00:12:03:02', '198.51.100.30/24', 'listen=127.0.0.1:' + str(link23))]),
         ('Relay', 13, '192.0.2.20', [('52:54:00:12:02:01', '192.0.2.20/24', 'listen=127.0.0.1:' + str(link12)), ('52:54:00:12:02:02', '198.51.100.20/24', 'connect=127.0.0.1:' + str(link23))]),
@@ -90,13 +93,31 @@ def main():
                 time.sleep(2)
             else:
                 raise RuntimeError('Disposable SSH startup timed out.')
-            command(ssh + ['cloud-init status --wait'], timeout=420)
+            command(ssh + ['cloud-init status --wait'], timeout=180)
             guard = command(ssh + ['python3 -c "from pathlib import Path; print(Path(\'/etc/may-tcp-chain-fixture\').read_text().strip()); print(Path(\'/sys/class/dmi/id/product_uuid\').read_text().strip())"']).stdout.lower().split()
             if guard != [identity, identity]:
                 raise RuntimeError('Disposable identity mismatch; no commands applied.')
             network = "import json,subprocess\nlinks=" + repr([(mac, ip) for mac, ip, _ in links]) + "\nfor mac,address in links:\n for link in json.loads(subprocess.check_output(['ip','-j','link'])):\n  if link.get('address','').lower()==mac:\n   subprocess.run(['ip','link','set',link['ifname'],'up'],check=True)\n   subprocess.run(['ip','address','replace',address,'dev',link['ifname']],check=True)\n"
             script = "set -euo pipefail\ninstall -d -m 0700 /opt/may-tcp-chain-fixture\nprintf '%s' '" + base64.b64encode(network.encode()).decode() + "' | base64 -d > /opt/may-tcp-chain-fixture/network.py\ncat > /etc/systemd/system/may-tcp-chain-network.service <<'EOF'\n[Unit]\nDescription=Disposable TCP chain test NICs\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 /opt/may-tcp-chain-fixture/network.py\nRemainAfterExit=yes\n[Install]\nWantedBy=multi-user.target\nEOF\nsystemctl daemon-reload\nsystemctl enable --now may-tcp-chain-network.service\n"
             command(ssh + ['bash -se'], input=script, timeout=30)
+            if args.round21:
+                addresses={
+                    '192.0.2.10/24':'2001:db8:21:1::10/64', '192.0.2.20/24':'2001:db8:21:1::20/64',
+                    '198.51.100.20/24':'2001:db8:21:2::20/64', '198.51.100.30/24':'2001:db8:21:2::30/64'}
+                ipv6=[(mac,addresses[ip]) for mac,ip,_ in links]
+                addition="\nfor mac,address in "+repr(ipv6)+":\n for link in json.loads(subprocess.check_output(['ip','-j','link'])):\n  if link.get('address','').lower()==mac:\n   subprocess.run(['ip','-6','address','replace',address,'dev',link['ifname'],'nodad'],check=True)\n"
+                command(ssh+['bash -se'],input="printf '%s' '"+base64.b64encode(addition.encode()).decode()+"' | base64 -d >> /opt/may-tcp-chain-fixture/network.py\nsystemctl restart may-tcp-chain-network.service\n",timeout=15)
+                nodes[name]['IPv6']=addresses[links[0][1]].split('/')[0]
+                if name in ('Front','Landing'):
+                    import importlib.util
+                    spec=importlib.util.spec_from_file_location('ingress',args.project/'tests/chain-fixture-channel.py');channel=importlib.util.module_from_spec(spec);spec.loader.exec_module(channel)
+                    for family,target in [('IPv4',address),('IPv6',nodes[name]['IPv6'])]:
+                        entry=port()
+                        target='['+target+']' if ':' in target else target
+                        forward=subprocess.Popen(ssh[:-1]+['-N','-o','ExitOnForwardFailure=yes','-L','127.0.0.1:'+str(entry)+':'+target+':18443',ssh[-1]],stdout=subprocess.DEVNULL,stderr=(work/('ingress-'+family+'.log')).open('w'))
+                        processes.append(forward)
+                        token=secrets.token_urlsafe(32);datagrams=channel.start(ssh,nodes[name]['IPv6'] if family=='IPv6' else address,token);channels.append(datagrams)
+                        nodes[name]['Ingress'+family]={'ApplicationPort':entry,'DatagramTunnelPort':datagrams.server_address[1],'DatagramTunnelToken':token}
             print(name, 'Debian', version, 'disposable guest ready', flush=True)
             if name == 'Landing':
                 import io
@@ -110,7 +131,7 @@ def main():
         manifest = {'Version': 1, 'SyntheticOnly': True, 'Nodes': nodes, 'StopFile': str(root / 'stop'), 'CreatedAt': time.time()}
         (root / 'manifest.private.json').write_text(json.dumps(manifest, indent=2))
         print('READY: three disposable guests; waiting for explicit stop marker', flush=True)
-        for _ in range(3600):
+        for _ in range(args.lifetime):
             if (root / 'stop').exists():
                 break
             if any(p.poll() is not None for p in processes):
@@ -119,6 +140,7 @@ def main():
         else:
             raise RuntimeError('Fixture lifetime exceeded one hour.')
     finally:
+        for channel in channels:channel.shutdown();channel.server_close()
         for process in reversed(processes):
             if process.poll() is None:
                 process.terminate()

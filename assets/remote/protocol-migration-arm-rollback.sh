@@ -424,7 +424,7 @@ chmod 0750 /usr/local/libexec/mxh-protocol-migration-rollback
 
 if [[ -n "${VPS_PARAM_TCP_CHAIN_ID:-}" ]]; then
   [[ "$VPS_PARAM_TCP_CHAIN_ID" =~ ^[a-f0-9]{32}$ ]]
-  [[ "$components" == TcpForwarding || "$components" == TcpForwarding,Firewall ]]
+  [[ "$components" == TcpForwarding || "$components" == TcpForwarding,Firewall || "$components" == UdpForwarding || "$components" == UdpForwarding,Firewall ]]
   printf '%s\n' "$VPS_PARAM_TCP_CHAIN_ID" > "$backup_dir/tcp-chain-id"
   cp /usr/local/libexec/mxh-protocol-migration-rollback "$backup_dir/tcp-chain-rollback"
   (cd "$backup_dir" && sha256sum tcp-chain-rollback > tcp-chain-rollback.sha256)

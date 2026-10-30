@@ -12,7 +12,7 @@ public sealed partial class MainWindow
         var selected = scheme ?? throw new OperationException("请先打开方案。");
         var model = new JsonObject { ["Region"] = selected["Layout"]!.Strings("region_groups").First(), ["Role"] = "Auto" };
         var input = new TextBox { Header = "每行一个分享链接", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 180, MaxLength = ClientNodeImport.MaximumCharacters, Tag = "ClientLinks.Input" };
-        var panel = Column(Text("支持 VLESS Reality + Vision、AnyTLS、Shadowsocks。先逐条预览，不支持的参数会明确拒绝。链接含凭据，只保存到方案的加密私人归档。", 14, true), input,
+        var panel = Column(Text("支持 VLESS Reality + Vision、TLS WS／gRPC 的 VLESS／Trojan、AnyTLS、Shadowsocks、Hysteria2（含标准多端口）。先逐条预览，不支持的参数会明确拒绝。链接含凭据，只保存到方案的加密私人归档。", 14, true), input,
             Choice("入口归属 / 落地连接的入口组", model, "Region", selected["Layout"]!.Strings("region_groups").Select(r => (r, r))),
             Choice("节点用途", model, "Role", [("Auto", "默认：SS 作为落地，其余作为入口"), ("entry", "全部作为入口"), ("landing", "全部作为落地")]));
         var dialog = OperationDialog("导入外部节点", panel, "预览");
@@ -29,7 +29,7 @@ public sealed partial class MainWindow
             var node = row.Node;
             var server = node?.Text("sing_box.server") ?? ""; var endpoint = (server.Contains(':') ? "[" + server + "]" : server) + ":" + node?.Number("sing_box.server_port");
             rows.Children.Add(Column(Text("第 " + row.Line + " 行 · " + (row.Status == "Ready" ? node!.Text("name") : row.Status == "Duplicate" ? "重复连接" : "无法导入"), 16),
-                Text(node == null ? row.Message : node.Text("sing_box.type") + " · " + endpoint + " · " + (node.Text("kind") == "entry" ? "入口" : "落地") + "\n" + row.Message, 13, true)));
+                Text(node == null ? row.Message : ClientStreamTransports.Label(node) + " · " + endpoint + (node.Text("clash.ports") == "" ? "" : " · 跳跃 " + node.Text("clash.ports")) + " · " + (node.Text("kind") == "entry" ? "入口" : "落地") + "\n" + row.Message, 13, true)));
         }
         var review = OperationDialog("核对导入结果", Column(Text("可导入 " + preview.Accepted + " 个；重复 " + preview.Rows.Count(r => r.Status == "Duplicate") + " 个；拒绝 " + preview.Rows.Count(r => r.Status == "Rejected") + " 个。只有下方标为可导入的节点会加入方案。", 14),
             new ScrollViewer { Content = rows, MaxHeight = 400 }), "导入 " + preview.Accepted + " 个有效节点");
@@ -49,7 +49,7 @@ public sealed partial class MainWindow
         DirtyScheme();
     }
 
-    private static string NodeRouteLabel(JsonObject node) => node.Text("name") + "\n" + node.Text("sing_box.type", node.Text("clash.type")) + " · 连接：" + ClientTopology.ConnectionFamily(node) + " · " + ClientTopology.OriginLabel(node);
+    private static string NodeRouteLabel(JsonObject node) => node.Text("name") + "\n" + ClientStreamTransports.Label(node) + " · 连接：" + ClientTopology.ConnectionFamily(node) + " · " + ClientTopology.OriginLabel(node);
     private static string ExitLabel(JsonObject node) => (node.At("ServerRoute.DestinationRules") is JsonArray rules && rules.Count > 0 ? "默认落地：" : "") + (ClientTopology.EgressFamily(node) switch { "IPv4" => "IPv4 网站出口", "IPv6" => "IPv6 网站出口", _ => "网站出口地址族未标注，诊断时观测" });
 
     private void DesignerTopology()

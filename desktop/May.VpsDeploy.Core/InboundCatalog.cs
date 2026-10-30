@@ -18,10 +18,11 @@ public interface IInboundValidation
 public static class InboundCatalog
 {
     public const int MaximumInbounds = 16;
-    public static string[] Protocols => ["Reality", "AnyTLS", "Shadowsocks2022", "Hysteria2"];
-    public static bool UdpOnly(JsonObject inbound) => inbound.Text("Protocol") == "Hysteria2";
-    public static bool UsesUdp(JsonObject inbound) => inbound.Text("Protocol") is "Shadowsocks2022" or "Hysteria2";
-    public static string UserKind(JsonObject inbound) => inbound.Text("Protocol") switch { "Reality" => "Uuid", "AnyTLS" or "Hysteria2" => "Password", _ => inbound.Text("Options.Method") == "2022-blake3-aes-256-gcm" ? "SS256" : "SS128" };
+    public static string[] Protocols => ["Reality", "AnyTLS", "Shadowsocks2022", "Hysteria2", "TuicV5", "VLESS"];
+    public static bool UsesXray(JsonObject inbound) => inbound.Text("Protocol") is "Reality" or "VLESS";
+    public static bool UdpOnly(JsonObject inbound) => inbound.Text("Protocol") is "Hysteria2" or "TuicV5";
+    public static bool UsesUdp(JsonObject inbound) => inbound.Text("Protocol") is "Shadowsocks2022" or "Hysteria2" or "TuicV5" || inbound.Text("Protocol")=="VLESS"&&inbound.Text("Options.Transport.HTTPVersion")=="3";
+    public static string UserKind(JsonObject inbound) => inbound.Text("Protocol") switch { "Reality" or "VLESS" => "Uuid", "TuicV5" => "TuicV5", "AnyTLS" or "Hysteria2" => "Password", _ => inbound.Text("Options.Method") == "2022-blake3-aes-256-gcm" ? "SS256" : "SS128" };
     public static string Id(string value) => Regex.IsMatch(value, "^[a-f0-9]{32}$") ? value : throw new OperationException("入站资源身份无效。");
     public static IEnumerable<JsonObject> Items(JsonObject model, string group) => (model[group] as JsonArray)?.OfType<JsonObject>() ?? [];
     public static JsonObject Empty() => new() { ["Version"] = 1, ["Inbounds"] = new JsonArray(), ["Users"] = new JsonArray(), ["Certificates"] = new JsonArray(), ["Outbounds"] = new JsonArray() };
@@ -38,8 +39,8 @@ public static class InboundCatalog
         }
         catch (CryptographicException) { throw new OperationException("证书或私钥格式不正确，或二者不匹配。"); }
     }
-    public static string Label(string protocol) => protocol switch { "Reality" => "VLESS / Reality", "AnyTLS" => "AnyTLS", "Shadowsocks2022" => "Shadowsocks 2022", "Hysteria2" => "Hysteria2 / QUIC", _ => protocol };
-    private static string HysteriaSummary(JsonObject inbound) => !UdpOnly(inbound) ? "" : " · UDP/QUIC · " + (inbound.Number("Options.UploadMbps") == 0 ? "自适应 BBR" : "客户端上行 " + inbound.Number("Options.UploadMbps") + " Mbps / 下行 " + inbound.Number("Options.DownloadMbps") + " Mbps") + " · Salamander " + (inbound.Flag("Options.ObfsEnabled") ? "已启用" : "未启用") + " · SNI " + inbound.Text("Options.ServerName");
+    public static string Label(string protocol) => protocol switch { "Reality" => "VLESS / Reality", "VLESS" => "VLESS / XHTTP", "AnyTLS" => "AnyTLS", "Shadowsocks2022" => "Shadowsocks 2022", "Hysteria2" => "Hysteria2 / QUIC", "TuicV5" => "TUIC v5 / QUIC", _ => protocol };
+    private static string HysteriaSummary(JsonObject inbound) => inbound.Text("Protocol") != "Hysteria2" ? "" : " · UDP/QUIC · " + (inbound.Number("Options.UploadMbps") == 0 ? "自适应 BBR" : "客户端上行 " + inbound.Number("Options.UploadMbps") + " Mbps / 下行 " + inbound.Number("Options.DownloadMbps") + " Mbps") + " · Salamander " + (inbound.Flag("Options.ObfsEnabled") ? "已启用" : "未启用") + " · SNI " + inbound.Text("Options.ServerName") + (inbound.Text("Options.HopPorts") == "" ? "" : " · 跳跃端口 " + inbound.Text("Options.HopPorts") + " / " + inbound.Number("Options.HopIntervalSeconds") + " 秒（主机受管 UDP 重定向；服务商须放行完整端口集）");
     private static void Fields(JsonObject value, params string[] fields)
     { if (value.Count != fields.Length || value.Any(p => !fields.Contains(p.Key))) throw new OperationException("入站模型包含未知或缺少的字段。"); }
     private static void Name(JsonObject value)
@@ -69,11 +70,14 @@ public static class InboundCatalog
         foreach (var user in Items(m, "Users"))
         {
             Fields(user, "Id", "Name", "Kind"); var secret = credentials["Users"]?[user.Text("Id")] as JsonObject ?? throw new OperationException("用户凭据缺失。");
-            Fields(secret, "Value"); var value = secret.Text("Value");
+            if (user.Text("Kind") == "TuicV5") Fields(secret, "Value", "Uuid"); else Fields(secret, "Value"); var value = secret.Text("Value");
             switch (user.Text("Kind"))
             {
                 case "Uuid": if (!Guid.TryParseExact(value, "D", out var id) || id == Guid.Empty) throw new OperationException("VLESS 用户 UUID 无效。"); break;
                 case "Password": if (value.Length is < 16 or > 256 || value.Any(char.IsControl)) throw new OperationException("AnyTLS 密码须为 16–256 个可打印字符。"); break;
+                case "TuicV5":
+                    if (!Guid.TryParseExact(secret.Text("Uuid"), "D", out var tuicId) || tuicId == Guid.Empty || value.Length is < 16 or > 256 || value.Any(char.IsControl)) throw new OperationException("TUIC v5 用户须有有效 UUID 和 16–256 个可打印字符的密码。");
+                    break;
                 case "SS128": Key(value, 16); break;
                 case "SS256": Key(value, 32); break;
                 default: throw new OperationException("用户认证类型不受支持。");
@@ -114,18 +118,40 @@ public static class InboundCatalog
             foreach (var userId in inbound.Strings("UserIds"))
                 if (Items(m, "Users").SingleOrDefault(u => u.Text("Id") == userId)?.Text("Kind") != kind) throw new OperationException("引用的用户不存在或认证类型与协议不匹配。");
             if (!Items(m, "Outbounds").Any(o => o.Text("Id") == inbound.Text("OutboundId"))) throw new OperationException("入站引用的出站不存在。");
-            if (inbound.Text("Protocol") is "AnyTLS" or "Hysteria2")
+            if (inbound.Text("Protocol") is "AnyTLS" or "Hysteria2" or "TuicV5" or "VLESS")
             {
                 if (inbound.Text("Protocol") == "AnyTLS") { Fields(options, "ServerName", "EchEnabled"); _ = Flag(options, "EchEnabled"); }
+                else if (inbound.Text("Protocol") == "VLESS")
+                {
+                    VlessXhttp.Validate(options, credentials["Inbounds"]![inbound.Text("Id")]!);
+                    if (Items(m, "Outbounds").Single(o => o.Text("Id") == inbound.Text("OutboundId")).Text("Kind") != "Direct") throw new OperationException("本轮 XHTTP 仅验收直连出站，不叠加服务器下一跳。");
+                }
+                else if (inbound.Text("Protocol") == "TuicV5")
+                {
+                    TuicV5.Validate(options);
+                    var identities = inbound.Strings("UserIds").Select(id => Guid.Parse(credentials.Text("Users." + id + ".Uuid"))).ToArray();
+                    if (identities.Distinct().Count() != identities.Length) throw new OperationException("同一 TUIC 入站不能绑定重复的用户 UUID。");
+                }
                 else
                 {
-                    Fields(options, "ServerName", "UploadMbps", "DownloadMbps", "ObfsEnabled"); _ = Flag(options, "ObfsEnabled");
+                    if (options.ContainsKey("HopPorts") || options.ContainsKey("HopIntervalSeconds"))
+                    {
+                        Fields(options, "ServerName", "UploadMbps", "DownloadMbps", "ObfsEnabled", "HopPorts", "HopIntervalSeconds");
+                        if (options["HopPorts"] is not JsonValue hopValue || !hopValue.TryGetValue<string>(out var hopText)) throw new OperationException("跳跃端口须为文本格式。");
+                        var hops = Hysteria2Ports.Expand(hopText);
+                        if (hops.Length < 2 || !hops.Contains(port)) throw new OperationException("跳跃端口至少包含两个端口，并须包含当前监听端口。");
+                        foreach (var hop in hops.Where(p => p != port)) if (!ports.Add(hop)) throw new OperationException("跳跃端口与其他独立入站端口冲突；停用入站仍保留端口。");
+                        options["HopPorts"] = Hysteria2Ports.Normalize(hopText); _ = Hysteria2Ports.Interval(options);
+                    }
+                    else Fields(options, "ServerName", "UploadMbps", "DownloadMbps", "ObfsEnabled");
+                    _ = Flag(options, "ObfsEnabled");
                     foreach (var field in new[] { "UploadMbps", "DownloadMbps" }) if (options[field] is not JsonValue bandwidth || !bandwidth.TryGetValue<int>(out var rate) || rate is < 0 or > 100000) throw new OperationException("Hysteria2 带宽须为 0–100000 Mbps 的整数；两项为 0 时使用自适应拥塞控制。");
                     if ((options.Number("UploadMbps") == 0) != (options.Number("DownloadMbps") == 0)) throw new OperationException("自适应模式请将上、下行同时设为 0；固定带宽请同时填写正数。");
                     var obfs = credentials.Text("Inbounds." + inbound.Text("Id") + ".ObfsPassword");
                     if (options.Flag("ObfsEnabled") && (obfs.Length is < 16 or > 256 || obfs.Any(char.IsControl))) throw new OperationException("Salamander 密码须为 16–256 个可打印字符。");
                 }
                 DeploymentPlans.Domain(options.Text("ServerName"));
+                if (inbound.Text("Protocol") == "VLESS" && options.Text("Security") == "Reality") { if (inbound.Text("CertificateId") != "") throw new OperationException("Reality XHTTP 不使用证书引用，请清空后审阅。"); continue; }
                 var cert = Items(m, "Certificates").SingleOrDefault(c => c.Text("Id") == inbound.Text("CertificateId")) ?? throw new OperationException("TLS 入站须引用独立证书。");
                 var material = credentials["Certificates"]![cert.Text("Id")]!;
                 using var x509 = X509Certificate2.CreateFromPem(material.Text("CertificatePem"));
@@ -152,7 +178,8 @@ public static class InboundCatalog
     public static JsonObject AddUser(JsonObject model, JsonObject credentials, string name, string kind)
     {
         var user = new JsonObject { ["Id"] = NewId(), ["Name"] = name, ["Kind"] = kind }; model["Users"]!.AsArray().Add(user);
-        credentials["Users"]![user.Text("Id")] = new JsonObject { ["Value"] = kind == "Uuid" ? Guid.NewGuid().ToString() : ServerConfigurations.RandomKey(kind == "SS128" ? 16 : 32) }; return user;
+        credentials["Users"]![user.Text("Id")] = new JsonObject { ["Value"] = kind == "Uuid" ? Guid.NewGuid().ToString() : ServerConfigurations.RandomKey(kind == "SS128" ? 16 : 32) };
+        if (kind == "TuicV5") credentials["Users"]![user.Text("Id")]!["Uuid"] = Guid.NewGuid().ToString(); return user;
     }
     public static JsonObject ImportCertificate(JsonObject model, JsonObject credentials, string name, string certificatePem, string keyPem)
     {
@@ -169,12 +196,12 @@ public static class InboundCatalog
     public static JsonObject AddInbound(JsonObject model, JsonObject credentials, string protocol)
     {
         if (!Protocols.Contains(protocol)) throw new OperationException("请选择支持的协议。");
-        var id = NewId(); var user = AddUser(model, credentials, "用户 " + (Items(model, "Users").Count() + 1), protocol == "Reality" ? "Uuid" : protocol is "AnyTLS" or "Hysteria2" ? "Password" : "SS128");
+        var id = NewId(); var user = AddUser(model, credentials, "用户 " + (Items(model, "Users").Count() + 1), protocol is "Reality" or "VLESS" ? "Uuid" : protocol == "TuicV5" ? "TuicV5" : protocol is "AnyTLS" or "Hysteria2" ? "Password" : "SS128");
         var outbound = Items(model, "Outbounds").FirstOrDefault() ?? AddDirect(model, "默认直连");
-        var used = Items(model, "Inbounds").Select(i => i.Number("Listener.Port")).ToHashSet(); var port = 22000; while (used.Contains(port)) port++;
+        var used = Items(model, "Inbounds").SelectMany(Hysteria2Ports.ListenerPorts).ToHashSet(); var port = 22000; while (used.Contains(port)) port++;
         var inbound = new JsonObject { ["Id"] = id, ["Name"] = Label(protocol) + " " + (Items(model, "Inbounds").Count() + 1), ["Protocol"] = protocol, ["Enabled"] = true,
             ["Listener"] = new JsonObject { ["Address"] = "0.0.0.0", ["Port"] = port }, ["UserIds"] = new JsonArray(user.Text("Id")), ["CertificateId"] = "", ["OutboundId"] = outbound.Text("Id"),
-            ["Options"] = protocol == "Reality" ? new JsonObject { ["ServerName"] = "", ["HandshakeServer"] = "", ["HandshakePort"] = 443, ["PublicKey"] = "", ["ShortId"] = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8)) } : protocol == "AnyTLS" ? new JsonObject { ["ServerName"] = "", ["EchEnabled"] = false } : protocol == "Hysteria2" ? new JsonObject { ["ServerName"] = "", ["UploadMbps"] = 0, ["DownloadMbps"] = 0, ["ObfsEnabled"] = false } : new JsonObject { ["Method"] = "2022-blake3-aes-128-gcm" } };
+            ["Options"] = protocol == "VLESS" ? VlessXhttp.Options() : protocol == "Reality" ? new JsonObject { ["ServerName"] = "", ["HandshakeServer"] = "", ["HandshakePort"] = 443, ["PublicKey"] = "", ["ShortId"] = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8)) } : protocol == "AnyTLS" ? new JsonObject { ["ServerName"] = "", ["EchEnabled"] = false } : protocol == "TuicV5" ? TuicV5.Options() : protocol == "Hysteria2" ? new JsonObject { ["ServerName"] = "", ["UploadMbps"] = 0, ["DownloadMbps"] = 0, ["ObfsEnabled"] = false } : new JsonObject { ["Method"] = "2022-blake3-aes-128-gcm" } };
         credentials["Inbounds"]![id] = protocol == "Shadowsocks2022" ? new JsonObject { ["ServerKey"] = ServerConfigurations.RandomKey(16) } : protocol == "Hysteria2" ? new JsonObject { ["ObfsPassword"] = ServerConfigurations.RandomKey(32) } : new JsonObject(); model["Inbounds"]!.AsArray().Add(inbound); return inbound;
     }
     public static void RemoveEntity(JsonObject model, JsonObject credentials, string group, string id)
@@ -186,7 +213,7 @@ public static class InboundCatalog
     public static void ValidateOptions(JsonObject options)
     {
         Fields(options, "Action", "Model", "Credentials", "ExpectedHash");
-        if (options.Text("Action") is not ("Apply" or "Check" or "UpgradeSingBox") || options.Text("ExpectedHash") != "Absent" && !Regex.IsMatch(options.Text("ExpectedHash"), "^[a-f0-9]{64}$") || options["Model"] is not JsonObject || options["Credentials"] is not JsonObject) throw new OperationException("通用入站任务无效。");
+        if (options.Text("Action") is not ("Apply" or "Check" or "UpgradeSingBox" or "UpgradeXray") || options.Text("ExpectedHash") != "Absent" && !Regex.IsMatch(options.Text("ExpectedHash"), "^[a-f0-9]{64}$") || options["Model"] is not JsonObject || options["Credentials"] is not JsonObject) throw new OperationException("通用入站任务无效。");
         _ = Normalize(options["Model"]!.AsObject(), options["Credentials"]!.AsObject());
     }
     public static JsonObject Options(JsonObject state, string action, JsonObject model, JsonObject credentials) => new() { ["Action"] = action, ["Model"] = model.DeepClone(), ["Credentials"] = credentials.DeepClone(), ["ExpectedHash"] = state.Text("Inbounds.RemoteHash", "Absent") };
@@ -209,10 +236,18 @@ public static class InboundCatalog
             var core = state["Inbounds"]?["Core"] as JsonObject;
             if(request.Options.Text("Action")=="UpgradeSingBox")
             {
-                if(core==null||!Items(old,"Inbounds").Any(i=>i.Text("Protocol")!="Reality"))throw new OperationException("此实例没有已应用的 sing-box 独立入站。");
+                if(core==null||!Items(old,"Inbounds").Any(i=>!UsesXray(i)))throw new OperationException("此实例没有已应用的 sing-box 独立入站。");
                 var current=InboundRendering.Core(store.Paths);if(core.Text("Sha256")==current.Text("Sha256")&&core.Text("Version")==current.Text("Version"))throw new OperationException("独立入站已经使用当前包内固定核心。");
                 if(!Version.TryParse(core.Text("Version"),out var previousVersion)||!Version.TryParse(current.Text("Version"),out var nextVersion)||nextVersion<=previousVersion)throw new OperationException("核心更新只接受更高的固定版本，不覆盖同版本差异或降级。");
                 current["Reality"]=core["Reality"]?.DeepClone();core=current;
+            }
+            if (request.Options.Text("Action") == "UpgradeXray")
+            {
+                if (core?["Reality"] is not JsonObject previousCore || !Items(old, "Inbounds").Any(UsesXray)) throw new OperationException("此实例没有已应用的 Xray 独立入站。");
+                var nextCore = InboundRendering.Core(store.Paths)["Reality"]!.DeepClone().AsObject();
+                if (previousCore.Text("Sha256") == nextCore.Text("Sha256") && previousCore.Text("Version") == nextCore.Text("Version")) throw new OperationException("独立 Xray 入站已使用包内固定核心。");
+                if (!Version.TryParse(previousCore.Text("Version"), out var oldVersion) || !Version.TryParse(nextCore.Text("Version"), out var newVersion) || newVersion <= oldVersion) throw new OperationException("Xray 核心更新只接受更高的固定版本。");
+                core = core.DeepClone().AsObject(); core["Reality"] = nextCore;
             }
             var payload = InboundRendering.Payload(store, plan, model, credentials, core);
             // Use the committed hashes rather than rendering obsolete credentials or
@@ -225,9 +260,11 @@ public static class InboundCatalog
                 return !JsonNode.DeepEquals(before, after) || after != null && state.At("Inbounds.Runtime") is JsonObject runtime && runtime[id] is JsonObject actual && (actual.Flag("Enabled") != after.Flag("Enabled") || actual.Flag("Active") != after.Flag("Enabled"));
             }).Order(StringComparer.Ordinal).ToArray();
             InboundRendering.ValidatePorts(plan, state, model);
-            var summary = "通用入站 · " + (request.Options.Text("Action") == "Check" ? "只读检查" : "保存资源模型") + "\n" + string.Join("\n", Items(model, "Inbounds").Select(i => i.Text("Name") + " · " + Label(i.Text("Protocol")) + HysteriaSummary(i) + " · " + i.Text("Listener.Address") + ":" + i.Number("Listener.Port") + " · " + (i.Flag("Enabled") ? "启用" : "停用") + "\n用户：" + string.Join("，", i.Strings("UserIds").Select(id => Items(model, "Users").Single(u => u.Text("Id") == id).Text("Name"))) + "；证书：" + (Items(model, "Certificates").SingleOrDefault(c => c.Text("Id") == i.Text("CertificateId"))?.Text("Name") ?? "无") + "；出站：" + Items(model, "Outbounds").Single(o => o.Text("Id") == i.Text("OutboundId")).Text("Name")));
+            if (plan.Text("Firewall.Mode") == "PreserveExisting" && Items(model, "Inbounds").Any(i => i.Text("Options.HopPorts") != "")) throw new OperationException("端口跳跃需要本应用受管的 nftables 防火墙；保留现有防火墙模式不会自动写入重定向规则。");
+            var summary = "通用入站 · " + (request.Options.Text("Action") == "Check" ? "只读检查" : "保存资源模型") + "\n" + string.Join("\n", Items(model, "Inbounds").Select(i => i.Text("Name") + " · " + Label(i.Text("Protocol")) + HysteriaSummary(i) + TuicV5.Summary(i) + VlessXhttp.Summary(i) + " · " + i.Text("Listener.Address") + ":" + i.Number("Listener.Port") + " · " + (i.Flag("Enabled") ? "启用" : "停用") + "\n用户：" + string.Join("，", i.Strings("UserIds").Select(id => Items(model, "Users").Single(u => u.Text("Id") == id).Text("Name"))) + "；证书：" + (Items(model, "Certificates").SingleOrDefault(c => c.Text("Id") == i.Text("CertificateId"))?.Text("Name") ?? "无") + "；出站：" + Items(model, "Outbounds").Single(o => o.Text("Id") == i.Text("OutboundId")).Text("Name")));
             summary += "\n\n本次影响：" + (affected.Length == 0 ? "仅目录信息，运行配置不变" : string.Join("，", affected.Select(id => Items(model, "Inbounds").Concat(Items(old, "Inbounds")).First(i => i.Text("Id") == id).Text("Name")))) + "。共享用户、证书或出站变化时，引用它们的入站会一并纳入范围。\n每个入站独立服务与配置；仅重启受影响入站，失败按同一范围恢复。原有固定角色服务保留。新入站监听对可达来源开放，访问由原协议用户鉴权控制；须确认服务商防火墙与监听范围。";
-            if(request.Options.Text("Action")=="UpgradeSingBox")summary="更新独立入站固定 sing-box 核心："+state.Text("Inbounds.Core.Version")+" → "+core!.Text("Version")+"\n涉及共享核心的 Hysteria2、AnyTLS、SS2022；Xray 固定版本保留。\n"+summary;
+            if(request.Options.Text("Action")=="UpgradeSingBox")summary="更新独立入站固定 sing-box 核心："+state.Text("Inbounds.Core.Version")+" → "+core!.Text("Version")+"\n涉及共享核心的 Hysteria2、TUIC v5、AnyTLS、SS2022；Xray 固定版本保留。\n"+summary;
+            if (request.Options.Text("Action") == "UpgradeXray") summary = "更新独立入站固定 Xray 核心：" + state.Text("Inbounds.Core.Reality.Version") + " → " + core!.Text("Reality.Version") + "\n重新验收所有受影响 Reality / XHTTP 入站，sing-box 核心保持原版本。\n" + summary;
             return new(model, credentials, payload, affected, expected, summary);
         }
         finally { oldCredentials.Clear(); }

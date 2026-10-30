@@ -49,6 +49,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
                 foreach (var name in new[] { "deployment-plan.json", "deployment-state.json", "secrets.dotnet.private.json", "operation-pending.dotnet.json" }) files[instance + ":" + name] = ClientSchemes.SourceFingerprint(SafePath.Resolve(store.Paths.Instance(instance), name));
             files["ChainRecord"] = ClientSchemes.SourceFingerprint(TcpChains.FileName(store.Paths, config.Text("Id")));
             files["ChainSource"] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, config.Text("Landing.SchemeId")));
+            foreach (var name in new[] { "scripts/udp-forwarding.py", "scripts/udp-forward-worker.py", "scripts/inbound-host.py", "assets/remote/udp-forward-read.sh", "assets/remote/udp-forward-apply.sh", "assets/remote/inbound-read.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
             foreach (var name in new[] { "scripts/forwarding-host.py", "scripts/tcp-forwarding.py", "assets/remote/audit.sh", "assets/remote/tcp-chain-probe.sh", "assets/remote/tcp-chain-rollback.sh", "assets/remote/tcp-forward-read.sh", "assets/remote/tcp-forward-apply.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/protocol-migration-trigger-rollback.sh", "assets/remote/maintenance-transaction-commit.sh", "assets/remote/maintenance-transaction-status.sh", "assets/remote/maintenance-mutation-guard.sh", "assets/remote/nftables-apply.sh", "assets/remote/firewall-preflight.sh", "assets/remote/firewall-tools.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
         }
         foreach (var name in new[] { "deployment-plan.json", "deployment-state.json", "secrets.dotnet.private.json", "deployment-secrets.private.json", "operation-pending.dotnet.json" })
@@ -211,7 +212,7 @@ public static class OperationPolicy
     }
     public static string TargetLabel(OperationRequest request) => request.Kind switch
     {
-        OperationKind.TcpChain => "跨实例 TCP 前置 → 中转 → 落地",
+        OperationKind.TcpChain => "跨实例前置 → 中转 → 落地",
         OperationKind.Inbounds => "通用多入站资源 · " + (request.Options.Text("Action") == "Check" ? "只读检查" : "审阅变更范围"),
         OperationKind.MayMonitor => MayMonitorLifecycle.Label(request.Options.Text("Role")) + " · " + request.Options.Text("Action"),
         OperationKind.MayMonitorAccess => "May Monitor · 接入与单节点验收",

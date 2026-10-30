@@ -6,6 +6,11 @@
 
 | 记录 | 原文件 |
 | --- | --- |
+| [第二十一轮：双地址族 TCP 与限定 UDP 编排](CHAIN-ROUND-21-2026-10-30.zh-CN.md) | `CHAIN-ROUND-21-2026-10-30.zh-CN.md` |
+| [第二十轮：完整 XHTTP 客户端与配套流程](XHTTP-ROUND-20-2026-10-29.zh-CN.md) | `XHTTP-ROUND-20-2026-10-29.zh-CN.md` |
+| [第十九轮：VLESS TLS／Reality XHTTP](XHTTP-ROUND-19-2026-10-29.zh-CN.md) | `XHTTP-ROUND-19-2026-10-29.zh-CN.md` |
+| [第十八轮：外部 WS／gRPC 节点兼容](CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md) | `CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md` |
+| [第十七轮：服务器 Hysteria2／TUIC 下一跳](SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md) | `SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md` |
 | [校园、学术数据库与业务分类审查](ACADEMIC-ROUTING-AUDIT-2026-10-23.zh-CN.md) | `ACADEMIC-ROUTING-AUDIT-2026-10-23.zh-CN.md` |
 | [审计修复与隔离升级验证（2026-10-01）](AUDIT-FIXES-2026-10-01.zh-CN.md) | `AUDIT-FIXES-2026-10-01.zh-CN.md` |
 | [应用后台实测接口（B 方案）](BACKGROUND-TESTING.zh-CN.md) | `BACKGROUND-TESTING.zh-CN.md` |
@@ -29,6 +34,8 @@
 | [首页历史内容存档](HISTORICAL-README-2026-10-27.zh-CN.md) | `HISTORICAL-README-2026-10-27.zh-CN.md` |
 | [Hugging Face Hub 与下载 CDN 的路由分类修复](HUGGINGFACE-RESEARCH-ROUTING-2026-10-22.zh-CN.md) | `HUGGINGFACE-RESEARCH-ROUTING-2026-10-22.zh-CN.md` |
 | [原计划第十四轮：Hysteria2 部署与维护闭环](HYSTERIA2-ROUND-14-2026-10-25.zh-CN.md) | `HYSTERIA2-ROUND-14-2026-10-25.zh-CN.md` |
+| [第十五轮：Hysteria2 分享与端口跳跃（未发行）](HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md) | `HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md` |
+| [第十六轮：TUIC v5 独立入站（未发行）](TUIC-ROUND-16-2026-10-28.zh-CN.md) | `TUIC-ROUND-16-2026-10-28.zh-CN.md` |
 | [原定第十三轮：通用多入站资源模型](INBOUND-MODEL-ROUND-13-2026-10-25.zh-CN.md) | `INBOUND-MODEL-ROUND-13-2026-10-25.zh-CN.md` |
 | [交互维护与回归约定](INTERACTION-MAINTENANCE.md) | `INTERACTION-MAINTENANCE.md` |
 | [Komari 旧备份 Linux 隔离补测](KOMARI-LINUX-SUPPLEMENT-2026-10-11.zh-CN.md) | `KOMARI-LINUX-SUPPLEMENT-2026-10-11.zh-CN.md` |

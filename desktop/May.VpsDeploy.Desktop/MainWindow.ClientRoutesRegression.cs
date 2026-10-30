@@ -79,6 +79,7 @@ public sealed partial class MainWindow
             SelectPage("clients"); Require(Find<TextBlock>(shell).Any(t => t.Text == "所选路径已连通"), "当前诊断记录未展示。");
             scheme["Nodes"]![3]!["sing_box"]!["password"] = "synthetic-changed"; SelectPage("clients");
             Require(Find<TextBlock>(shell).Any(t => t.Text.Contains("参数已变化，需重测")), "节点参数变化后仍显示旧健康结果为当前结果。"); proof["stale_diagnostic_visible"] = true;
+            proof["external_streams"] = await ClientStreamRegression(output);
             return proof;
         }
         catch (Exception error) when (error is not OperationException)

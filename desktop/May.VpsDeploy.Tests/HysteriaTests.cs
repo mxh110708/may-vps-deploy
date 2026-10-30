@@ -49,7 +49,12 @@ internal sealed partial class BoundaryTests
         public bool Typed{get;set;}=true;
         public Task<JsonObject> ValidateAsync(JsonObject plan,JsonObject model,JsonObject credentials,string[] ids,string directory,IProgress<string> progress,CancellationToken ct)
         {
-            var items=new JsonArray();foreach(var node in InboundRendering.Nodes(store,plan.Text("Provider")+"/"+plan.Text("Instance")+"/May-VPS-Deploy",plan,model,credentials).Where(n=>ids.Contains(n.Text("InboundOrigin.InboundId"))))items.Add(new JsonObject{["InboundId"]=node.Text("InboundOrigin.InboundId"),["UserId"]=node.Text("InboundOrigin.UserId"),["Family"]=node.Text("InboundOrigin.Family"),["ConnectionFingerprint"]=ClientNodeImport.ConnectionFingerprint(node),["Status"]="Passed",["From"]="Controller",["Scope"]="ProxyHttps",["Result"]=new JsonObject{["Status"]="Reachable",["ValidatedProtocol"]=Typed?"hysteria2":"tcp"}});return Task.FromResult(new JsonObject{["Status"]="Passed",["Items"]=items});
+            var items=new JsonArray();foreach(var node in InboundRendering.Nodes(store,plan.Text("Provider")+"/"+plan.Text("Instance")+"/May-VPS-Deploy",plan,model,credentials).Where(n=>ids.Contains(n.Text("InboundOrigin.InboundId"))))
+            {
+                var item=new JsonObject{["InboundId"]=node.Text("InboundOrigin.InboundId"),["UserId"]=node.Text("InboundOrigin.UserId"),["Family"]=node.Text("InboundOrigin.Family"),["ConnectionFingerprint"]=ClientNodeImport.ConnectionFingerprint(node),["Status"]="Passed",["From"]="Controller",["Scope"]="ProxyHttps",["Result"]=new JsonObject{["Status"]="Reachable",["ValidatedProtocol"]=Typed?"hysteria2":"tcp"}};
+                if(Hysteria2Ports.ValidationPorts(node) is { Length: > 0 } ports)item["HopPorts"]=new JsonArray(ports.Select(p=>(JsonNode?)JsonValue.Create(p)).ToArray());items.Add(item);
+            }
+            return Task.FromResult(new JsonObject{["Status"]="Passed",["Items"]=items});
         }
     }
     private async Task HysteriaLoopback()
@@ -98,13 +103,14 @@ internal sealed partial class BoundaryTests
     private static int UdpPort() { using var socket = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0)); return ((IPEndPoint)socket.Client.LocalEndPoint!).Port; }
     private sealed class HysteriaCore(Process process, Task<string> output, Task<string> error) : IAsyncDisposable
     {
+        public Process Process => process;
         public static async Task<HysteriaCore> Start(string executable, IExternalToolRunner tools, JsonObject config, string directory, string name, CancellationToken ct)
         {
             var file = SafePath.Resolve(directory, name + ".private.json"); config["log"] = new JsonObject { ["disabled"] = true }; ArchiveStore.WriteJson(file, config); (await tools.RunAsync(executable, ["check", "-c", file], null, TimeSpan.FromSeconds(10), ct)).RequireSuccess("Fixed core rejected Hysteria2 fixture.");
             var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true }; foreach (var arg in new[] { "run", "-c", file }) start.ArgumentList.Add(arg); var child = Process.Start(start)!; var running=new HysteriaCore(child, child.StandardOutput.ReadToEndAsync(), child.StandardError.ReadToEndAsync());
             // Wait for the configured local UDP sockets, not a fixed sleep. This
             // only gates fixture startup; protocol success still needs a reply.
-            var ports=config["inbounds"]!.AsArray().Where(i=>i!.Text("type")=="hysteria2"||i!.Text("network")=="udp").Select(i=>i!.Number("listen_port")).ToArray();var deadline=Stopwatch.StartNew();
+            var ports=config["inbounds"]!.AsArray().Where(i=>i!.Text("type") is "hysteria2" or "tuic"||i!.Text("network")=="udp").Select(i=>i!.Number("listen_port")).ToArray();var deadline=Stopwatch.StartNew();
             try
             {
                 while(true)

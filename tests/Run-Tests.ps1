@@ -44,11 +44,16 @@ Assert-True ([string]$manifest.sing_box.assets.amd64.sha256 -match '^[0-9a-f]{64
 Assert-True ([string]$manifest.sing_box.assets.windows_amd64.sha256 -match '^[0-9a-f]{64}$') 'sing-box Windows SHA-256'
 Assert-True ([string]$manifest.mihomo.version -eq '1.19.32') 'Mihomo stable test core version is pinned'
 $vendorManifest = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'vendor\test-cores\windows-amd64\checksums.json') | ConvertFrom-Json
-Assert-True (@($vendorManifest.artifacts).Count -eq 2) 'vendor manifest contains both required Windows test cores'
+Assert-True ((@($vendorManifest.artifacts.core | Sort-Object) -join ',') -eq 'may-core,mihomo,sing-box') 'vendor manifest contains official cores and the separate May XHTTP core'
 foreach ($artifact in @($vendorManifest.artifacts)) {
     $archive = Join-Path $ProjectRoot ('vendor\test-cores\windows-amd64\' + [string]$artifact.file)
     Assert-True (Test-Path -LiteralPath $archive -PathType Leaf) "vendored archive exists: $($artifact.core)"
     Assert-True ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -eq [string]$artifact.sha256) "vendored archive checksum matches: $($artifact.core)"
+    if($artifact.core -eq 'may-core'){
+        Assert-True ($artifact.capabilities -contains 'vless-xhttp-round20' -and $artifact.source_revision -match '^[0-9a-f]{40}$' -and $artifact.source_tree_sha256 -match '^[0-9a-f]{64}$') 'May XHTTP validation source and capability are explicit'
+        $sourceArchive=Join-Path $ProjectRoot ('vendor/test-cores/windows-amd64/'+$artifact.source_archive)
+        Assert-True ((Get-FileHash -LiteralPath $sourceArchive -Algorithm SHA256).Hash.ToLowerInvariant() -eq $artifact.source_archive_sha256) 'May validation core includes matching corresponding source'
+    }
 }
 Assert-True (@($vendorManifest.data_files | Where-Object consumer -eq 'mihomo').Count -eq 2) 'vendor manifest contains both required Mihomo GeoData files'
 Assert-True (@($vendorManifest.data_files | Where-Object consumer -eq 'sing-box').Count -eq 5) 'vendor manifest contains all five May Route offline public rules'
@@ -1772,6 +1777,10 @@ if($pythonCommandForClient){
 if($pythonCommandForClient){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_inbound_host.py')
     if ($LASTEXITCODE -ne 0) { throw 'Independent inbound ownership regression failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_hysteria_hopping.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Hysteria hopping firewall scope regression failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_server_quic_probe.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Server QUIC probe boundary regression failed.' }
 }
 if($bash -and $pythonCommandForClient){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_tcp_forwarding.py')

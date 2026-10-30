@@ -15,7 +15,7 @@ public sealed class ClientSharePreview(string fingerprint, IReadOnlyList<ClientS
     public bool Ready => Issues.All(i => i.Severity != "Error") && Rows.Any(r => r.Ready);
 }
 
-public static class ClientShareLinks
+public static partial class ClientShareLinks
 {
     private static readonly UTF8Encoding Utf8 = new(false, true);
     public static ClientSharePreview Preview(JsonObject scheme)
@@ -57,7 +57,9 @@ public static class ClientShareLinks
     }
     private static JsonObject Canonical(JsonObject native, string name)
     {
-        var protocol = String(native, "type"); var common = new[] { "type", "tag", "server", "server_port" };
+        var protocol = String(native, "type"); if (protocol == "hysteria2") return CanonicalHysteria(native, name);
+        if (ClientStreamTransports.IsNative(native)) return ClientStreamTransports.Canonical(native, name);
+        var common = new[] { "type", "tag", "server", "server_port" };
         Fields(native, common.Concat(protocol switch { "shadowsocks" => new[] { "method", "password" }, "anytls" => new[] { "password", "tls" }, "vless" => new[] { "uuid", "flow", "tls" }, _ => throw new OperationException("分享暂支持 Shadowsocks、SS2022、VLESS Reality + Vision 和基础 AnyTLS。") }).ToArray());
         if (String(native, "tag") != name || native["server_port"] is not JsonValue number || !number.TryGetValue<int>(out var port) || port is < 1 or > 65535) throw new OperationException("节点名称、服务器或端口不完整。");
         var result = new JsonObject { ["type"] = protocol, ["tag"] = name, ["server"] = Host(String(native, "server")), ["server_port"] = port };
@@ -86,6 +88,8 @@ public static class ClientShareLinks
     private static JsonObject FromClash(JsonObject clash, string name)
     {
         var protocol = String(clash, "type");
+        if (protocol == "hysteria2") return HysteriaFromClash(clash, name);
+        if (ClientStreamTransports.IsClash(clash)) return ClientStreamTransports.FromClash(clash, name);
         Fields(clash, new[] { "type", "name", "server", "port", "udp" }.Concat(protocol switch { "ss" => new[] { "cipher", "password" }, "anytls" => new[] { "password", "sni", "skip-cert-verify" }, "vless" => new[] { "uuid", "flow", "tls", "network", "servername", "client-fingerprint", "reality-opts", "alpn" }, _ => throw new OperationException("此 Clash 协议暂不能生成分享链接。") }).ToArray());
         if (String(clash, "name") != name || !Boolean(clash, "udp", true)) throw new OperationException("节点名称或 UDP 限制无法等效表达为分享链接。");
         var native = new JsonObject { ["type"] = protocol == "ss" ? "shadowsocks" : protocol, ["tag"] = name, ["server"] = String(clash, "server"), ["server_port"] = clash["port"]?.DeepClone() };
@@ -104,17 +108,26 @@ public static class ClientShareLinks
     {
         if (node.Text("kind") == "landing" || node.Text("sing_box.detour") != "" || node.Text("clash.dialer-proxy") != "") throw new OperationException("此节点依赖客户端入口链路；普通分享链接不能保留该依赖，请导出完整配置。");
         var name = node.Text("name"); if (name.Length is < 1 or > 120 || name.Any(char.IsControl)) throw new OperationException("节点显示名无效。");
+        if (VlessXhttp.IsNode(node)) return VlessXhttp.ShareLink(node);
         try
         {
             var native = node["sing_box"] is JsonObject sing ? Canonical(sing, name) : node["clash"] is JsonObject clash ? FromClash(clash, name) : throw new OperationException("节点缺少完整原生参数。");
             if (node["clash"] is JsonObject paired && ArchiveStore.Fingerprint(FromClash(paired, name)) != ArchiveStore.Fingerprint(native)) throw new OperationException("两类客户端的连接参数不一致，不能猜测应分享哪一份。");
             static string E(string value) => Uri.EscapeDataString(value);
             var host = native.Text("server"); var address = (host.Contains(':') ? "[" + host + "]" : host) + ":" + native.Number("server_port"); var tag = "#" + E(name); var protocol = native.Text("type"); string link;
-            if (protocol == "shadowsocks")
+            if (ClientStreamTransports.IsNative(native)) link = ClientStreamTransports.ShareLink(native, name);
+            else if (protocol == "shadowsocks")
             {
                 var method = native.Text("method"); var password = native.Text("password"); var info = method.StartsWith("2022-", StringComparison.Ordinal) ? E(method) + ":" + E(password) : Convert.ToBase64String(Utf8.GetBytes(method + ":" + password)).TrimEnd('=').Replace('+', '-').Replace('/', '_'); link = "ss://" + info + "@" + address + tag;
             }
             else if (protocol == "anytls") link = "anytls://" + E(native.Text("password")) + "@" + address + "/?sni=" + E(native.Text("tls.server_name")) + "&insecure=0" + tag;
+            else if (protocol == "hysteria2")
+            {
+                if (native["server_ports"] != null) address = (host.Contains(':') ? "[" + host + "]" : host) + ":" + Hysteria2Ports.Authority(Hysteria2Ports.FromNative(native["server_ports"]), native.Number("server_port"));
+                link = "hysteria2://" + E(native.Text("password")) + "@" + address + "/?sni=" + E(native.Text("tls.server_name")) + "&insecure=0";
+                if (native["obfs"] != null) link += "&obfs=salamander&obfs-password=" + E(native.Text("obfs.password"));
+                link += tag;
+            }
             else
             {
                 link = "vless://" + E(native.Text("uuid")) + "@" + address + "?encryption=none&type=tcp&security=reality&flow=xtls-rprx-vision&sni=" + E(native.Text("tls.server_name")) + "&fp=" + E(native.Text("tls.utls.fingerprint")) + "&pbk=" + E(native.Text("tls.reality.public_key")) + "&sid=" + E(native.Text("tls.reality.short_id"));

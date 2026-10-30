@@ -76,6 +76,7 @@ public static class ClientSchemes
     {
         var formats = Formats(scheme);
         var nodes = scheme["Nodes"]!.AsArray(); var layout = scheme["Layout"]!.AsObject();
+        if (nodes.OfType<JsonObject>().Any(n => VlessXhttp.IsNode(n) && n.Text("kind") != "entry")) throw new OperationException("本轮 XHTTP 仅输出入口节点，不叠加客户端链式落地。");
         if (nodes.Count == 0 || nodes.Select(n => n!.Text("name")).Distinct().Count() != nodes.Count) throw new OperationException("请添加节点，名称不能重复。");
         foreach (var node in nodes)
             foreach (var format in formats)

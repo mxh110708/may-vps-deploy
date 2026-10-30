@@ -160,6 +160,8 @@ public sealed partial class MainWindow
             case "suite.tcp-chain":
             case "suite.inbounds":
             case "suite.hysteria":
+            case "suite.tuic":
+            case "suite.xhttp":
             case "suite.udp-forward":
             case "suite.run":
             {
@@ -191,6 +193,8 @@ public sealed partial class MainWindow
                         if (command is "suite.run" or "suite.tcp-chain") await Run("tcp_chain", TcpChainRegression);
                         if (command is "suite.run" or "suite.inbounds") await Run("inbounds", InboundRegression);
                         if (command is "suite.run" or "suite.hysteria") await Run("hysteria", HysteriaRegression);
+                        if (command is "suite.run" or "suite.tuic") await Run("tuic", TuicRegression);
+                        if (command is "suite.run" or "suite.xhttp") await Run("xhttp", XhttpRegression);
                         if (command is "suite.run" or "suite.udp-forward") await Run("udp_forward", UdpForwardRegression);
                         if (testActivations != 0 || testForegroundSamples != 0) throw new OperationException("界面回归获得前台焦点。");
                         testSuiteResult = result; testSuiteState = "passed";

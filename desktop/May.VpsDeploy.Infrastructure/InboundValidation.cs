@@ -4,17 +4,52 @@ using May.VpsDeploy.Core;
 
 namespace May.VpsDeploy.Infrastructure;
 
-public sealed class InboundValidation(ArchiveStore store, ClientRouteDiagnostics diagnostics) : IInboundValidation
+public sealed class InboundValidation(ArchiveStore store, IClientRouteDiagnostics diagnostics) : IInboundValidation
 {
     public async Task<JsonObject> ValidateAsync(JsonObject plan, JsonObject model, JsonObject credentials, string[] ids, string directory, IProgress<string> progress, CancellationToken ct)
     {
         var instance = plan.Text("Provider") + "/" + plan.Text("Instance") + "/May-VPS-Deploy"; var items = new JsonArray();
+        var checkedPorts = new Dictionary<(string Id, string Family), int[]>();
         foreach (var node in InboundRendering.Nodes(store, instance, plan, model, credentials).Where(n => ids.Contains(n.Text("InboundOrigin.InboundId"))))
         {
             progress.Report("验收入站 / 用户 / 地址族：" + node.Text("name"));
-            var scheme = new JsonObject { ["Nodes"] = new JsonArray(node.DeepClone()), ["Layout"] = new JsonObject { ["region_groups"] = new JsonArray(node.Text("region_group")) } };
-            var route = ClientTopology.DiagnosticRoute(scheme, node.Text("name")); var result = await diagnostics.RunAsync(route, directory, progress, ct);
-            items.Add(new JsonObject { ["InboundId"] = node.Text("InboundOrigin.InboundId"), ["UserId"] = node.Text("InboundOrigin.UserId"), ["Family"] = node.Text("InboundOrigin.Family"), ["ConnectionFingerprint"] = ClientNodeImport.ConnectionFingerprint(node), ["Status"] = result.Text("Status") == "Reachable" ? "Passed" : "Incomplete", ["From"] = "Controller", ["Scope"] = "ProxyHttps", ["Udp"] = "NotMeasured", ["Result"] = result });
+            var ports = Hysteria2Ports.ValidationPorts(node); var key = (node.Text("InboundOrigin.InboundId"), node.Text("InboundOrigin.Family"));
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromMinutes(5));
+            async Task<JsonObject> Probe(int? port = null)
+            {
+                var candidate = node.DeepClone().AsObject();
+                if (port != null)
+                {
+                    // Probe each alias deterministically. A random successful
+                    // hop must not stand in for a blocked member of the set.
+                    var native = candidate["sing_box"]!.AsObject(); native["server_port"] = port.Value; native.Remove("server_ports"); native.Remove("hop_interval"); native.Remove("hop_interval_max");
+                }
+                var scheme = new JsonObject { ["Nodes"] = new JsonArray(candidate), ["Layout"] = new JsonObject { ["region_groups"] = new JsonArray(candidate.Text("region_group")) } };
+                var route = ClientTopology.DiagnosticRoute(scheme, candidate.Text("name")) with { RequiresApplicationUdp = InboundRendering.RequiresApplicationUdp(store, instance, model, node.Text("InboundOrigin.InboundId")) };
+                return await diagnostics.RunAsync(route, directory, progress, deadline.Token);
+            }
+            var result = await Probe(ports.Length == 0 ? null : node.Number("sing_box.server_port"));
+            if (ports.Length > 0 && result.Text("Status") == "Reachable" && !checkedPorts.ContainsKey(key))
+            {
+                var passed = new List<int> { node.Number("sing_box.server_port") };
+                foreach (var port in ports.Where(p => p != node.Number("sing_box.server_port")))
+                {
+                    progress.Report("核对跳跃端口：" + port);
+                    var check = await Probe(port);
+                    if (check.Text("Status") != "Reachable" || check.Text("ValidatedProtocol") != "hysteria2") break;
+                    passed.Add(port);
+                }
+                checkedPorts[key] = passed.Order().ToArray();
+            }
+            var item = new JsonObject { ["InboundId"] = key.Item1, ["UserId"] = node.Text("InboundOrigin.UserId"), ["Family"] = key.Item2, ["ConnectionFingerprint"] = ClientNodeImport.ConnectionFingerprint(node), ["Status"] = result.Text("Status") == "Reachable" ? "Passed" : "Incomplete", ["From"] = "Controller", ["Scope"] = "ProxyHttps", ["Udp"] = result.Flag("UdpValidation.ResponseMatched") ? "Passed" : "NotMeasured", ["Result"] = result };
+            if (ports.Length > 0)
+            {
+                // All users still authenticate separately; port reachability
+                // is shared only within this invocation and address family.
+                item["HopPorts"] = new JsonArray(checkedPorts.GetValueOrDefault(key, []).Select(p => (JsonNode?)JsonValue.Create(p)).ToArray());
+                if (!Hysteria2Ports.ValidationMatches(node, item)) item["Status"] = "Incomplete";
+            }
+            items.Add(item);
         }
         return new JsonObject { ["Status"] = items.All(i => i!.Text("Status") == "Passed") ? "Passed" : "Incomplete", ["Items"] = items, ["At"] = DateTimeOffset.UtcNow };
     }

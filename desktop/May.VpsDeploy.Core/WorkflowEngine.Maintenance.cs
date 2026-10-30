@@ -539,7 +539,7 @@ public sealed partial class WorkflowEngine
         if (c.Plan.Text("Firewall.Mode") != "PreserveExisting" && !FirewallParameters(c.Plan, true).OrderBy(p => p.Key).SequenceEqual(FirewallParameters(firewallPlan, true).OrderBy(p => p.Key))) throw new OperationException("协议恢复点需要的监听或可信入口与当前防火墙不同。此次范围保留防火墙，请先切换到兼容的协议状态，未开始恢复。");
         var reserved = new List<int> { c.Plan.Number("Ports.SshPrimary"), c.Plan.Number("Ports.SshRescue") };
         reserved.AddRange(TcpForwarding.Rules(c.Plan["TcpForwarding"] as JsonObject).Select(r => r.Number("ListenPort")));
-        reserved.AddRange(InboundCatalog.Items(c.Plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").Select(i => i.Number("Listener.Port")));
+        reserved.AddRange(InboundCatalog.Items(c.Plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").SelectMany(Hysteria2Ports.ListenerPorts));
         if (Enabled(oldPlan, "ShadowsocksLanding") && UdpForwarding.Rules(c.Plan["UdpForwarding"] as JsonObject).Any(r => r.Number("ListenPort") == oldPlan.Number("Ports.LandingShadowsocks"))) throw new OperationException("协议恢复点与当前 UDP 转发端口冲突，未开始恢复。");
         if (c.State.Flag("KomariController.Installed") || c.State.Flag("MonitoringInventory.KomariController.Installed")) reserved.Add(c.Plan.Number("KomariController.Port", 25774));
         if (c.State.Flag("Cloudflared.Installed") || c.State.Flag("MonitoringInventory.Cloudflared.Installed")) reserved.Add(c.Plan.Number("Cloudflared.MetricsPort", 20241));

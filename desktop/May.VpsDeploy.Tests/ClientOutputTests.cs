@@ -88,7 +88,7 @@ internal sealed partial class BoundaryTests
         Check(scheme["Nodes"]![0]!.Text("sing_box.password") == "synthetic-local-edit", "unchanged upstream overwrote local edit");
         var conflict = ClientSubscriptions.Preview(scheme, source, changedBody.Replace("synthetic-new@", "synthetic-next@")); fingerprint = ArchiveStore.Fingerprint(scheme);
         Check(!conflict.Ready && conflict.Changes.Any(c => c.Kind == "Conflict"), "concurrent local/upstream edit not flagged"); Refuses(() => ClientSubscriptions.Apply(scheme, conflict), "conflicting source preview applied"); Check(ArchiveStore.Fingerprint(scheme) == fingerprint, "conflict mutated source scheme");
-        var partial = ClientSubscriptions.Preview(scheme, source, changedBody + "\nhy2://unsupported@bad.example:443"); Check(!partial.Ready, "partial source parse could remove unparsed old connections");
+        var partial = ClientSubscriptions.Preview(scheme, source, changedBody + "\nhy2://unsupported@bad.example:443?unsupported=1"); Check(!partial.Ready, "partial source parse could remove unparsed old connections");
         var stale = ClientSubscriptions.Preview(scheme, source, changedBody); scheme["Name"] = "changed"; Refuses(() => ClientSubscriptions.Apply(scheme, stale), "stale source preview applied");
         ClientSubscriptions.Detach(scheme["Nodes"]![0]!.AsObject()); var newSource = ClientSubscriptions.Preview(scheme, source, changedBody.Replace("synthetic-new@", "synthetic-next@")); ClientSubscriptions.Apply(scheme, newSource);
         Check(scheme["Nodes"]!.AsArray().Any(n => n!.Text("Id") == idA && n.Text("Source.Kind") == "Manual") && scheme["Nodes"]!.AsArray().Count == 3, "detached local node was reclaimed by source refresh");

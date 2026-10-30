@@ -28,6 +28,8 @@ public static partial class ServerOutboundRouting
                     try { ManagedNodeSources.Verify(store, new JsonArray(origin.DeepClone())); }
                     catch (OperationException) { return new("ManagedChanged", "来源受管实例的连接、凭据或状态已变化；先重新提取来源，再审阅更新。", false); }
                 }
+                try { InboundSources.VerifyNodes(store, nodes); }
+                catch (OperationException) { return new("ManagedChanged", "来源独立入站、用户、证书、出站或验收已变化；先更新来源，再重新审阅。", false); }
                 return new("Matches", "来源与已审阅快照一致。", true);
             }
             finally { scheme.Clear(); }

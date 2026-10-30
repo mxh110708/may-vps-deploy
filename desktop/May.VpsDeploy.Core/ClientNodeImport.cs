@@ -12,7 +12,7 @@ public sealed record ClientImportPreview(string SchemeFingerprint, IReadOnlyList
 }
 
 // A share link is credential material. Never retain it in provenance or error messages.
-public static class ClientNodeImport
+public static partial class ClientNodeImport
 {
     public const int MaximumCharacters = 262144;
     public const int MaximumLines = 200;
@@ -48,7 +48,7 @@ public static class ClientNodeImport
                 if (!fingerprints.Add(fingerprint)) { rows.Add(new(i + 1, "Duplicate", null, "与方案或本批次中的连接参数完全相同，跳过。")); continue; }
                 var original = node.Text("name"); var name = original; var suffix = 2;
                 while (!names.Add(name)) { var tail = " (" + suffix++ + ")"; name = original[..Math.Min(original.Length, 120 - tail.Length)] + tail; }
-                node["name"] = name; node["clash"]!["name"] = name; node["sing_box"]!["tag"] = name;
+                node["name"] = name; if(node["clash"]!=null)node["clash"]!["name"] = name; if(node["sing_box"]!=null)node["sing_box"]!["tag"] = name;
                 node["Id"] = Guid.NewGuid().ToString("N");
                 node["kind"] = role == "Auto" ? node.Text("sing_box.type") == "shadowsocks" ? "landing" : "entry" : role;
                 node["region_group"] = region; node["transit_group"] = region;
@@ -78,12 +78,13 @@ public static class ClientNodeImport
         var separator = text.IndexOf("://", StringComparison.Ordinal);
         if (separator < 1) throw new OperationException("每行需为一个完整的节点分享链接。");
         var protocol = text[..separator].ToLowerInvariant();
-        if (protocol is not ("vless" or "anytls" or "ss")) throw new OperationException("本轮支持 VLESS Reality + Vision、AnyTLS 和 Shadowsocks；此协议暂不支持。");
+        if (protocol is "hysteria2" or "hy2") return ParseHysteria2(text);
+        if (protocol is not ("vless" or "trojan" or "anytls" or "ss")) throw new OperationException("支持 VLESS Reality + Vision、TLS WS／gRPC 的 VLESS／Trojan、AnyTLS、Shadowsocks 和 Hysteria2；此协议暂不支持。");
         var uri = new Uri(text, UriKind.Absolute);
         if (uri.AbsolutePath is not ("" or "/") || uri.Host.Length == 0 || uri.Port == 0 || uri.Port > 65535) throw new OperationException("服务器地址、端口或链接路径无效。");
         var host = uri.IdnHost.Trim('[', ']').ToLowerInvariant();
         if (Uri.CheckHostName(host) == UriHostNameType.Unknown) throw new OperationException("服务器地址无效。");
-        var port = uri.Port < 0 && protocol == "anytls" ? 443 : uri.Port;
+        var port = uri.Port < 0 && protocol is "anytls" or "trojan" ? 443 : uri.Port;
         if (port < 1) throw new OperationException("此协议必须指定端口。");
         var name = uri.Fragment.Length > 1 ? Decode(uri.Fragment[1..]) : protocol.ToUpperInvariant() + " · " + host;
         if (name.Length is < 1 or > 120 || name.Any(char.IsControl)) throw new OperationException("显示名称应为 1–120 个可打印字符。");
@@ -91,6 +92,8 @@ public static class ClientNodeImport
         var clash = new JsonObject { ["name"] = name, ["server"] = host, ["port"] = port };
         var sing = new JsonObject { ["tag"] = name, ["server"] = host, ["server_port"] = port };
         var auth = Decode(uri.UserInfo);
+        if(protocol=="vless"&&query.GetValueOrDefault("type")=="xhttp")return ParseXhttp(name,host,port,auth,query);
+        if (protocol == "trojan" || protocol == "vless" && query.GetValueOrDefault("type") is "ws" or "grpc") return ParseStream(protocol, name, host, port, auth, query);
         if (protocol == "ss")
         {
             RequireKeys(query, []);
@@ -142,6 +145,35 @@ public static class ClientNodeImport
         return new JsonObject { ["name"] = name, ["clash"] = clash, ["sing_box"] = sing };
     }
 
+    private static JsonObject ParseHysteria2(string text)
+    {
+        // System.Uri rejects the protocol's standard multi-port authority. Only
+        // replace that field for URI parsing; do not rewrite user credentials.
+        var start = text.IndexOf("://", StringComparison.Ordinal) + 3;
+        var end = text.IndexOfAny(['/', '?', '#'], start); if (end < 0) end = text.Length;
+        var authority = text[start..end]; var at = authority.LastIndexOf('@');
+        var server = authority[(at + 1)..]; var colon = server.StartsWith('[') ? server.IndexOf(':', server.IndexOf(']') + 1) : server.LastIndexOf(':');
+        var ports = colon >= 0 ? server[(colon + 1)..] : "443";
+        var normalized = Hysteria2Ports.Normalize(ports);
+        var main = colon >= 0 ? int.Parse(ports.Split(',')[0].Split('-')[0], System.Globalization.CultureInfo.InvariantCulture) : 443;
+        var rewritten = colon < 0 ? text[..end] + ":443" + text[end..] : text[..(start + at + 1 + colon + 1)] + main + text[end..];
+        var uri = new Uri(rewritten, UriKind.Absolute);
+        if (uri.AbsolutePath is not ("" or "/") || uri.Host.Length == 0 || uri.Port is < 1 or > 65535) throw new OperationException("Hysteria2 服务器、端口或路径无效。");
+        var host = uri.IdnHost.Trim('[', ']').ToLowerInvariant(); if (Uri.CheckHostName(host) == UriHostNameType.Unknown) throw new OperationException("Hysteria2 服务器地址无效。");
+        var password = Decode(uri.UserInfo); if (password.Length is < 1 or > 4096) throw new OperationException("Hysteria2 链接缺少有效鉴权信息。");
+        var query = Query(uri.Query); RequireKeys(query, ["sni", "insecure", "obfs", "obfs-password"]);
+        if (query.GetValueOrDefault("insecure", "0") != "0") throw new OperationException("不导入跳过证书验证的 Hysteria2 链接。");
+        var sni = query.GetValueOrDefault("sni", host); ValidateSni(sni);
+        var name = uri.Fragment.Length > 1 ? Decode(uri.Fragment[1..]) : "Hysteria2 · " + host;
+        if (name.Length is < 1 or > 120 || name.Any(char.IsControl)) throw new OperationException("显示名称应为 1–120 个可打印字符。");
+        var clash = new JsonObject { ["name"] = name, ["type"] = "hysteria2", ["server"] = host, ["port"] = main, ["password"] = password, ["sni"] = sni, ["skip-cert-verify"] = false, ["udp"] = true };
+        var sing = new JsonObject { ["tag"] = name, ["type"] = "hysteria2", ["server"] = host, ["server_port"] = main, ["password"] = password, ["tls"] = new JsonObject { ["enabled"] = true, ["server_name"] = sni } };
+        if (ports.Contains(',') || ports.Contains('-')) Hysteria2Ports.Apply(clash, sing, normalized, Hysteria2Ports.DefaultInterval);
+        var obfs = query.GetValueOrDefault("obfs", ""); var obfsPassword = query.GetValueOrDefault("obfs-password", "");
+        if (obfs != "" && obfs != "salamander" || obfs == "" && obfsPassword != "" || obfs == "salamander" && (obfsPassword.Length is < 1 or > 4096)) throw new OperationException("Hysteria2 仅支持完整的 Salamander 混淆参数。");
+        if (obfs == "salamander") { clash["obfs"] = obfs; clash["obfs-password"] = obfsPassword; sing["obfs"] = new JsonObject { ["type"] = obfs, ["password"] = obfsPassword }; }
+        return new JsonObject { ["name"] = name, ["clash"] = clash, ["sing_box"] = sing };
+    }
     private static void ValidateSni(string value) { if (value.Length == 0 || Uri.CheckHostName(value) == UriHostNameType.Unknown) throw new OperationException("TLS 服务器名称无效。"); }
     private static string Decode(string value)
     {

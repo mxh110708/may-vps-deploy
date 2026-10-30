@@ -37,6 +37,16 @@ def config():
 
 
 class Ownership(unittest.TestCase):
+    def test_ipv6_chain_owner_and_exact_whitelist_survive_materialization(self):
+        value=config();rule=value['Rules'][0];rule.update(ListenFamily='IPv6',TargetAddress='2001:db8::20',AllowedSources=['2001:db8::10/128'],Validation={'Type':'TcpChain','ChainId':'c'*32,'FrontInstance':'示例/Front/May-VPS-Deploy'})
+        normalized=UDP.normalize(value)
+        files=UDP.material(normalized,'/usr/bin/python3')
+        self.assertIn('ip6 saddr { 2001:db8::10/128 } accept',files[UDP.ACL])
+        self.assertIn('--target 2001:db8::20',files[UDP.unit_path(UDP.unit_name(rule,'service'))])
+        for mutation in [dict(ChainId='../other'),dict(FrontInstance='Example/../May-VPS-Deploy'),dict(FrontInstance='Example/Front/Other'),dict(Extra=True)]:
+            bad=copy.deepcopy(value);bad['Rules'][0]['Validation'].update(mutation)
+            with self.assertRaises(ValueError):UDP.normalize(bad)
+
     def test_unit_revision_is_pinned_to_the_controller_archive(self):
         check_unit_revision(self, UDP)
 

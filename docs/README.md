@@ -18,6 +18,7 @@
 | TLS／DNS | [Cloudflare 与 Certbot](CLOUDFLARE-CERTBOT.zh-CN.md)，具体动作仍以当前受管范围审阅。 |
 | 监控 | [Server／Agent／HTTPS／主题](MONITOR-OPERATIONS.zh-CN.md)、[独立 watchdog](MONITOR-WATCHDOG.zh-CN.md) |
 | 开发 | [开发与验证](DEVELOPMENT.zh-CN.md)、[安全](SECURITY.md)、[架构参考](DOTNET-ARCHITECTURE.zh-CN.md) |
+| 未发行功能 | [第十五轮 Hysteria2 分享与端口跳跃](HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md)、[第十六轮 TUIC v5](TUIC-ROUND-16-2026-10-28.zh-CN.md)、[第十七轮服务器 QUIC 下一跳](SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md)、[第十八轮外部 WS／gRPC](CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md)、[第二十轮 XHTTP 完整客户端配套](XHTTP-ROUND-20-2026-10-29.zh-CN.md)、[第二十一轮双地址族 TCP／限定 UDP 编排](CHAIN-ROUND-21-2026-10-30.zh-CN.md)、[主线后续计划](DEPLOY-ROADMAP-2026-10-24.zh-CN.md) |
 
 ## 历史、CLI 与证据
 

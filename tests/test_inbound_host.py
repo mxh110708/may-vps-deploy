@@ -160,8 +160,27 @@ class InboundOwnership(unittest.TestCase):
     def test_logical_paths_cannot_escape_synthetic_root(self):
         for path in ('/../root','\\root\\file','/etc/../../root','//root/file','C:\\root'):
             with self.assertRaises(ValueError):self.host.path(path)
-    def quic(self):
-        value=payload((A,));value['Model']['Inbounds'][0]['Protocol']='Hysteria2';config=json.loads(base64.b64decode(value['Configurations'][A]));config['inbounds'][0]['type']='hysteria2';del config['inbounds'][0]['method'];del config['inbounds'][0]['password'];data=json.dumps(config).encode();value['Configurations'][A]=base64.b64encode(data).decode();value['Bindings'][0]['Sha256']=M.digest(data);return value
+    def quic(self,protocol='Hysteria2'):
+        value=payload((A,));value['Model']['Inbounds'][0]['Protocol']=protocol;config=json.loads(base64.b64decode(value['Configurations'][A]));config['inbounds'][0]['type']='tuic' if protocol=='TuicV5' else 'hysteria2';del config['inbounds'][0]['method'];del config['inbounds'][0]['password'];data=json.dumps(config).encode();value['Configurations'][A]=base64.b64encode(data).decode();value['Bindings'][0]['Sha256']=M.digest(data);return value
+    def test_tuic_v5_is_udp_only_and_rejects_udp_collision(self):
+        value=self.quic('TuicV5')
+        with socket.socket() as tcp:
+            tcp.bind(('127.0.0.1',value['Bindings'][0]['Port']));tcp.listen();self.host.preflight(value,[A])
+        with socket.socket(type=socket.SOCK_DGRAM) as udp:
+            udp.bind(('127.0.0.1',value['Bindings'][0]['Port']))
+            with self.assertRaises(OSError):self.host.preflight(value,[A])
+        self.assertFalse(self.host.path(M.REGISTRY).exists())
+    def test_tuic_listener_ready_checks_owned_udp_pid(self):
+        value=self.quic('TuicV5');self.apply(value,[A]);binding=value['Bindings'][0]
+        def run(args,**kwargs):
+            if 'MainPID' in args:return subprocess.CompletedProcess(args,0,'3344','')
+            if args[0]=='ss':return subprocess.CompletedProcess(args,0,'UNCONN 0 0 127.0.0.1:'+str(binding['Port'])+' 0.0.0.0:* users:(("sing-box",pid=3344,fd=7))','')
+            return self.kernel(args,**kwargs)
+        M.Host(self.root,run).wait_ready(binding)
+        def tcp_only(args,**kwargs):
+            return subprocess.CompletedProcess(args,0,'','') if args[0]=='ss' else run(args,**kwargs)
+        with patch.object(M.time,'sleep'):
+            with self.assertRaises(ValueError):M.Host(self.root,tcp_only).wait_ready(binding)
     def test_quic_preflight_does_not_require_a_tcp_port(self):
         value=self.quic()
         with socket.socket() as tcp:
@@ -184,6 +203,96 @@ class InboundOwnership(unittest.TestCase):
             return subprocess.CompletedProcess(args,result.returncode,result.stdout.replace('pid=3344,','pid=9988,'),result.stderr)
         with patch.object(M.time,'sleep'):
             with self.assertRaises(ValueError):M.Host(self.root,wrong).wait_ready(binding)
+    def test_hopping_checks_alternative_udp_before_writes(self):
+        value=self.quic();base=value['Bindings'][0]['Port']
+        with socket.socket(type=socket.SOCK_DGRAM) as other:
+            other.bind(('127.0.0.1',0));alternative=other.getsockname()[1]
+            value['Model']['Inbounds'][0]['Options']={'HopPorts':str(base)+','+str(alternative),'HopIntervalSeconds':30}
+            with self.assertRaises(OSError):self.host.preflight(value,[A])
+        self.assertFalse(self.host.path(M.REGISTRY).exists())
+    def test_hopping_bounds_and_conflicts_are_rechecked_remotely(self):
+        original=self.quic();base=original['Bindings'][0]['Port']
+        for options in ({'HopPorts':str(base),'HopIntervalSeconds':30},{'HopPorts':'1-65535','HopIntervalSeconds':30},{'HopPorts':str(base)+',1','HopIntervalSeconds':True},{'HopPorts':str(base)+',1; id','HopIntervalSeconds':30}):
+            with self.subTest(options=options):
+                value=copy.deepcopy(original);value['Model']['Inbounds'][0]['Options']=options
+                with self.assertRaises(ValueError):M.normalize(value)
+        value=payload();first=value['Bindings'][0];second=value['Bindings'][1]
+        value['Model']['Inbounds'][0]['Protocol']='Hysteria2'
+        value['Model']['Inbounds'][0]['Options']={'HopPorts':str(first['Port'])+','+str(second['Port']),'HopIntervalSeconds':30}
+        config=json.loads(base64.b64decode(value['Configurations'][A]));config['inbounds'][0]['type']='hysteria2';data=json.dumps(config).encode();value['Configurations'][A]=base64.b64encode(data).decode();first['Sha256']=M.digest(data)
+        with self.assertRaises(ValueError):M.normalize(value)
+
+
+class XhttpOwnership(unittest.TestCase):
+    setUp=InboundOwnership.setUp
+    snapshot=InboundOwnership.snapshot
+    apply=InboundOwnership.apply
+    restore=InboundOwnership.restore
+    @staticmethod
+    def xhttp(security='TLS'):
+        value=payload((A,)); item=value['Model']['Inbounds'][0]; binding=value['Bindings'][0]
+        item.update(Protocol='VLESS',UserIds=['c'*32],CertificateId='d'*32 if security=='TLS' else '',OutboundId='e'*32)
+        value['Model']['Outbounds']=[{'Id':'e'*32,'Kind':'Direct'}]
+        item['Options']={'ServerName':'xhttp.example.test','Security':security,'Reality':{},'Transport':{'Type':'XHTTP','Path':'/may-xhttp/','Host':'front.example.test','Mode':'stream-one'}}
+        stream={'network':'xhttp','security':security.lower(),'xhttpSettings':{'path':'/may-xhttp/','host':'front.example.test','mode':'stream-one'}}
+        if security=='TLS':stream['tlsSettings']={'serverName':'xhttp.example.test','minVersion':'1.3','maxVersion':'1.3','alpn':['h2'],'certificates':[{'certificate':['synthetic-certificate'],'key':['synthetic-key']}]}
+        else:
+            item['Options']['Reality']={'HandshakeServer':'target.example.test','HandshakePort':443,'PublicKey':'A'*43,'ShortId':'abcd1234'}
+            stream['realitySettings']={'show':False,'target':'target.example.test:443','xver':0,'serverNames':['xhttp.example.test'],'privateKey':'A'*43,'shortIds':['abcd1234']}
+        config={'log':{'loglevel':'warning'},'inbounds':[{'tag':A,'protocol':'vless','listen':binding['Address'],'port':binding['Port'],'settings':{'clients':[{'id':'00000001-0002-0003-0004-000000000005','email':'c'*32}],'decryption':'none'},'streamSettings':stream}],'outbounds':[{'protocol':'freedom'}],'routing':{'rules':[]}}
+        data=M.encoded(config).encode();value['Configurations'][A]=base64.b64encode(data).decode();binding['Sha256']=M.digest(data);binding['Udp']=False
+        value['Core']['Reality']={'Engine':'xray','Version':'26.3.27','Artifact':'Xray-linux-64.zip','Sha256':'f'*64}
+        return value
+    def test_xhttp_uses_xray_and_scoped_private_unit(self):
+        for security in ('TLS','Reality'):
+            with self.subTest(security=security):
+                value=self.xhttp(security);M.normalize(value);self.assertEqual(M.selected_core(value,A)['Engine'],'xray');text=M.unit(A,M.selected_core(value,A));self.assertIn('xray run -config %d/config.json',text);self.assertNotIn('sing-box run',text);self.assertIn('LoadCredential=',text)
+    def test_xhttp_h3_checks_owned_udp_and_ignores_unrelated_tcp(self):
+        value=self.xhttp();item=value['Model']['Inbounds'][0];binding=value['Bindings'][0]
+        item['Options']['Transport'].update(HTTPVersion='3',Mode='packet-up',Extra={'sessionPlacement':'header'})
+        config=json.loads(base64.b64decode(value['Configurations'][A]));stream=config['inbounds'][0]['streamSettings']
+        stream['tlsSettings']['alpn']=['h3'];stream['xhttpSettings'].update(mode='packet-up',extra={'sessionPlacement':'header'})
+        data=M.encoded(config).encode();value['Configurations'][A]=base64.b64encode(data).decode();binding.update(Sha256=M.digest(data),Udp=True)
+        with socket.socket() as tcp:
+            tcp.bind(('127.0.0.1',binding['Port']));tcp.listen();self.host.preflight(value,[A])
+        with socket.socket(type=socket.SOCK_DGRAM) as udp:
+            udp.bind(('127.0.0.1',binding['Port']))
+            with self.assertRaises(OSError):self.host.preflight(value,[A])
+        self.apply(value,[A])
+        def run(args,**kwargs):
+            if 'MainPID' in args:return subprocess.CompletedProcess(args,0,'3344','')
+            if args[0]=='ss':return subprocess.CompletedProcess(args,0,'UNCONN 0 0 127.0.0.1:'+str(binding['Port'])+' 0.0.0.0:* users:(("xray",pid=3344,fd=7))','')
+            return self.kernel(args,**kwargs)
+        M.Host(self.root,run).wait_ready(binding)
+        def foreign(args,**kwargs):
+            r=run(args,**kwargs);return subprocess.CompletedProcess(args,r.returncode,r.stdout.replace('pid=3344,','pid=9988,'),r.stderr)
+        with patch.object(M.time,'sleep'):
+            with self.assertRaises(ValueError):M.Host(self.root,foreign).wait_ready(binding)
+    def test_xhttp_security_transport_and_flow_cannot_drift(self):
+        for security in ('TLS','Reality'):
+            for mutation in ('transport','mode','host','flow','security'):
+                with self.subTest(security=security,mutation=mutation):
+                    value=self.xhttp(security);config=json.loads(base64.b64decode(value['Configurations'][A]));stream=config['inbounds'][0]['streamSettings']
+                    if mutation=='transport':stream['network']='ws'
+                    if mutation=='mode':stream['xhttpSettings']['mode']='auto'
+                    if mutation=='host':stream['xhttpSettings']['host']='other.example.test'
+                    if mutation=='flow':config['inbounds'][0]['settings']['clients'][0]['flow']='xtls-rprx-vision'
+                    if mutation=='security':stream['security']='none'
+                    data=M.encoded(config).encode();value['Configurations'][A]=base64.b64encode(data).decode();value['Bindings'][0]['Sha256']=M.digest(data)
+                    with self.assertRaises(ValueError):M.normalize(value)
+    def test_xhttp_rejects_advanced_overrides_and_h3(self):
+        for mutation in ('extra','alpn','file'):
+            value=self.xhttp();config=json.loads(base64.b64decode(value['Configurations'][A]));stream=config['inbounds'][0]['streamSettings']
+            if mutation=='extra':stream['xhttpSettings']['extra']={}
+            if mutation=='alpn':stream['tlsSettings']['alpn']=['h3']
+            if mutation=='file':stream['tlsSettings']['certificates']=[{'certificateFile':'/outside.pem','keyFile':'/outside.key'}]
+            data=M.encoded(config).encode();value['Configurations'][A]=base64.b64encode(data).decode();value['Bindings'][0]['Sha256']=M.digest(data)
+            with self.assertRaises(ValueError):M.normalize(value)
+        value=self.xhttp();value['Model']['Outbounds'][0]['Kind']='Proxy'
+        with self.assertRaises(ValueError):M.normalize(value)
+    def test_xhttp_restore_retains_exact_owned_state(self):
+        original=self.xhttp();self.apply(original,[A]);before=self.host.read()['Hash'];changed=copy.deepcopy(original);changed['Bindings'][0]['Enabled']=False;changed['Model']['Inbounds'][0]['Enabled']=False
+        backup,_=self.apply(changed,[A]);self.assertFalse(self.host.state(A)['Active']);self.restore(backup);self.assertEqual(self.host.read()['Hash'],before);self.assertTrue(self.host.state(A)['Active'])
 
 
 if __name__=='__main__':unittest.main()

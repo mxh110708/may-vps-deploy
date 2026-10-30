@@ -53,7 +53,11 @@ def normalize(value):
         check = rule['Validation']
         if not isinstance(check, dict):
             raise ValueError('UDP application validation is required.')
-        if check.get('Type') == 'Echo':
+        if check.get('Type') == 'TcpChain':
+            parts = check.get('FrontInstance', '').split('/')
+            if set(check) != {'Type', 'ChainId', 'FrontInstance'} or not isinstance(check.get('ChainId'), str) or not re.fullmatch('[a-f0-9]{32}', check['ChainId']) or len(parts) != 3 or parts[2] != 'May-VPS-Deploy' or any(not re.fullmatch(r'[^\W_][\w. -]{0,63}', p) or p.endswith(('.', ' ')) for p in parts[:2]):
+                raise ValueError('Invalid UDP chain reference.')
+        elif check.get('Type') == 'Echo':
             if set(check) != {'Type'}:
                 raise ValueError('Unexpected UDP echo options.')
         elif check.get('Type') in ('Dns', 'Shadowsocks'):

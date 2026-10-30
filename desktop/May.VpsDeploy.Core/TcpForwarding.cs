@@ -98,7 +98,7 @@ public static class TcpForwarding
         var source = rule["Validation"]!.AsObject(); var scheme = store.ReadSecret(ServerOutboundRouting.SchemeFile(store.Paths, source.Text("SchemeId")));
         var node = (scheme["Nodes"] as JsonArray)?.OfType<JsonObject>().SingleOrDefault(n => n.Text("Id") == source.Text("NodeId")) ?? throw new OperationException("代理验收来源已移除，请重新选择。");
         if (ArchiveStore.Fingerprint(node) != source.Text("NodeFingerprint")) throw new OperationException("代理验收来源已变化，请重新选择并审阅。");
-        if (node.Text("sing_box.type") == "hysteria2") throw new OperationException("Hysteria2 使用 UDP/QUIC，不能作为仅 TCP 透明转发的协议目标。");
+        if (node.Text("sing_box.type") is "hysteria2" or "tuic") throw new OperationException("Hysteria2 和 TUIC 使用 UDP/QUIC，不能作为仅 TCP 透明转发的协议目标。");
         if (node["ForwardedOrigin"] != null || node["TcpChainOrigin"] != null) throw new OperationException("本轮转发目标须选择原始代理节点，不能再次引用转发或跨实例线路节点。");
         if (node["ManagedOrigin"] is JsonObject origin)
         {
@@ -154,7 +154,7 @@ public static class TcpForwarding
     {
         state ??= new JsonObject();
         var reserved = new HashSet<int> { plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue"), plan.Number("Server.BootstrapSshPort") };
-        foreach (var inbound in InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds")) reserved.Add(inbound.Number("Listener.Port"));
+        foreach (var port in InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").SelectMany(Hysteria2Ports.ListenerPorts)) reserved.Add(port);
         foreach (var (role, fields) in new[] { ("RealityEntry", new[] { "Ports.XrayPrimary", "Ports.XrayBackup" }), ("AnyTlsEntry", new[] { "Ports.AnyTlsPrimary" }), ("ShadowsocksLanding", new[] { "Ports.LandingShadowsocks" }) })
             if (plan.Flag("ProtocolInventory." + role + ".Installed", DeploymentPlans.Uses(plan, role))) foreach (var field in fields) reserved.Add(plan.Number(field));
         if (plan.Text("Reality.TargetMode") == "LocalOwnedTls") reserved.Add(plan.Number("Reality.LocalHttpsPort"));

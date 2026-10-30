@@ -5,6 +5,12 @@ namespace May.VpsDeploy.Core;
 public static class InboundSources
 {
     private static readonly AsyncLocal<HashSet<string>?> Resolving = new();
+    private static bool ProtocolMatches(JsonObject node, JsonNode? item, bool requireUdp = false) => (!requireUdp || item.Flag("Result.UdpValidation.ResponseMatched") && item.Text("Result.UdpValidation.Transport") == "UDP") && (VlessXhttp.IsNode(node) ? VlessXhttp.Evidence(node, item?["Result"]) : node.Text("sing_box.type") switch
+    {
+        "hysteria2" => item.Text("Result.ValidatedProtocol") == "hysteria2",
+        "tuic" => item.Text("Result.ValidatedProtocol") == "tuic" && item.Flag("Result.UdpValidation.ResponseMatched") && item.Text("Result.UdpValidation.Transport") == "UDP",
+        _ => true
+    });
     public static void RequireValidation(ArchiveStore store, JsonObject plan, JsonObject model, JsonObject credentials, string[] ids, JsonObject result)
     {
         var instance = plan.Text("Provider") + "/" + plan.Text("Instance") + "/May-VPS-Deploy";
@@ -13,8 +19,9 @@ public static class InboundSources
         if (result.Text("Status") != "Passed" || items.Length != nodes.Length) throw new OperationException("入站、用户及地址族的实际代理验收未全部完成。");
         foreach (var node in nodes)
         {
-            if (node.Text("sing_box.type") == "hysteria2" && !items.Any(i => i.Text("InboundId") == node.Text("InboundOrigin.InboundId") && i.Text("UserId") == node.Text("InboundOrigin.UserId") && i.Text("Family") == node.Text("InboundOrigin.Family") && i.Text("Result.ValidatedProtocol") == "hysteria2")) throw new OperationException("Hysteria2 验收缺少对应用户和地址族的真实协议请求结果。");
-            if (items.Count(i => i.Text("InboundId") == node.Text("InboundOrigin.InboundId") && i.Text("UserId") == node.Text("InboundOrigin.UserId") && i.Text("Family") == node.Text("InboundOrigin.Family") && i.Text("ConnectionFingerprint") == ClientNodeImport.ConnectionFingerprint(node) && i.Text("Status") == "Passed" && i.Text("From") == "Controller" && i.Text("Scope") == "ProxyHttps" && i.Text("Result.Status") == "Reachable") != 1) throw new OperationException("入站验收证据缺少对应用户或地址族。");
+            var requireUdp = InboundRendering.RequiresApplicationUdp(store, instance, model, node.Text("InboundOrigin.InboundId"));
+            if (!items.Any(i => i.Text("InboundId") == node.Text("InboundOrigin.InboundId") && i.Text("UserId") == node.Text("InboundOrigin.UserId") && i.Text("Family") == node.Text("InboundOrigin.Family") && ProtocolMatches(node, i))) throw new OperationException("QUIC 入站验收缺少对应用户、地址族的真实协议请求或应用 UDP 结果。");
+            if (items.Count(i => i.Text("InboundId") == node.Text("InboundOrigin.InboundId") && i.Text("UserId") == node.Text("InboundOrigin.UserId") && i.Text("Family") == node.Text("InboundOrigin.Family") && i.Text("ConnectionFingerprint") == ClientNodeImport.ConnectionFingerprint(node) && i.Text("Status") == "Passed" && i.Text("From") == "Controller" && i.Text("Scope") == "ProxyHttps" && i.Text("Result.Status") == "Reachable" && Hysteria2Ports.ValidationMatches(node, i) && ProtocolMatches(node, i, requireUdp)) != 1) throw new OperationException("入站验收证据缺少对应用户、地址族、完整跳跃端口集或应用 UDP 回程。");
         }
     }
     public static JsonObject Create(ArchiveStore store, string instance, string inboundId, string userId, string family)
@@ -34,7 +41,8 @@ public static class InboundSources
                 var node = InboundRendering.Nodes(store, instance, plan, model, secrets["Inbounds"]!.AsObject()).SingleOrDefault(n => n.Text("InboundOrigin.InboundId") == inboundId && n.Text("InboundOrigin.UserId") == userId && n.Text("InboundOrigin.Family") == family) ?? throw new OperationException("入站或用户已移除、解绑或停用。");
                 if (!state.Flag("Inbounds.Runtime." + inboundId + ".Active") || !state.Flag("Inbounds.Runtime." + inboundId + ".Enabled")) throw new OperationException("入站最近核对的运行状态不符，请先重新检查。");
                 var validation = state.At("Inbounds.ValidationById." + inboundId) as JsonObject;
-                if (validation?.Text("Status") != "Passed" || !(validation["Items"] as JsonArray ?? []).Any(i => i!.Text("UserId") == userId && i.Text("Family") == family && i.Text("ConnectionFingerprint") == ClientNodeImport.ConnectionFingerprint(node) && i.Text("Status") == "Passed")) throw new OperationException("该入站用户缺少当前连接的实际验收，请先检查已保存入站。");
+                var requireUdp = InboundRendering.RequiresApplicationUdp(store, instance, model, inboundId);
+                if (validation?.Text("Status") != "Passed" || !(validation["Items"] as JsonArray ?? []).Any(i => i!.Text("UserId") == userId && i.Text("Family") == family && i.Text("ConnectionFingerprint") == ClientNodeImport.ConnectionFingerprint(node) && i.Text("Status") == "Passed" && Hysteria2Ports.ValidationMatches(node, i) && ProtocolMatches(node, i, requireUdp))) throw new OperationException("该入站用户缺少当前连接的实际验收，请先检查已保存入站。");
                 return node;
             }
             finally { secrets.Clear(); }
@@ -87,7 +95,8 @@ public static class InboundSources
             foreach (var node in InboundRendering.Nodes(store, instance, plan, model, credentials))
             {
                 var id = node.Text("InboundOrigin.InboundId"); var user = node.Text("InboundOrigin.UserId"); var family = node.Text("InboundOrigin.Family"); var validation = state.At("Inbounds.ValidationById." + id);
-                var valid = state.Flag("Inbounds.Runtime." + id + ".Active") && state.Flag("Inbounds.Runtime." + id + ".Enabled") && validation.Text("Status") == "Passed" && (validation?["Items"] as JsonArray ?? []).Any(i => i!.Text("UserId") == user && i.Text("Family") == family && i.Text("ConnectionFingerprint") == ClientNodeImport.ConnectionFingerprint(node) && i.Text("Status") == "Passed");
+                var requireUdp = InboundRendering.RequiresApplicationUdp(store, instance, model, id);
+                var valid = state.Flag("Inbounds.Runtime." + id + ".Active") && state.Flag("Inbounds.Runtime." + id + ".Enabled") && validation.Text("Status") == "Passed" && (validation?["Items"] as JsonArray ?? []).Any(i => i!.Text("UserId") == user && i.Text("Family") == family && i.Text("ConnectionFingerprint") == ClientNodeImport.ConnectionFingerprint(node) && i.Text("Status") == "Passed" && Hysteria2Ports.ValidationMatches(node, i) && ProtocolMatches(node, i, requireUdp));
                 var label = plan.Text("NodeName") + " / " + node.Text("name"); result.Add((instance, valid ? node : null, label, valid ? "独立入站 · 已完成用户与代理 HTTPS 验收" : "运行状态或当前用户验收不符，请先检查已保存入站。")); if (!valid) node.Clear();
             }
             foreach (var disabled in InboundCatalog.Items(model, "Inbounds").Where(i => !i.Flag("Enabled"))) result.Add((instance, null, plan.Text("NodeName") + " / " + disabled.Text("Name"), "入站已停用。"));

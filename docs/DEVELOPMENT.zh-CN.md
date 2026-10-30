@@ -27,6 +27,18 @@ dotnet run --project .\desktop\May.VpsDeploy.Tests -c Release --no-restore -- $P
 pwsh -NoProfile -File .\scripts\Test-NoSecrets.ps1 -ProjectRoot $PWD
 ```
 
+完整 .NET 回归也可拆成七个独立组运行，以便每组设置超时并定位问题。`--group` 只选择原完整入口中的连续用例，不替换断言；不带该参数时仍按原顺序执行全部组。七组均通过才算完整分组回归通过：
+
+```powershell
+$groups = 'foundation', 'clients', 'xhttp', 'chains', 'quic', 'udp', 'operations'
+foreach ($group in $groups) {
+    dotnet .\desktop\May.VpsDeploy.Tests\bin\Release\net10.0\May.VpsDeploy.Tests.dll $PWD --group $group
+    if ($LASTEXITCODE -ne 0) { throw "Regression group failed: $group" }
+}
+```
+
+先构建测试项目。需要真实本机协议用例时设置 `MAY_TEST_PYTHON` 与固定 Xray 的 `MAY_TEST_XRAY`；SSH/SFTP 专项使用 `MAY_TEST_SSH_PYTHON`。后台运行器须给各组独立超时并关闭自己的子进程，不能将超时、缺失本机依赖或仅模型通过记为真实协议通过。原生 WinUI 使用已有后台测试接口，禁止弹出测试窗口。
+
 PowerShell 主入口的完整离线回归：
 
 ```powershell

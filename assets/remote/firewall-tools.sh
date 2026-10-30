@@ -6,6 +6,29 @@ import hashlib, ipaddress, json, os, re, subprocess, sys, tarfile
 from pathlib import Path
 action = sys.argv[1]
 config = Path('/etc/nftables.conf')
+
+def hysteria_redirects():
+    mappings = json.loads(os.environ.get('VPS_PARAM_HYSTERIA_REDIRECTS', '[]'))
+    if not isinstance(mappings, list) or len(mappings) > 16: raise SystemExit('Invalid Hysteria redirect catalogue.')
+    lines, claimed = [], set()
+    for value in mappings:
+        if not isinstance(value, dict) or set(value) != {'Address', 'Port', 'Ports'}: raise SystemExit('Invalid Hysteria redirect fields.')
+        port, ports = value['Port'], value['Ports']
+        if type(port) is not int or not 1 <= port <= 65535 or not isinstance(ports, list) or not 2 <= len(ports) <= 256 or any(type(p) is not int or not 1 <= p <= 65535 for p in ports) or len(set(ports)) != len(ports) or port not in ports or claimed.intersection(ports): raise SystemExit('Invalid or overlapping Hysteria redirect ports.')
+        claimed.update(ports)
+        try: address = ipaddress.ip_address(value['Address'])
+        except (ValueError, TypeError): raise SystemExit('Invalid Hysteria redirect address.')
+        if address.is_loopback or address.is_multicast or address.version == 6 and (address.ipv4_mapped or address.scope_id): raise SystemExit('Unsupported Hysteria redirect address.')
+        members = ','.join(map(str, sorted(p for p in ports if p != port)))
+        families = (4, 6) if address == ipaddress.ip_address('::') else (address.version,)
+        for family in families:
+            scope = 'meta nfproto ipv'+str(family) if address.is_unspecified else ('ip' if family == 4 else 'ip6')+' daddr '+str(address)
+            target='redirect to :'+str(port) if address.is_unspecified else 'dnat '+('ip' if family==4 else 'ip6')+' to '+(str(address) if family==4 else '['+str(address)+']')+':'+str(port)
+            lines.append('    '+scope+' udp dport { '+members+' } counter '+target)
+    return '' if not lines else '  chain may_hysteria_hopping {\n    type nat hook prerouting priority -100; policy accept;\n'+'\n'.join(lines)+'\n  }\n'
+
+if action == 'render-hysteria':
+    print(hysteria_redirects(), end=''); raise SystemExit(0)
 def regular(path):
     if path.is_symlink() or not path.is_file() or any(p.is_symlink() for p in path.parents):
         raise SystemExit('Linked or missing firewall file.')
@@ -13,12 +36,16 @@ def table(text):
     match = re.search(r'(?ms)^table inet filter\s*\{(?!\s*\}).*\}\s*$', text)
     if not match: raise SystemExit('Unsupported managed firewall layout.')
     prefix = '\n'.join(line for line in text[:match.start()].splitlines() if line.strip() and not line.startswith('#'))
-    if prefix not in ('', 'flush ruleset', 'table inet filter {}\nflush table inet filter'):
+    if prefix not in ('', 'flush ruleset', 'table inet filter {}\nflush table inet filter', 'table inet filter {}\nflush table inet filter\ndelete table inet filter'):
         raise SystemExit('Unmanaged firewall commands; review required.')
     return match.group()
 def canonical(text):
     text = re.sub(r'(?m)^\s*#.*$', '', table(text))
     text = re.sub(r'priority filter\b', 'priority 0', text)
+    text = re.sub(r'priority dstnat\b', 'priority -100', text)
+    text = re.sub(r'meta nfproto 2\b', 'meta nfproto ipv4', text)
+    text = re.sub(r'meta nfproto 10\b', 'meta nfproto ipv6', text)
+    text = re.sub(r'counter packets [0-9]+ bytes [0-9]+', 'counter', text)
     text = re.sub(r'ip protocol 1\b', 'ip protocol icmp', text)
     text = re.sub(r'ip6 nexthdr 58\b', 'ip6 nexthdr ipv6-icmp', text)
     def states(match):
@@ -64,7 +91,10 @@ def matches(state):
     current = identity()
     return all(current[key] in (state['Original'][key], state.get('Applied', {}).get(key)) for key in current)
 def scoped(text):
-    return '#!/usr/sbin/nft -f\n# Managed by May VPS Deploy.\ntable inet filter {}\nflush table inet filter\n\n' + table(text)
+    # Flushing removes rules but keeps base chains and their hooks. Recreate
+    # the verified owned table atomically so disabled NAT chains disappear too;
+    # other tables and conntrack entries remain outside this operation.
+    return '#!/usr/sbin/nft -f\n# Managed by May VPS Deploy.\ntable inet filter {}\nflush table inet filter\ndelete table inet filter\n\n' + table(text)
 
 def baseline_identity():
     if config.exists(): regular(config)
@@ -135,7 +165,7 @@ def verify_archive():
             if values:
                 for protocol in ('tcp', 'udp'): rules.append(prefix+' saddr { '+','.join(map(str, values))+' } '+protocol+' dport '+restricted+' accept')
     rules += ['udp sport 67 udp dport 68 accept', 'udp sport 547 udp dport 546 accept', 'ip protocol icmp accept', 'ip6 nexthdr ipv6-icmp accept']
-    expected = 'table inet filter {\n  chain input {\n type filter hook input priority 0;\n policy drop;\n'+'\n'.join(rules)+'\n}\nchain forward {\n type filter hook forward priority 0; policy drop;\n}\nchain output {\n type filter hook output priority 0; policy accept;\n}\n}'
+    expected = 'table inet filter {\n  chain input {\n type filter hook input priority 0;\n policy drop;\n'+'\n'.join(rules)+'\n}\nchain forward {\n type filter hook forward priority 0; policy drop;\n}\nchain output {\n type filter hook output priority 0; policy accept;\n}\n'+hysteria_redirects()+'}'
     if canonical(config.read_text()) != canonical(expected): raise SystemExit('Firewall differs from the managed archive; review required.')
 if action == 'check':
     regular(config)

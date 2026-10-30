@@ -11,7 +11,8 @@ public sealed partial class MainWindow
     {
         var roles = ServerOutboundRouting.Roles.Where(role => plan.Flag("ProtocolInventory." + role + ".Enabled", DeploymentPlans.InitiallyEnabled(plan, role))).ToArray();
         if (!roles.Contains(initialRole)) throw new OperationException("请先启用所选入站组件，再配置并验收服务器出站。");
-        var candidates = workbench.List().SelectMany(s => (s["Nodes"] as JsonArray)?.OfType<JsonObject>().Where(ServerOutboundRouting.SupportedNode).Select(n => (Scheme: s, Node: n)) ?? []).ToArray();
+        var allCandidates = workbench.List().SelectMany(s => (s["Nodes"] as JsonArray)?.OfType<JsonObject>().Where(ServerOutboundRouting.SupportedNode).Select(n => (Scheme: s, Node: n)) ?? []).ToArray();
+        var candidates = allCandidates.Where(c => ServerOutboundRouting.SupportedNode(c.Node, initialRole)).ToArray();
         var model = new JsonObject { ["Protocol"] = initialRole, ["Action"] = "Apply", ["Selection"] = "", ["ExpectedAddress"] = "" };
         var roleChoice = Choice("目标入站组件", model, "Protocol", roles.Select(role => (role, ServerOutboundRouting.Label(role))));
         var modeHost = new StackPanel { Spacing = 14 }; var currentText = Text("", 14, true); var scopeText = Text("", 14, true); var statusText = Text("", 13, true);
@@ -20,8 +21,8 @@ public sealed partial class MainWindow
         var ruleInputs = new List<(JsonObject Rule, TextBox Input)>(); var hopInputs = new List<(JsonObject Model, TextBox Input)>(); var drafts = new Dictionary<string, JsonObject>(); string? shownRole = null;
         TextBox? expectedInput = null; JsonObject? reviewedOptions = null;
         var errorText = Text("", 13, true);
-        var panel = Column(Text("入站 → 服务器连接 Shadowsocks 落地 → 网站", 17), roleChoice, scopeText, currentText, statusText, modeHost, fields,
-            Text("只使用已保存方案中完整的 Shadowsocks / SS2022 原生节点。当前支持 IP 端点，不接受插件或客户端 detour。下一跳失败不会回退直连。", 13, true),
+        var panel = Column(Text("入站 → 服务器连接所选下一跳 → 网站", 17), roleChoice, scopeText, currentText, statusText, modeHost, fields,
+            Text("从已保存方案选择完整原生节点：sing-box 支持 Shadowsocks、Hysteria2、TUIC v5；固定 Xray 支持 Shadowsocks、Hysteria2。当前支持 IP 端点，不接受插件或客户端 detour。下一跳失败不会回退直连。", 13, true),
             Text("落地需允许当前 VPS 的来源地址；本操作不修改落地白名单。执行只重启所选组件，现有连接短暂断开。预期出口用于实际验收，不应填入口机地址。", 13, true), errorText);
         var dialog = OperationDialog("服务器固定下一跳", DialogScroll(panel), "审阅");
         void Refresh()
@@ -30,7 +31,7 @@ public sealed partial class MainWindow
             ruleInputs.Clear(); hopInputs.Clear(); expectedInput = null; fields.Children.Clear();
             if (model.Text("Action") == "Remove") { dialog.IsPrimaryButtonEnabled = current != null; return; }
             dialog.IsPrimaryButtonEnabled = candidates.Length > 0;
-            if (candidates.Length == 0) { fields.Children.Add(Text("请先在配置设计中导入并保存一个具有完整 sing-box 原生参数的 Shadowsocks 落地节点。")); return; }
+            if (candidates.Length == 0) { fields.Children.Add(Text("请先在配置设计中导入并保存适用于所选核心的完整原生下一跳节点。")); return; }
             var selection = Choice("已保存的默认下一跳", model, "Selection", candidates.Select(c => (c.Scheme.Text("Id") + ":" + c.Node.Text("Id"), c.Scheme.Text("Name") + " / " + c.Node.Text("name"))), model.Text("Selection") != "");
             selection.PlaceholderText = "来源已缺失，请重新选择";
             var address = expectedInput = Field("预期网站出口 IP", model, "ExpectedAddress");
@@ -55,6 +56,7 @@ public sealed partial class MainWindow
             }
             ruleInputs.Clear(); hopInputs.Clear(); expectedInput = null;
             var role = model.Text("Protocol"); current = plan.At("ServerOutbound." + role) as JsonObject;
+            candidates = allCandidates.Where(c => ServerOutboundRouting.SupportedNode(c.Node, role)).ToArray();
             shownRole = role;
             scopeText.Text = role == "RealityEntry" ? "Reality 主／备用端口、IPv4／IPv6 监听共同使用本次出口；保留 UUID、Reality 密钥和目标站点。" : "只处理 anytls-in 的出口；保留 AnyTLS 用户、TLS / ECH 和 padding。";
             currentText.Text = current == null ? "当前未设置固定下一跳。" : "当前下一跳：" + current.Text("Name") + " · 出口 " + current.Text("ExpectedAddress");

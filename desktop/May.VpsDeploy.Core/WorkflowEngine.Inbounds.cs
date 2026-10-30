@@ -22,7 +22,7 @@ public sealed partial class WorkflowEngine
                 var audit = await c.Run("audit.sh"); Supported(new JsonObject { ["OsId"] = RemoteAssets.Marker(audit.Output, "OS_ID"), ["OsVersion"] = RemoteAssets.Marker(audit.Output, "OS_VERSION"), ["Architecture"] = RemoteAssets.Marker(audit.Output, "ARCH") });
                 await VerifyManagement(c); var observed = await Read(!check);
                 if (observed.Text("Hash") != preview.ExpectedHash || preview.ExpectedHash != "Absent" && !JsonNode.DeepEquals(observed.At("Registry.Model"), c.Plan["InboundModel"])) throw new OperationException("实际入站资源或目录与归档不同，未修改远端。", code: "InboundRemoteDrift");
-                if (!check && c.Plan.Text("Firewall.Mode") != "PreserveExisting") await c.Run("firewall-preflight.sh", FirewallParameters(c.Plan, true), marker: "FIREWALL_SCOPE_OK");
+                if ((!check || Hysteria2Ports.Redirects(c.Plan).Count > 0) && c.Plan.Text("Firewall.Mode") != "PreserveExisting") await c.Run("firewall-preflight.sh", FirewallParameters(c.Plan, true), marker: "FIREWALL_SCOPE_OK");
             });
             if (!check)
             {

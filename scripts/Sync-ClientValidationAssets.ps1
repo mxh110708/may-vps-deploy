@@ -44,6 +44,20 @@ function Install-VerifiedAsset([string]$Path,[string]$Relative,[string]$Hash) {
 function Restore-RemoteAsset($Asset,[string]$Kind) {
     $destination=Get-AssetDestination $Asset.file
     if($Asset.sha256 -notmatch '^[0-9a-f]{64}$'){throw '资产校验值无效。'}
+    if($Kind -eq 'Core' -and $Asset.core -eq 'may-core'){
+        if($Asset.file -notmatch '^may-core-1\.14\.2-may\.xhttp20\.[0-9]+-windows-amd64\.zip$' -or
+            $Asset.source_revision -notmatch '^[0-9a-f]{40}$' -or $Asset.source_tree_sha256 -notmatch '^[0-9a-f]{64}$' -or
+            $Asset.source_archive_sha256 -notmatch '^[0-9a-f]{64}$' -or $Asset.source_archive -notmatch '^may-core-[A-Za-z0-9.-]+-source\.zip$' -or
+            $Asset.capabilities -notcontains 'vless-xhttp-round20'){throw 'May Core 源代码与能力清单不完整。'}
+        foreach($item in @(@{file=$Asset.file;sha256=$Asset.sha256},@{file=$Asset.source_archive;sha256=$Asset.source_archive_sha256})){
+            $target=Get-AssetDestination $item.file
+            if(Test-AssetHash $target $item.sha256){continue}
+            $local=if($SourceDirectory){Join-Path $SourceDirectory $item.file}else{''}
+            if(-not $local -or -not(Test-Path -LiteralPath $local)){throw '缺少匹配的 May Core 及源码快照；请提供固定资产或按构建说明重建，不能用上游 sing-box 替代。'}
+            Install-VerifiedAsset $local $item.file $item.sha256
+        }
+        return
+    }
     if($Kind -eq 'Core'){
         if($Asset.file -notmatch '^[A-Za-z0-9.-]+\.zip$' -or $Asset.source -notmatch '^https://github\.com/(MetaCubeX/mihomo|SagerNet/sing-box)/releases/download/v[0-9.]+/[A-Za-z0-9.-]+\.zip$'){throw '不支持的核心资产来源。'}
     }elseif($Asset.file -notin @('mihomo-geodata/GeoSite.dat','mihomo-geodata/GeoIP.dat') -or

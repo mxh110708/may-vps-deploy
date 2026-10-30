@@ -25,6 +25,7 @@ if [[ -n "${VPS_PARAM_UDP_PORTS:-}" ]]; then
 fi
 
 restricted_rules=''
+hysteria_rules="$(mxh_firewall render-hysteria)"
 if [[ -n "$restricted_port" ]]; then
   [[ "$restricted_port" =~ ^[0-9]+$ ]] && (( restricted_port >= 1 && restricted_port <= 65535 )) || exit 1
   [[ -n "$allowed_ipv4s" || -n "$allowed_ipv6s" ]] || {
@@ -67,6 +68,7 @@ cat > "$temporary" <<EOF
 # Managed by May VPS Deploy.
 table inet filter {}
 flush table inet filter
+delete table inet filter
 
 table inet filter {
   chain input {
@@ -92,6 +94,7 @@ ${udp_rule}${restricted_rules}    udp sport 67 udp dport 68 accept
     type filter hook output priority 0;
     policy accept;
   }
+${hysteria_rules}
 }
 EOF
 

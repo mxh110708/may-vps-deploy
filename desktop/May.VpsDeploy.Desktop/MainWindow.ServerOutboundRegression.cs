@@ -80,6 +80,7 @@ public sealed partial class MainWindow
             var realityRoute = ServerOutboundRouting.Build("RealityEntry", ServerConfigurations.Xray(plan, secrets), null, node, "198.51.100.20", plan, origin);
             plan.Put("ServerOutbound.RealityEntry", realityRoute.Metadata!.DeepClone()); ArchiveStore.WriteJson(realityFile, realityRoute.Configuration); state.Put("ServerConfigHashes.RealityEntry", JsonValue.Create(ClientSchemes.SourceFingerprint(realityFile)));
             ArchiveStore.WriteJson(SafePath.Resolve(directory, "deployment-plan.json"), plan); ArchiveStore.WriteJson(SafePath.Resolve(directory, "deployment-state.json"), state); store.WriteSecret(SafePath.Resolve(directory, "secrets.dotnet.private.json"), secrets);
+            await ServerQuicUiChoices(relative, plan, output);
             var realityBefore = ClientSchemes.SourceFingerprint(realityFile); var anyTlsBefore = ClientSchemes.SourceFingerprint(file); var sourceBefore = ArchiveStore.Fingerprint(source);
             pending = operation = ServerOutboundSheet(relative, plan, "RealityEntry"); form = await Dialog();
             Require(Find<TextBlock>(form).Any(t => t.Text.Contains("来源与已审阅快照一致")) && Find<ComboBox>(form).Single(c => c.Header as string == "已保存的默认下一跳").SelectedItem is ComboBoxItem selected && selected.Tag as string == source.Text("Id") + ":" + node.Text("Id"), "当前 Reality 下一跳未预选或来源状态错误。");

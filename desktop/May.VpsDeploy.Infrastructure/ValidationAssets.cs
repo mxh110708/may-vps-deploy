@@ -1,14 +1,20 @@
 using System.IO.Compression;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using May.VpsDeploy.Core;
 
 namespace May.VpsDeploy.Infrastructure;
 
-public interface IValidationAssets { string ResolveCore(string name); string DataDirectory { get; } string ExpectedVersion(string name) => ""; }
+public interface IValidationAssets { string ResolveCore(string name); string DataDirectory { get; } string ExpectedVersion(string name) => ""; bool Supports(string name,string capability) => false; }
 public sealed class ValidationAssets(AppPaths paths, string platform) : IValidationAssets
 {
     public string DataDirectory => paths.Resolve("vendor/test-cores/" + platform + "/mihomo-geodata");
     public string ExpectedVersion(string name) => ArchiveStore.ReadJson(paths.Resolve("vendor/test-cores/" + platform + "/checksums.json"))["artifacts"]!.AsArray().Single(n => n!.Text("core") == name)!.Text("version");
+    public bool Supports(string name,string capability)
+    {
+        var item=ArchiveStore.ReadJson(paths.Resolve("vendor/test-cores/"+platform+"/checksums.json"))["artifacts"]!.AsArray().SingleOrDefault(n=>n!.Text("core")==name);
+        return item!=null&&item.Strings("capabilities").Contains(capability)&&Regex.IsMatch(item.Text("source_revision"),"^[0-9a-f]{40}$")&&Regex.IsMatch(item.Text("source_tree_sha256"),"^[0-9a-f]{64}$");
+    }
     public string ResolveCore(string name)
     {
         var root = paths.Resolve("vendor/test-cores/" + platform);

@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — 第十五至二十一轮
+
+- 第二十一轮扩展三实例编排：IPv6 TCP，以及 IPv4／IPv6 的固定端口 Hysteria2／TUIC UDP，增加明确的地址族／传输选择、来源筛选、`/128` 白名单、独立入站来源与实际状态核对，见[第二十一轮](docs/CHAIN-ROUND-21-2026-10-30.zh-CN.md)。
+- UDP 线路须通过原 QUIC 协议、HTTPS 和真实应用 UDP 回程；分段选路单独标注，不当作可用证据。复用相应组件事务、逐台提交及已提交补偿，保持另一传输组件和生产服务范围。
+
+- 第二十轮补齐 VLESS XHTTP 的四模式、合法 HTTP/1.1／2／3 与 TLS／Reality 组合、独立下载身份、固定高级字段和 XMux；联动 May Core、Route 配置／探测及 Deploy 表单、导入分享、双客户端能力与对应核心校验，见[第二十轮](docs/XHTTP-ROUND-20-2026-10-29.zh-CN.md)。
+- XHTTP 实际验收包含 HTTPS 和应用 UDP，HTTP/3 按受管进程的 UDP 监听判就绪；保留来源失效、取消、局部恢复和丢失响应核对。配套 May 校验核心附对应源码与摘要，普通协议仍使用官方核心。
+- packet-up 上传缓冲按需倍增并封顶；后台微基准显示 1／8 MiB 上传累计分配减少约 62%／55%，不据此宣称整应用常驻内存下降。
+
+- 第十九轮增加 VLESS + TLS／Reality + XHTTP 独立入站，限定 HTTP/2、stream-one、直连服务器出站和 Mihomo 完整配置；接通按用户 HTTPS／应用 UDP 验收及局部恢复，范围见[第十九轮](docs/XHTTP-ROUND-19-2026-10-29.zh-CN.md)。
+- 独立入站增加固定 Xray 升级入口，只接受包内更高版本并重验受影响的 Xray 入站，保留官方 sing-box 固定版本。May Core 的 XHTTP 原生适配按第二十轮配套交付。
+
+- 第十八轮增加外部 VLESS／Trojan 的 TLS WS／gRPC 链接导入、来源读取、双客户端输出及分享往返；参数不支持或路径不能等价表达时明确拒绝，范围见[第十八轮](docs/CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md)。
+- 外部 WS／gRPC 使用独立编辑表单，取消／改名保留原生参数，更换连接保留节点身份并使旧候选失效，避免普通 VLESS 被误作 Reality 编辑。
+
+- 第十七轮扩展 sing-box 的服务器 Hysteria2／TUIC v5 下一跳，并接入固定 Xray 原生 Hysteria2；保留带宽、混淆、跳跃、身份、TLS 和来源约束。QUIC 出站强制验证应用 UDP，具体核心范围及恢复见[第十七轮](docs/SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md)。
+- 修正 Hysteria2 单独跳跃端口在固定 sing-box 中要求的范围编码，保持集合意义及双客户端对应。
+
+- 第十六轮新增 TUIC v5 独立入站、多用户 UUID／密码、证书、三种拥塞控制及两种 UDP 中继，0-RTT 默认关闭；双客户端完整生成与实际 TCP／UDP 验收、局部恢复和 Debian 重启验证见[第十六轮](docs/TUIC-ROUND-16-2026-10-28.zh-CN.md)。
+- Hysteria2 标准分享链接导入／导出，覆盖默认端口、IPv6、Salamander、多端口和双客户端完整往返核对；不静默删除无法表达的高级设置。
+- 受管端口跳跃复用原服务与 UDP 监听，加入冲突预检、逐端口验收、来源失效和局部恢复；停用时清理自有跳跃链。
+- 补充双客户端真实 QUIC、长连接、中断恢复、Debian 12／13 重启和原生界面验收。未发布，详细边界见[本轮记录](docs/HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md)。
+
 ## 0.9.38 - 2026-10-27
 
 - 配套 May Monitor Server／Agent／Web 0.1.0 正式版与 May Status .17，补齐独立主机检查及邮件使用说明；邮件按用户选择保持未配置。

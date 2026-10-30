@@ -36,8 +36,8 @@ public static class ForwardedNodeSources
         foreach (var record in TcpChains.List(store).Where(r => r.Text("Phase") == "Active"))
         {
             var config = record["Configuration"]!.AsObject(); JsonObject? node = null;
-            try { node = TcpChains.Project(store, config, region); TcpChains.VerifyNodes(store, [node]); choices.Add(new(config.Text("FrontInstance"), config.Text("Id"), "IPv4", config.Text("Name"), node, "跨实例前置 → 中转 → 落地 · TCP 整链验收")); }
-            catch (Exception error) when (error is OperationException or IOException or UnauthorizedAccessException) { node?.Clear(); choices.Add(new(config.Text("FrontInstance"), config.Text("Id"), "IPv4", config.Text("Name"), null, error is OperationException ? error.Message : "线路来源无法安全读取。")); }
+            try { node = TcpChains.Project(store, config, region); TcpChains.VerifyNodes(store, [node]); choices.Add(new(config.Text("FrontInstance"), config.Text("Id"), TcpChains.Family(config), config.Text("Name"), node, "跨实例前置 → 中转 → 落地 · " + TcpChains.Transport(config) + " 整链验收")); }
+            catch (Exception error) when (error is OperationException or IOException or UnauthorizedAccessException) { node?.Clear(); choices.Add(new(config.Text("FrontInstance"), config.Text("Id"), TcpChains.Family(config), config.Text("Name"), null, error is OperationException ? error.Message : "线路来源无法安全读取。")); }
         }
         return choices;
     }
@@ -153,7 +153,7 @@ public static class ForwardedNodeSources
                 while (used.Contains(name)) name = basis + " (" + suffix++ + ")";
                 if (name.Length > 120) throw new OperationException("转发节点名称过长，请先缩短转发规则名称。"); node["name"] = name;
             }
-            node["clash"]!["name"] = node.Text("name"); node["sing_box"]!["tag"] = node.Text("name");
+            if (node["clash"] is JsonObject clash) clash["name"] = node.Text("name"); if (node["sing_box"] is JsonObject sing) sing["tag"] = node.Text("name");
             if (previous == null) nodes.Add(node); else nodes[nodes.IndexOf(previous)] = node;
         }
         scheme["Nodes"] = nodes; scheme.Remove("Candidate");

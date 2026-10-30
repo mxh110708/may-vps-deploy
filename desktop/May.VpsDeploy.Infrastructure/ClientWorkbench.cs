@@ -43,7 +43,7 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
         foreach (var (format, file) in new[] { ("--clash", clash), ("--sing-box", sing) }.Where(p => p.Item2 != "")) { SafePath.CheckLinks(file); args.AddRange([format, file]); }
         if (args.Count == 1) throw new OperationException("请选择所需客户端的来源文件。");
         var result = await tools.RunAsync(python, args, null, TimeSpan.FromSeconds(30), cancellationToken);
-        result.RequireSuccess("来源配置无法提取受支持节点。"); return JsonNode.Parse(result.Output)!.AsArray();
+        result.RequireSuccess("来源配置无法提取受支持节点。"); var nodes=JsonNode.Parse(result.Output)!.AsArray();foreach(var n in nodes.OfType<JsonObject>())VlessXhttp.CompletePair(n);return nodes;
     }
     public async Task<JsonObject> BuildAsync(JsonObject scheme, CancellationToken cancellationToken)
     {
@@ -100,7 +100,10 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
             VerifyCandidate(scheme, candidate);
             foreach (var format in ClientSchemes.Formats(scheme))
             {
-                var core = format == "Clash" ? "mihomo" : "sing-box"; var executable = assets.ResolveCore(core);
+                var xhttp=format=="SingBox"&&ArchiveStore.ReadJson(candidate.Text(format))["outbounds"]!.AsArray().Any(o=>o!.Text("transport.type")=="xhttp");
+                var core = format == "Clash" ? "mihomo" : xhttp?"may-core":"sing-box";
+                if(xhttp&&!assets.Supports(core,"vless-xhttp-round20"))throw new OperationException("候选含 May XHTTP 扩展，缺少可核对来源的配套 May Core。");
+                var executable = assets.ResolveCore(core);
                 await ProtocolValidation.VerifyVersion(assets, tools, core, executable, cancellationToken);
                 if (format == "Clash")
                 {

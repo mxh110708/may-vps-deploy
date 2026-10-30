@@ -10,7 +10,9 @@ The supported desktop target is Windows 10 2004 or later / Windows 11 amd64. Rem
 
 This documentation baseline is **v0.9.38**. A repository branch is not proof of the version installed on your computer.
 
-| Area | Supported behavior |
+Unreleased source adds [round 15 Hysteria2 sharing and port hopping](docs/HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md), [round 16 TUIC v5 inbounds](docs/TUIC-ROUND-16-2026-10-28.zh-CN.md), [round 17 server QUIC next hops](docs/SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md), [round 18 external WS/gRPC nodes](docs/CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md), [round 20 XHTTP client integration](docs/XHTTP-ROUND-20-2026-10-29.zh-CN.md), and [round 21 dual-family TCP / bounded UDP chains](docs/CHAIN-ROUND-21-2026-10-30.zh-CN.md). XHTTP covers four modes, valid HTTP/TLS/Reality combinations, separate download identities and advanced fields, using matching May Core or an equivalent Mihomo representation. UDP chains require fixed-port Hysteria2 or TUIC. Round 19 remains a historical record of the earlier limited subset. This does not imply that an installed release or every public CDN supports these features.
+
+| Area | v0.9.38 release baseline |
 | --- | --- |
 | Instances | New deployment, adoption of recognized layouts, SSH identity checks, health inspection, maintenance and retirement. |
 | Inbounds | Reality, AnyTLS, SS2022 and Hysteria2, with separate listener, user, certificate, outbound and recovery identities. |
@@ -19,7 +21,7 @@ This documentation baseline is **v0.9.38**. A repository branch is not proof of 
 | Monitoring | Separate May Server/Agent maintenance, HTTPS origin checks, scoped read access and reviewed static theme updates. |
 | Recovery | Component-scoped snapshots and reconciliation of uncertain acknowledgements, without blindly replaying writes. |
 
-Provider-specific ATT IPv6 leasing, TUIC deployment, arbitrary UDP multi-hop, billing and hosted subscriptions are not complete product features. A working Hysteria2 inbound does not make a TCP forwarder support QUIC.
+TUIC and bounded UDP chains belong to the unreleased source listed above. Provider-specific ATT IPv6 leasing, arbitrary UDP multi-hop, billing and hosted subscriptions remain outside current capabilities. A working Hysteria2 inbound does not make a TCP forwarder support QUIC.
 
 ## Start using the desktop app
 

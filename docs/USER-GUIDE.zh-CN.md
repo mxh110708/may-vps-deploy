@@ -80,9 +80,27 @@ Hysteria2 使用 UDP／QUIC 和 TLS 1.3。准备匹配 SNI 的证书与私钥，
 
 每个用户和导出地址族分别验收。密码、证书、出站或核心身份变化后，旧来源资格会失效，需要重新核对并生成节点。详细参数、更新范围及反例见[Hysteria2 记录](HYSTERIA2-ROUND-14-2026-10-25.zh-CN.md)和[多入站模型](INBOUND-MODEL-ROUND-13-2026-10-25.zh-CN.md)。
 
+第十五轮源码新增「启用端口跳跃」，尚未发行。它要求受管 nftables 和服务商放行完整 UDP 集合，默认间隔 30 秒，使用原服务监听；逐端口验收失败会阻止提交。包含本轮改动的构建按[分享与跳跃说明](HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md)操作，现有发行版不据此推断具备该选项。
+
+## TUIC v5（未发行源码）
+
+第十六轮源码另提供 TUIC v5 独立入站，尚未发行。在同一管理页面新建协议，使用分别保存的 UUID 和密码，选择匹配 SNI 的证书；默认 cubic、native 数据报、10 秒心跳、3 秒鉴权等待，0-RTT 关闭。保存须同时通过真实 HTTPS 与应用 UDP，不能以 TCP 端口通替代。详细字段、维护及恢复见[TUIC v5 说明](TUIC-ROUND-16-2026-10-28.zh-CN.md)。
+
+## VLESS XHTTP（未发行源码）
+
+第二十轮源码在通用入站提供 VLESS + TLS／Reality + XHTTP，模式支持 stream-one、stream-up、packet-up 和 auto；TLS 可选 HTTP/1.1／2／3，Reality 限合法的 HTTP/2。填写 SNI、Host、路径和 UUID 用户引用；TLS 选择证书，Reality 使用独立握手目标和密钥。新建默认仍为 HTTP/2、stream-one，可显式更改并审阅高级 extra。服务器出站限直连。
+
+客户端方案可选择配套 May Core 原生配置、可等价表达的 Clash，或双输出；包含 XHTTP 时必须使用具有对应能力和来源记录的 May 校验核心，不能拿上游 sing-box 1.14.2 代替。独立下载参数属于客户端连接，可从完整来源或标准分享链接导入；不能把它当作另一台互不关联服务器的自动会话共享。无法等价分享／转换的字段保留完整原生来源，明确拒绝有损转换。详细流程、证书／密钥轮换、核心更新、启停和局部恢复见[XHTTP 操作说明](XHTTP-ROUND-20-2026-10-29.zh-CN.md)。
+
 ## 配置、线路和监控
 
+第十八轮未发行源码支持 TLS 的 VLESS／Trojan WS／gRPC 外部节点导入、分享与双客户端配置输出。协议和传输分别展示，路径、Host、serviceName 与 TLS 身份分别保留；复杂路径和无法等价表达的参数会拒绝链接转换。编辑时使用专用表单，更换连接保留节点身份。步骤、限制与实测边界见[外部 WS／gRPC 节点](CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md)。
+
+第十七轮未发行源码增加服务器 Hysteria2／TUIC 下一跳。在实例「配置出站」或通用入站的出站引用中选择已保存来源；候选按核心筛选。固定 Xray 原生支持 Hysteria2，本轮不为 TUIC 增加转接进程。默认链路须通过 HTTPS、出口与应用 UDP，附加 TCP 落地继续保持业务规则范围；完整步骤、参数及失败恢复见[服务器 QUIC 下一跳](SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md)。
+
 客户端草稿、转发目标和多跳链路各自有保存、应用及恢复范围，按[配置与线路手册](CLIENT-AND-LINES.zh-CN.md)操作。不要把本地方案保存成功当作远端转发已启用。
+
+第二十一轮未发行源码的「跨实例线路编排」增加 IPv6 TCP，以及 IPv4／IPv6 固定端口 Hysteria2／TUIC UDP。先保存已验收的原始落地来源，从前置实例选择地址族、传输、中转、落地、端口和来源白名单，审阅后执行；三台实例均须同族。UDP 必须通过整链原协议、HTTPS 和应用 UDP 回程，不能以分段选路代替。成功后在配置设计添加转发节点；检查、移除和恢复均从统一线路入口处理，详见[第二十一轮](CHAIN-ROUND-21-2026-10-30.zh-CN.md)。
 
 May Monitor 使用独立 Server／Agent。Deploy 的读取凭据只授予指定节点、限定期限的只读权限，不能复用管理员 Key。首次安装、HTTPS、Agent 凭据核对、续期、静态主题和独立 watchdog 见[监控运维](MONITOR-OPERATIONS.zh-CN.md)。邮件功能需要单独 SMTP 配置和显式启用，安装监控不会自动发信。
 

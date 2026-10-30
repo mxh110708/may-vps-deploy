@@ -12,15 +12,31 @@ else if (args.Contains("--ssh-only")) await new BoundaryTests(repository).RunSsh
 else if (args.Contains("--client-routes-only")) await new BoundaryTests(repository).RunClientRouteTests();
 else if (args.Contains("--client-output-only")) await new BoundaryTests(repository).RunClientOutputTests();
 else if (args.Contains("--server-outbound-only")) await new BoundaryTests(repository).RunServerOutboundTests();
+else if (args.Contains("--server-quic-only")) await new BoundaryTests(repository).RunServerQuicTests();
+else if (args.Contains("--server-quic-model-only")) await new BoundaryTests(repository).RunServerQuicTests(modelOnly: true);
+else if (args.Contains("--server-quic-vm")) await new BoundaryTests(repository).RunServerQuicVmTests(args[Array.IndexOf(args, "--server-quic-vm") + 1]);
 else if (args.Contains("--reality-outbound-only")) await new BoundaryTests(repository).RunRealityOutboundTests();
 else if (args.Contains("--server-rules-only")) await new BoundaryTests(repository).RunServerDestinationTests();
 else if (args.Contains("--server-hops-only")) await new BoundaryTests(repository).RunServerHopTests();
 else if (args.Contains("--hop-probe-only")) await new BoundaryTests(repository).RunHopProbeTests();
 else if (args.Contains("--client-share-only")) new BoundaryTests(repository).RunClientShareTests();
+else if (args.Contains("--client-stream-only")) await new BoundaryTests(repository).RunClientStreamTests();
+else if (args.Contains("--client-stream-model-only")) await new BoundaryTests(repository).RunClientStreamTests(modelOnly: true);
+else if (args.Contains("--xhttp-runtime-only")) await new BoundaryTests(repository).RunXhttpRuntimeTests();
+else if (args.Contains("--xhttp-only")) await new BoundaryTests(repository).RunXhttpTests();
+else if (args.Contains("--xhttp-model-only")) await new BoundaryTests(repository).RunXhttpTests(modelOnly: true);
+else if (args.Contains("--xhttp-vm")) await new BoundaryTests(repository).RunXhttpVmTests(args[Array.IndexOf(args, "--xhttp-vm") + 1]);
 else if (args.Contains("--tcp-forward-only")) await new BoundaryTests(repository).RunTcpForwardTests();
 else if (args.Contains("--tcp-chain-only")) await new BoundaryTests(repository).RunTcpChainTests();
+else if (args.Contains("--chain21-only")) await new BoundaryTests(repository).RunChain21Tests();
+else if (args.Contains("--chain21-vm")) await new BoundaryTests(repository).RunChain21VmTests(args[Array.IndexOf(args,"--chain21-vm")+1]);
 else if (args.Contains("--inbounds-only")) await new BoundaryTests(repository).RunInboundTests();
 else if (args.Contains("--hysteria-only")) await new BoundaryTests(repository).RunHysteriaTests();
+else if (args.Contains("--tuic-only")) await new BoundaryTests(repository).RunTuicTests();
+else if (args.Contains("--tuic-model-only")) await new BoundaryTests(repository).RunTuicModelTests();
+else if (args.Contains("--tuic-vm")) await new BoundaryTests(repository).RunHysteriaVmTests(args[Array.IndexOf(args, "--tuic-vm") + 1], tuic: true);
+else if (args.Contains("--hysteria15-only")) await new BoundaryTests(repository).RunHysteria15Tests();
+else if (args.Contains("--hysteria15-vm")) await new BoundaryTests(repository).RunHysteriaVmTests(args[Array.IndexOf(args, "--hysteria15-vm") + 1], hopping: true);
 else if (args.Contains("--hysteria-vm")) await new BoundaryTests(repository).RunHysteriaVmTests(args[Array.IndexOf(args, "--hysteria-vm") + 1]);
 else if (args.Contains("--inbounds-vm")) await new BoundaryTests(repository).RunInboundVmTests(args[Array.IndexOf(args, "--inbounds-vm") + 1]);
 else if (args.Contains("--tcp-chain-vm")) await new BoundaryTests(repository).RunTcpChainVmTests(args[Array.IndexOf(args, "--tcp-chain-vm") + 1]);
@@ -31,6 +47,7 @@ else if (args.Contains("--monitor-read-only")) await new BoundaryTests(repositor
 else if (args.Contains("--may-monitor-only")) await new BoundaryTests(repository).RunMayMonitorTests();
 else if(args.Contains("--monitor-maintenance-only"))await new BoundaryTests(repository).RunMonitorMaintenanceTests();
 else if (args.Contains("--monitor-access-only")) await new BoundaryTests(repository).RunMonitorAccessTests();
+else if (args.Contains("--group")) await new BoundaryTests(repository).Run(args[Array.IndexOf(args, "--group") + 1]);
 else await new BoundaryTests(repository).Run();
 
 internal sealed partial class BoundaryTests(string repository)
@@ -49,46 +66,85 @@ internal sealed partial class BoundaryTests(string repository)
         var python = Environment.GetEnvironmentVariable("MAY_TEST_SSH_PYTHON") ?? throw new Exception("MAY_TEST_SSH_PYTHON is required for transport tests.");
         await LocalSshConfirmation(f, python); Console.WriteLine($"PASS: {assertions} loopback SSH/SFTP transport assertions; no production connections.");
     }
-    public async Task Run()
+    public async Task Run(string group = "all")
     {
-        using var f = new Fixture(repository); Paths(f); Fonts(f); await Coordinator(f); Publisher(f); SinglePublisher(f); Profiles(f); MultiPurpose(f); Keys(f); await Workflows(f); await DesktopDeployment(f); await Credentials(f); await Workbench(f); await Trust(f); await DeploymentExperience(f); await MaintenanceExperience(f);
-        CloudflareCredentialExperience(f);
-        ClientLayoutUpgradeExperience(f);
-        CityNamingExperience(f);
-        await ClientRouteExperience(f);
-        using (var outputs = new Fixture(repository)) { await ClientOutputExperience(outputs); ClientSubscriptionExperience(outputs); }
-        await SubscriptionDownloadExperience();
-        using (var serverRoutes = new Fixture(repository)) { await ServerOutboundExperience(serverRoutes); await ServerOutboundLoopback(serverRoutes); }
-        using (var realityRoutes = new Fixture(repository)) { await RealityOutboundExperience(realityRoutes); await RealityOutboundLoopback(realityRoutes); }
-        using (var destinationRules = new Fixture(repository)) { await ServerDestinationExperience(destinationRules); await ServerOutboundLoopback(destinationRules, true); await RealityOutboundLoopback(destinationRules, true); }
-        using (var hops = new Fixture(repository)) { await ServerHopExperience(hops); await ServerOutboundLoopback(hops, withHops: true); await RealityOutboundLoopback(hops, withHops: true); await ServerHopProbeRuntime(hops); }
-        using (var shares = new Fixture(repository)) ClientShareExperience(shares);
-        using (var forwardedNodes = new Fixture(repository)) await ForwardedNodeExperience(forwardedNodes);
-        using (var forwarding = new Fixture(repository)) { await TcpForwardExperience(forwarding); await TcpForwardValidationLoopback(forwarding); }
-        await TcpChainExperience();
-        await InboundExperience();
-        await HysteriaLoopback();
-        await HysteriaModelBoundary();
-        using (var udpForwarding = new Fixture(repository)) { await UdpForwardExperience(udpForwarding); await UdpForwardLoopback(udpForwarding); await UdpProxySourceExperience(udpForwarding); await UdpProxyWorkflow(udpForwarding); await UdpProxyRuntime(udpForwarding); }
-        await MonitoringArchiveExperience(f);
-        using (var monitorRead = new Fixture(repository)) await MonitorReadExperience(monitorRead);
-        using (var mayMonitor = new Fixture(repository)) await MayMonitorExperience(mayMonitor);
-        await MonitorMaintenanceExperience();
-        using (var monitorAccess = new Fixture(repository)) await MonitorAccessExperience(monitorAccess);
-        await ComponentUpdateExperience(f);
-        await RecoveryExperience(f);
-        await PrivateDirectoryExperience();
-        WindowPlacementExperience();
-        await ManagedKeyDeployment(f);
-        await AdditionsExperience(f);
-        await TunnelAccessExperience(f); await NetworkExperience(f); await KernelExperience(f); await InstallationVersionExperience(f);
-        await BackgroundTestTransport(f);
-        await ReviewRepairExperience();
-        await GlobalReviewExperience();
-        await BackgroundFaultExperience(f);
-        var sshPython = Environment.GetEnvironmentVariable("MAY_TEST_SSH_PYTHON"); if (!string.IsNullOrEmpty(sshPython)) await LocalSshConfirmation(f, sshPython);
-        var python = Environment.GetEnvironmentVariable("MAY_TEST_PYTHON"); if (!string.IsNullOrEmpty(python)) { using var clients = new Fixture(repository); await RealClientWorkbench(clients, python); }
-        Console.WriteLine($"PASS: {assertions} C# boundary and workflow assertions; no production connections.");
+        string[] groups = ["foundation", "clients", "xhttp", "chains", "quic", "udp", "operations"];
+        if (group != "all" && !groups.Contains(group)) throw new ArgumentException("Unknown test group: " + group);
+        Console.WriteLine("START: C# regression group " + group);
+        bool Includes(string name) => group == "all" || group == name;
+        using var f = new Fixture(repository);
+        if (Includes("foundation"))
+        {
+            Paths(f); Fonts(f); await Coordinator(f); Publisher(f); SinglePublisher(f); Profiles(f); MultiPurpose(f); Keys(f); await Workflows(f); await DesktopDeployment(f); await Credentials(f); await Workbench(f); await Trust(f); await DeploymentExperience(f); await MaintenanceExperience(f);
+            CloudflareCredentialExperience(f);
+            ClientLayoutUpgradeExperience(f);
+            CityNamingExperience(f);
+        }
+        if (Includes("clients"))
+        {
+            await ClientRouteExperience(f);
+            using (var outputs = new Fixture(repository)) { await ClientOutputExperience(outputs); ClientSubscriptionExperience(outputs); }
+            await SubscriptionDownloadExperience();
+            using (var serverRoutes = new Fixture(repository)) { await ServerOutboundExperience(serverRoutes); await ServerOutboundLoopback(serverRoutes); }
+            using (var realityRoutes = new Fixture(repository)) { await RealityOutboundExperience(realityRoutes); await RealityOutboundLoopback(realityRoutes); }
+            using (var destinationRules = new Fixture(repository)) { await ServerDestinationExperience(destinationRules); await ServerOutboundLoopback(destinationRules, true); await RealityOutboundLoopback(destinationRules, true); }
+            using (var hops = new Fixture(repository)) { await ServerHopExperience(hops); await ServerOutboundLoopback(hops, withHops: true); await RealityOutboundLoopback(hops, withHops: true); await ServerHopProbeRuntime(hops); }
+            using (var shares = new Fixture(repository)) ClientShareExperience(shares);
+            await ClientStreamModel();
+            await ClientStreamRuntime();
+        }
+        if (Includes("xhttp"))
+        {
+            XhttpExpandedModel();
+            await XhttpModel();
+            await XhttpRuntime();
+        }
+        if (Includes("chains"))
+        {
+            using (var forwardedNodes = new Fixture(repository)) await ForwardedNodeExperience(forwardedNodes);
+            using (var forwarding = new Fixture(repository)) { await TcpForwardExperience(forwarding); await TcpForwardValidationLoopback(forwarding); }
+            await TcpChainExperience();
+            await Chain21Coverage();
+            await InboundExperience();
+        }
+        if (Includes("quic"))
+        {
+            await HysteriaLoopback();
+            await HysteriaModelBoundary();
+            HysteriaLinks15();
+            await HysteriaHoppingModel15();
+            await HysteriaHoppingRuntime15();
+            await TuicModel();
+            await TuicRuntime();
+        }
+        if (Includes("udp"))
+        {
+            await ServerQuicModel();
+            await ServerQuicRuntime();
+            using (var udpForwarding = new Fixture(repository)) { await UdpForwardExperience(udpForwarding); await UdpForwardLoopback(udpForwarding); await UdpProxySourceExperience(udpForwarding); await UdpProxyWorkflow(udpForwarding); await UdpProxyRuntime(udpForwarding); }
+        }
+        if (Includes("operations"))
+        {
+            await MonitoringArchiveExperience(f);
+            using (var monitorRead = new Fixture(repository)) await MonitorReadExperience(monitorRead);
+            using (var mayMonitor = new Fixture(repository)) await MayMonitorExperience(mayMonitor);
+            await MonitorMaintenanceExperience();
+            using (var monitorAccess = new Fixture(repository)) await MonitorAccessExperience(monitorAccess);
+            await ComponentUpdateExperience(f);
+            await RecoveryExperience(f);
+            await PrivateDirectoryExperience();
+            WindowPlacementExperience();
+            await ManagedKeyDeployment(f);
+            await AdditionsExperience(f);
+            await TunnelAccessExperience(f); await NetworkExperience(f); await KernelExperience(f); await InstallationVersionExperience(f);
+            await BackgroundTestTransport(f);
+            await ReviewRepairExperience();
+            await GlobalReviewExperience();
+            await BackgroundFaultExperience(f);
+            var sshPython = Environment.GetEnvironmentVariable("MAY_TEST_SSH_PYTHON"); if (!string.IsNullOrEmpty(sshPython)) await LocalSshConfirmation(f, sshPython);
+            var python = Environment.GetEnvironmentVariable("MAY_TEST_PYTHON"); if (!string.IsNullOrEmpty(python)) { using var clients = new Fixture(repository); await RealClientWorkbench(clients, python); }
+        }
+        Console.WriteLine($"PASS: {assertions} C# boundary and workflow assertions (group {group}); no production connections.");
     }
     public void RunFontTests()
     {

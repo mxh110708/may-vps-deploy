@@ -121,7 +121,9 @@ internal sealed partial class BoundaryTests
             Remote?.Events.Add("validation");
             if (Failure is "validation" or "rollback" or "owner") throw new OperationException("synthetic whole-path failure");
             if (Failure == "cancel") throw new OperationCanceledException();
-            return Task.FromResult(new JsonObject { ["Status"] = Failure == "incomplete" ? "Incomplete" : "Passed", ["From"] = "Controller", ["Scope"] = "TcpChainProxyHttps", ["ConnectionFingerprint"] = ClientNodeImport.ConnectionFingerprint(node), ["Result"] = new JsonObject { ["Status"] = "Reachable" } });
+            var result = new JsonObject { ["Status"] = "Reachable", ["ValidatedProtocol"] = Failure == "wrong-protocol" ? "tcp" : node.Text("sing_box.type") };
+            if (Failure != "missing-udp") result["UdpValidation"] = new JsonObject { ["Transport"] = "UDP", ["ResponseMatched"] = true };
+            return Task.FromResult(new JsonObject { ["Status"] = Failure == "incomplete" ? "Incomplete" : "Passed", ["From"] = "Controller", ["Scope"] = "TcpChainProxyHttps", ["ConnectionFingerprint"] = ClientNodeImport.ConnectionFingerprint(node), ["Result"] = result });
         }
     }
     private sealed class ChainRemote : IRemoteSessionFactory
@@ -131,7 +133,7 @@ internal sealed partial class BoundaryTests
     }
     private sealed class ChainHost(string address, ChainRemote owner) : IRemoteSession
     {
-        public string Address => address; public FakeRemote Inner { get; } = new(); public JsonObject? Configuration { get; set; } private JsonObject? original;
+        public string Address => address; public FakeRemote Inner { get; } = new(); public JsonObject? Configuration { get; set; } public JsonObject? InboundState { get; set; } private JsonObject? original;
         public bool Unavailable { get; set; } public bool Drift { get; set; } public string Failure { get; set; } = ""; public string? MachineAddress { get; set; } public int ApplyCalls { get; private set; } public int Compensations { get; private set; }
         public Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken ct) => Inner.RunAsync(command, timeout, ct);
         public async Task<CommandResult> RunScriptAsync(string payload, TimeSpan timeout, bool mutating, CancellationToken ct)
@@ -139,15 +141,17 @@ internal sealed partial class BoundaryTests
             var asset = payload.Split('\n')[0].Replace("# MXH asset: ", "");
             string Parameter(string name) { var match = Regex.Match(payload, "export VPS_PARAM_" + name + "=.+?'([A-Za-z0-9+/=]*)' "); return match.Success ? Encoding.UTF8.GetString(Convert.FromBase64String(match.Groups[1].Value)) : ""; }
             static string Marker(string name, string value) => "VPSDEPLOY_" + name + "_B64=" + Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) + "\n";
-            if (asset == "tcp-forward-read.sh") return new(0, Marker("TCP_FORWARD_STATE", new JsonObject { ["Hash"] = Drift ? new string('f', 64) : Configuration == null ? "Absent" : ArchiveStore.Fingerprint(Configuration), ["Configuration"] = Configuration?.DeepClone(), ["TemplateCurrent"] = true }.ToJsonString()) + "VPSDEPLOY_TCP_FORWARD_READ\n", "");
+            var prefix = asset.StartsWith("udp-", StringComparison.Ordinal) ? "UDP_FORWARD" : "TCP_FORWARD";
+            if (asset is "tcp-forward-read.sh" or "udp-forward-read.sh") return new(0, Marker(prefix + "_STATE", new JsonObject { ["Hash"] = Drift ? new string('f', 64) : Configuration == null ? "Absent" : ArchiveStore.Fingerprint(Configuration), ["Configuration"] = Configuration?.DeepClone(), ["TemplateCurrent"] = true }.ToJsonString()) + "VPSDEPLOY_" + prefix + "_READ\n", "");
+            if (asset == "inbound-read.sh") return new(0, Marker("INBOUND_STATE", InboundState!.ToJsonString()) + "VPSDEPLOY_INBOUND_READ\n", "");
             if (asset == "protocol-migration-arm-rollback.sh") { original = Configuration?.DeepClone().AsObject(); Inner.StatusTaskId = Parameter("CONTROL_TASK_ID"); Inner.StatusPhase = Failure == "arm-before" ? "Preparing" : "Armed"; if (Failure is "arm-ack" or "arm-before") throw new IOException("synthetic lost snapshot acknowledgement"); }
-            if (asset == "tcp-forward-apply.sh")
+            if (asset is "tcp-forward-apply.sh" or "udp-forward-apply.sh")
             {
                 owner.Events.Add(address + ":apply"); ApplyCalls++; Configuration = Parameter("ACTION") == "Remove" ? null : JsonNode.Parse(Parameter("CONFIG_JSON"))!.AsObject();
                 if (Failure == "apply-ack") throw new IOException("synthetic lost apply acknowledgement");
-                return new(0, "VPSDEPLOY_TCP_FORWARD_APPLIED\n", "");
+                return new(0, "VPSDEPLOY_" + prefix + "_APPLIED\n", "");
             }
-            if (asset == "tcp-chain-probe.sh") return new(0, Marker("TCP_CHAIN_PROBE", new JsonObject { ["Address"] = Parameter("ADDRESS"), ["Port"] = int.Parse(Parameter("PORT")), ["SourceAddress"] = address, ["Status"] = "Connected", ["Scope"] = "TcpConnectOnly" }.ToJsonString()) + "VPSDEPLOY_TCP_CHAIN_PROBED\n", "");
+            if (asset == "tcp-chain-probe.sh") return new(0, Marker("TCP_CHAIN_PROBE", new JsonObject { ["Address"] = Parameter("ADDRESS"), ["Port"] = int.Parse(Parameter("PORT")), ["SourceAddress"] = address, ["Status"] = Parameter("TRANSPORT") == "UDP" ? "RouteAvailable" : "Connected", ["Scope"] = Parameter("TRANSPORT") == "UDP" ? "UdpRouteOnly" : "TcpConnectOnly" }.ToJsonString()) + "VPSDEPLOY_TCP_CHAIN_PROBED\n", "");
             if (asset == "maintenance-transaction-commit.sh")
             {
                 owner.Events.Add(address + ":commit"); if (Failure == "commit-front") throw new IOException("synthetic front commit failed");
