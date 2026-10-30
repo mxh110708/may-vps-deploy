@@ -8,23 +8,25 @@
 
 正式桌面控制端为 Windows 10 2004 及以上／Windows 11 amd64；远端运维验收面向 Debian 12／13 amd64。安装版自带 .NET、WinUI 及专用配置转换运行时，日常使用不需要另外安装 PowerShell、Python 或 .NET SDK。其他系统、架构与自定义服务器布局需要独立验证。
 
-当前文档以 **v0.9.38** 为基准；下载页面是获取新版本的入口。源码主分支可能包含尚未发行的文档或功能，不能用分支内容推断本机已安装版本。
+当前文档以 **v0.9.39** 为基准；下载页面是获取新版本的入口。源码主分支可能包含尚未发行的文档或功能，不能用分支内容推断本机已安装版本。
 
-未发行源码包括[第十五轮 Hysteria2 分享与端口跳跃](docs/HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md)、[第十六轮 TUIC v5](docs/TUIC-ROUND-16-2026-10-28.zh-CN.md)、[第十七轮服务器 QUIC 下一跳](docs/SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md)、[第十八轮外部 WS／gRPC](docs/CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md)、[第二十轮 XHTTP 客户端配套](docs/XHTTP-ROUND-20-2026-10-29.zh-CN.md)和[第二十一轮双地址族 TCP／限定 UDP 编排](docs/CHAIN-ROUND-21-2026-10-30.zh-CN.md)。XHTTP 已扩展四模式、合法 HTTP 版本、独立下载身份及高级字段，使用配套 May Core／可等价表达的 Mihomo；跨实例 UDP 限固定端口 Hysteria2／TUIC。原第十九轮有限范围作为历史保留，不能推断当前安装或公网 CDN 支持。
+本版纳入[第十五轮 Hysteria2 分享与端口跳跃](docs/HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md)、[第十六轮 TUIC v5](docs/TUIC-ROUND-16-2026-10-28.zh-CN.md)、[第十七轮服务器 QUIC 下一跳](docs/SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md)、[第十八轮外部 WS／gRPC](docs/CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md)、[第二十轮 XHTTP 客户端配套](docs/XHTTP-ROUND-20-2026-10-29.zh-CN.md)、[第二十一轮双地址族 TCP／限定 UDP 编排](docs/CHAIN-ROUND-21-2026-10-30.zh-CN.md)和[第二十二轮 WireGuard 双实例通道](docs/WIREGUARD-ROUND-22-2026-10-30.zh-CN.md)。XHTTP 已扩展四模式、合法 HTTP 版本、独立下载身份及高级字段，使用配套 May Core／可等价表达的 Mihomo；跨实例 UDP 限固定端口 Hysteria2／TUIC。原第十九轮有限范围作为历史保留，不能推断当前安装或公网 CDN 支持。
 
 ## 能做什么
 
-| 工作 | v0.9.38 发行基线的能力与边界 |
+| 工作 | v0.9.39 发行基线的能力与边界 |
 | --- | --- |
 | 实例生命周期 | 新机部署、受支持布局的已有实例接入、SSH 身份核对、健康审计、维护、恢复与退役。 |
-| 代理入站 | Reality、AnyTLS、SS2022，以及通用多入站模型中的 Hysteria2；独立管理监听、用户、证书、出站和恢复范围。 |
-| 服务端线路 | TCP／UDP 转发、经 Shadowsocks／SS2022 的 UDP 验收、有限 TCP 前置→中转→落地编排；不是任意协议的通用多跳控制器。 |
+| 代理入站 | Reality、AnyTLS、SS2022、Hysteria2、TUIC v5 及限定 XHTTP 组合；独立管理监听、用户、证书、出站和恢复范围。 |
+| 服务端线路 | TCP／UDP 转发、经 Shadowsocks／SS2022 的 UDP 验收、双地址族 TCP／限定 UDP 前置→中转→落地编排及 WireGuard 双实例通道；不是任意协议的通用多跳控制器。 |
 | 客户端配置 | 生成 Clash／Mihomo 和 sing-box 配置；方案、节点来源、地区组、路由分类、校验、导出及变更后的来源复核。 |
 | 网络维护 | 测量与建议、fq／BBR 配置、固定预构建 Google BBR v3 内核的显式升级与恢复。 |
 | May Monitor | 独立 Server／Agent 生命周期、HTTPS 来源核对、受限只读查看、固定静态主题维护；完整历史、探测和告警管理由监控 Web 提供。 |
 | 操作保护 | 先审阅后写入，限定组件快照与恢复，凭据加密归档；连接中断后的确认不明先核对身份和状态，不自动重复执行。 |
 
-Hysteria2 的部署与验收不代表 TCP 转发支持 QUIC。TUIC 与限定 UDP 整链编排属于上列未发行源码；服务商 ATT IPv6 租约申请、任意 UDP 多跳、用户计费及在线订阅托管不属于当前能力。详细范围见[配置与线路](docs/CLIENT-AND-LINES.zh-CN.md)。
+Hysteria2 的部署与验收不代表 TCP 转发支持 QUIC。TUIC 与限定 UDP 整链编排适用上列边界；服务商 ATT IPv6 租约申请、任意 UDP 多跳、用户计费及在线订阅托管不属于当前能力。详细范围见[配置与线路](docs/CLIENT-AND-LINES.zh-CN.md)。
+
+节点组可保存为加密快照，并在多个方案中复用、差异同步和解除关联；来源变化后必须重新生成、校验。使用步骤见[节点组与输出](docs/CLIENT-GROUPS-ROUND-23-2026-10-30.zh-CN.md)。
 
 ## 快速开始
 

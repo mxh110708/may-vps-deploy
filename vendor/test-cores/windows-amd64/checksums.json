@@ -37,7 +37,8 @@
         "-buildvcs=false",
         "-trimpath"
       ],
-      "lifecycle": "unreleased-development-snapshot"
+      "lifecycle": "source-pinned",
+      "release_tag": "v1.14.2-may.xhttp20.0"
     }
   ],
   "data_files": [

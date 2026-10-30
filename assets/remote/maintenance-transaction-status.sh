@@ -39,6 +39,8 @@ if [[ -n "$current" ]]; then
   [[ ! -f "$current/transaction-committed" ]] || phase=Committed
   [[ ! -f "$current/tcp-chain-compensating" ]] || phase=Compensating
   [[ ! -f "$current/tcp-chain-rollback-complete" ]] || phase=ChainRolledBack
+  [[ ! -f "$current/wireguard-pair-compensating" ]] || phase=WireGuardCompensating
+  [[ ! -f "$current/wireguard-pair-rollback-complete" ]] || phase=WireGuardRolledBack
 fi
 printf 'VPSDEPLOY_TRANSACTION_BACKUP_B64=%s\n' "$(printf '%s' "$current" | base64 | tr -d '\n')"
 printf 'VPSDEPLOY_TRANSACTION_PHASE_B64=%s\n' "$(printf '%s' "$phase" | base64 | tr -d '\n')"

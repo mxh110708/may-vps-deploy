@@ -23,6 +23,17 @@ public sealed partial class WorkflowEngine
             catch (Exception error) when (error is OperationException or IOException or System.Text.Json.JsonException) { }
             audit[component] = new JsonObject { ["MatchesArchive"] = matched, ["Scope"] = "ConfigurationSocketsWhitelist" };
         }
+        if (c.Plan["WireGuardTunnel"] is JsonObject tunnel)
+        {
+            var matched = false;
+            try
+            {
+                var response = await c.Run("wireguard-read.sh", timeout: 45, marker: "WIREGUARD_READ"); var current = JsonNode.Parse(RemoteAssets.Marker(response.Output, "WIREGUARD_STATE"))!;
+                matched = current.Text("Hash") == c.State.Text("WireGuardTunnel.RemoteHash") && JsonNode.DeepEquals(current["Configuration"], tunnel) && current.Flag("Healthy");
+            }
+            catch (Exception error) when (error is OperationException or IOException or System.Text.Json.JsonException) { }
+            audit["WireGuardTunnel"] = new JsonObject { ["MatchesArchive"] = matched, ["Scope"] = "ConfigurationInterfaceRoutes" };
+        }
         if (c.Plan["InboundModel"] is JsonObject inbounds)
         {
             var matched = false;
@@ -74,6 +85,7 @@ public sealed partial class WorkflowEngine
         store.WriteSecret(SafePath.Resolve(backup, "secrets.dotnet.private.json"), c.Secrets); c.Save();
         var role = DeploymentPlans.Roles.Contains(c.Plan.Text("Role")) ? c.Plan.Text("Role") : "MonitorOnly";
         var parameters = new Dictionary<string, string> { ["SOURCE_ROLE"] = role, ["TARGET_ROLE"] = role, ["TIMEOUT_MINUTES"] = c.Request.Kind == OperationKind.InstallComponent ? "60" : "20", ["QUIESCE_KOMARI_CONTROLLER"] = Bool(components.Contains("KomariController")), ["COMPONENTS"] = string.Join(',', components), ["CONTROL_TASK_ID"] = c.Id, ["NETWORK_SNAPSHOT"] = Bool(c.Request.Kind == OperationKind.TuneNetwork) };
+        if (components.Contains("WireGuardTunnel")) { parameters["WIREGUARD_EXPECTED_HASH"] = c.State.Text("WireGuardTunnel.RemoteHash", "Absent"); parameters["WIREGUARD_PAIR_ID"] = c.Request.Options.Text("Configuration.Id"); c.Pending["WireGuardTunnelId"] = parameters["WIREGUARD_PAIR_ID"]; c.Save(); }
         if (components.Contains("TcpForwarding")) parameters["TCP_FORWARD_EXPECTED_HASH"] = c.State.Text("TcpForwarding.RemoteHash", "Absent");
         if (c.Request.Kind == OperationKind.TcpChain) { parameters["TCP_CHAIN_ID"] = c.Request.Options.Text("Configuration.Id"); c.Pending["TcpChainId"] = parameters["TCP_CHAIN_ID"]; c.Save(); }
         if (components.Contains("UdpForwarding")) parameters["UDP_FORWARD_EXPECTED_HASH"] = c.State.Text("UdpForwarding.RemoteHash", "Absent");
@@ -87,10 +99,22 @@ public sealed partial class WorkflowEngine
         c.Pending["RemoteBackup"] = RemoteAssets.Marker(result.Output, "BACKUP_DIR"); c.Pending["Phase"] = "Armed"; c.Save();
         if (!Regex.IsMatch(c.Pending.Text("RemoteBackup"), @"^/root/vps-deploy-backups/[0-9]{8}-[0-9]{6}/protocol-lifecycle$")) throw new OperationException("远端恢复目录异常。", true);
         await using var session = await c.Session();
-        await session.DownloadAsync(c.Pending.Text("RemoteBackup") + "/protocol-files.tar.gz", SafePath.Resolve(backup, "remote-files.tar.gz"), c.Cancellation);
-        c.Pending["BackupSha256"] = ArchiveStore.Digest(File.ReadAllBytes(SafePath.Resolve(backup, "remote-files.tar.gz")));
+        if (components.Contains("WireGuardTunnel"))
+        {
+            // A removal snapshot contains the hosts' private WireGuard keys.
+            // Keep this snapshot on that host; only take back its digest.
+            var proof = await c.Run("wireguard-backup-proof.sh", new() { ["BACKUP_DIR"] = c.Pending.Text("RemoteBackup") }, timeout: 30, marker: "WIREGUARD_BACKUP_PROOF");
+            c.Pending["BackupSha256"] = RemoteAssets.Marker(proof.Output, "WIREGUARD_BACKUP_SHA256");
+            if (!Regex.IsMatch(c.Pending.Text("BackupSha256"), "^[a-f0-9]{64}$")) throw new OperationException("远端隧道恢复点缺少有效摘要。", true);
+            c.Pending["RemoteOnlyBackup"] = true;
+        }
+        else
+        {
+            await session.DownloadAsync(c.Pending.Text("RemoteBackup") + "/protocol-files.tar.gz", SafePath.Resolve(backup, "remote-files.tar.gz"), c.Cancellation);
+            c.Pending["BackupSha256"] = ArchiveStore.Digest(File.ReadAllBytes(SafePath.Resolve(backup, "remote-files.tar.gz")));
+        }
         await VerifyRemoteArchive(c, c.Pending.Text("RemoteBackup") + "/protocol-files.tar.gz", c.Pending.Text("BackupSha256")); c.Save();
-        ArchiveStore.WriteJson(SafePath.Resolve(backup, "restore-metadata.json"), new JsonObject { ["RemoteBackup"] = c.Pending.Text("RemoteBackup"), ["BackupSha256"] = c.Pending.Text("BackupSha256"), ["CreatedAt"] = DateTimeOffset.UtcNow, ["SshPorts"] = c.Plan.Text("Ports.SshPrimary") + "," + c.Plan.Text("Ports.SshRescue"), ["OldPlan"] = c.Plan.DeepClone(), ["OldState"] = c.State.DeepClone(), ["SecretsRelativePath"] = "maintenance-backups/" + c.Id + "/secrets.dotnet.private.json", ["Components"] = c.Pending["Components"]!.DeepClone() });
+        ArchiveStore.WriteJson(SafePath.Resolve(backup, "restore-metadata.json"), new JsonObject { ["RemoteBackup"] = c.Pending.Text("RemoteBackup"), ["BackupSha256"] = c.Pending.Text("BackupSha256"), ["CreatedAt"] = DateTimeOffset.UtcNow, ["SshPorts"] = c.Plan.Text("Ports.SshPrimary") + "," + c.Plan.Text("Ports.SshRescue"), ["OldPlan"] = c.Plan.DeepClone(), ["OldState"] = c.State.DeepClone(), ["SecretsRelativePath"] = "maintenance-backups/" + c.Id + "/secrets.dotnet.private.json", ["Components"] = c.Pending["Components"]!.DeepClone(), ["RemoteOnlyBackup"] = c.Pending.Flag("RemoteOnlyBackup") });
     }
     private async Task Commit(Context c)
     {
@@ -187,6 +211,7 @@ public sealed partial class WorkflowEngine
         }
         if (components.Contains("Network")) { Restore(c.Plan, oldPlan, "NetworkTuning"); Restore(c.State, oldState, "NetworkTuning"); }
         if (components.Contains("Firewall")) Restore(c.Plan, oldPlan, "Firewall");
+        if (components.Contains("WireGuardTunnel")) { Restore(c.Plan, oldPlan, "WireGuardTunnel"); Restore(c.State, oldState, "WireGuardTunnel"); }
         if (components.Contains("TcpForwarding")) { Restore(c.Plan, oldPlan, "TcpForwarding"); Restore(c.State, oldState, "TcpForwarding"); }
         if (components.Contains("UdpForwarding")) { Restore(c.Plan, oldPlan, "UdpForwarding"); Restore(c.State, oldState, "UdpForwarding"); }
         if (components.Contains("Inbounds")) { Restore(c.Plan, oldPlan, "InboundModel"); Restore(c.State, oldState, "Inbounds"); Restore(c.Secrets, oldSecrets, "Inbounds"); }

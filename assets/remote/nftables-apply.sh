@@ -26,6 +26,7 @@ fi
 
 restricted_rules=''
 hysteria_rules="$(mxh_firewall render-hysteria)"
+wireguard_rules="$(mxh_firewall render-wireguard)"
 if [[ -n "$restricted_port" ]]; then
   [[ "$restricted_port" =~ ^[0-9]+$ ]] && (( restricted_port >= 1 && restricted_port <= 65535 )) || exit 1
   [[ -n "$allowed_ipv4s" || -n "$allowed_ipv6s" ]] || {
@@ -79,7 +80,8 @@ table inet filter {
     ct state invalid drop
     ct state established,related accept
     tcp dport { ${ports_rendered} } accept
-${udp_rule}${restricted_rules}    udp sport 67 udp dport 68 accept
+${udp_rule}${restricted_rules}${wireguard_rules}
+    udp sport 67 udp dport 68 accept
     udp sport 547 udp dport 546 accept
     ip protocol icmp accept
     ip6 nexthdr ipv6-icmp accept

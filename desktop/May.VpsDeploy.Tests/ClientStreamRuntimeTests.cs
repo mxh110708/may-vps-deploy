@@ -47,7 +47,15 @@ internal sealed partial class BoundaryTests
                 await using (var client = await Round15Client.Start(clientName, assets.ResolveCore(clientName), candidate, cert, directory, ct))
                 {
                     processes.Add(client.Process.Id); using var http = TuicHttp(client.Port, cert); var before = origin.Requests;
-                    try { Check(await http.GetStringAsync("https://127.0.0.1:" + origin.Port, ct) == "198.51.100.22" && origin.Requests > before, clientName + " failed authenticated " + protocol + "/" + transport + (early ? " early data" : "")); }
+                    try
+                    {
+                        var body = await http.GetStringAsync("https://127.0.0.1:" + origin.Port, ct);
+                        // The target's stdout is read by an independent task; its
+                        // acknowledgement can arrive just after the HTTPS body.
+                        var until = DateTimeOffset.UtcNow.AddSeconds(2);
+                        while (Volatile.Read(ref origin.Requests) <= before && DateTimeOffset.UtcNow < until) await Task.Delay(10, ct);
+                        Check(body == "198.51.100.22" && Volatile.Read(ref origin.Requests) > before, clientName + " failed authenticated " + protocol + "/" + transport + (early ? " early data" : ""));
+                    }
                     catch (HttpRequestException) { Console.WriteLine("Round 18 synthetic client diagnostic: " + await client.StopAndRead() + "\nServer: " + await running.StopAndRead() + "\nGate: " + gate?.LastError + " Path: " + gate?.LastPath); throw; }
                     Check((await ClientProxyUdp.ProbeAsync(client.Port, new(IPAddress.Loopback, dns.Port), ct)).Flag("ResponseMatched"), clientName + " did not carry real UDP via " + protocol + "/" + transport);
                     if (gate != null) Check(gate.LastPath == node.Text("sing_box.transport.path") && gate.LastHost == "front.example.test" && gate.LastSni == "stream.example.test" && (!early || gate.EarlyHeaders > 0), clientName + " changed on-wire WebSocket path/Host/SNI/early-data header");

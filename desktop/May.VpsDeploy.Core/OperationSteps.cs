@@ -4,7 +4,7 @@ namespace May.VpsDeploy.Core;
 
 public static class OperationSteps
 {
-    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate or OperationKind.ServerOutbound or OperationKind.TcpForward or OperationKind.UdpForward or OperationKind.MayMonitor or OperationKind.TcpChain or OperationKind.Inbounds;
+    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate or OperationKind.ServerOutbound or OperationKind.TcpForward or OperationKind.UdpForward or OperationKind.MayMonitor or OperationKind.TcpChain or OperationKind.Inbounds or OperationKind.WireGuardTunnel;
     public static IReadOnlyList<PlannedTaskStep> Create(OperationRequest request, JsonObject plan)
     {
         var steps = new List<PlannedTaskStep>();
@@ -16,6 +16,14 @@ public static class OperationSteps
             if (request.Options.Text("Action") != "Check") { Add("inbound-backup", "建立入站范围恢复点", "仅保存受影响入站及本次防火墙，启用限时回退。"); Add("inbound-apply", "应用独立入站配置", "验证固定核心配置后，仅重启本次影响的入站。"); }
             Add("inbound-validation", "验收入站用户与真实代理", "按用户、监听地址族完成实际代理 HTTPS 请求。");
             if (request.Options.Text("Action") != "Check") Add("inbound-commit", "提交并保存资源目录", "确认同一事务并更新当前入站及验证记录。"); return steps;
+        }
+        if (request.Kind == OperationKind.WireGuardTunnel)
+        {
+            if (request.Options.Text("Action") == "Recover") { Add("wg-recovery", "协调恢复两端隧道", "核对原任务和恢复点，补偿已提交参与实例。"); return steps; }
+            Add("wg-preflight", "核对两台实例", "核对独立身份、管理连接、端口、地址与实际资源。");
+            if (request.Options.Text("Action") != "Check") { Add("wg-backup", "建立两端恢复点", "只保存隧道与本次涉及的受管防火墙。"); Add("wg-apply", "应用 WireGuard 通道", "两端生成私钥、交换公钥并建立内核通道；或移除本通道。"); }
+            Add("wg-validation", "双向 TCP 与 UDP 验收", "随机挑战、正确隧道路由、鉴权、配置与管理连接均须匹配。");
+            if (request.Options.Text("Action") != "Check") Add("wg-commit", "提交两端隧道", "逐台提交，确认丢失先对账，不重放变更。"); return steps;
         }
         if (request.Kind == OperationKind.TcpChain)
         {

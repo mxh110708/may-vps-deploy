@@ -33,11 +33,12 @@ components="${VPS_PARAM_COMPONENTS:-Protocols,Network,Firewall}"
 IFS=',' read -r -a component_list <<<"$components"
 ((${#component_list[@]} > 0))
 for component in "${component_list[@]}"; do
-  case "$component" in Protocols|RealityEntry|AnyTlsEntry|ShadowsocksLanding|TrustedTls|Network|Firewall|KomariAgent|KomariController|Cloudflared|TcpForwarding|UdpForwarding|Inbounds) ;; *) echo 'Unsupported transaction component.' >&2; exit 1 ;; esac
+  case "$component" in Protocols|RealityEntry|AnyTlsEntry|ShadowsocksLanding|TrustedTls|Network|Firewall|KomariAgent|KomariController|Cloudflared|TcpForwarding|UdpForwarding|Inbounds|WireGuardTunnel) ;; *) echo 'Unsupported transaction component.' >&2; exit 1 ;; esac
 done
 scope_has(){ [[ ",$components," == *",$1,"* ]]; }
 if scope_has TcpForwarding; then python3 -c "$VPS_TCP_FORWARD_PROGRAM" verify "${VPS_PARAM_TCP_FORWARD_EXPECTED_HASH:?}"; fi
 if scope_has UdpForwarding; then python3 -c "$VPS_UDP_FORWARD_PROGRAM" verify "${VPS_PARAM_UDP_FORWARD_EXPECTED_HASH:?}"; fi
+if scope_has WireGuardTunnel; then python3 -c "$VPS_WIREGUARD_PROGRAM" verify "${VPS_PARAM_WIREGUARD_EXPECTED_HASH:?}"; fi
 if scope_has Inbounds; then python3 -c "$VPS_INBOUND_PROGRAM" verify; fi
 printf '%s\n' "$components" > "$backup_dir/components"
 printf '%s\n' "$backup_dir" > "$owner"
@@ -59,6 +60,11 @@ if scope_has Network && [[ "${VPS_PARAM_NETWORK_SNAPSHOT:-false}" == true ]]; th
 fi
 printf '%s\n' "$VPS_PARAM_SOURCE_ROLE" > "$backup_dir/source-role"
 printf '%s\n' "$VPS_PARAM_TARGET_ROLE" > "$backup_dir/target-role"
+if scope_has WireGuardTunnel; then
+  python3 -c "$VPS_WIREGUARD_PROGRAM" snapshot "$backup_dir"
+  printf '%s' "$VPS_WIREGUARD_PROGRAM" > "$backup_dir/wireguard-host.py"
+  (cd "$backup_dir" && sha256sum wireguard-host.py > wireguard-program.sha256)
+fi
 if scope_has TcpForwarding; then
   python3 -c "$VPS_TCP_FORWARD_PROGRAM" snapshot "$backup_dir"
   printf '%s' "$VPS_TCP_FORWARD_PROGRAM" > "$backup_dir/tcp-forwarding.py"
@@ -126,6 +132,10 @@ if [[ "$quiesce_controller" == true ]]; then
 fi
 
 candidate_paths=()
+if scope_has WireGuardTunnel; then
+  wg_paths="$(python3 -c "$VPS_WIREGUARD_PROGRAM" paths)"
+  if [[ -n "$wg_paths" ]]; then mapfile -t wg_path_list <<<"$wg_paths"; candidate_paths+=("${wg_path_list[@]}"); fi
+fi
 if scope_has Inbounds; then
   inbound_paths="$(python3 -c "$VPS_INBOUND_PROGRAM" paths)"
   if [[ -n "$inbound_paths" ]]; then
@@ -219,6 +229,11 @@ if scope_has UdpForwarding; then
   (cd "$backup_dir" && sha256sum -c udp-forward-program.sha256 >/dev/null)
   python3 "$backup_dir/udp-forwarding.py" rollback-check "$backup_dir"
 fi
+if scope_has WireGuardTunnel; then
+  [[ -f "$backup_dir/wireguard-host.py" && ! -L "$backup_dir/wireguard-host.py" ]]
+  (cd "$backup_dir" && sha256sum -c wireguard-program.sha256 >/dev/null)
+  python3 "$backup_dir/wireguard-host.py" rollback-check "$backup_dir"
+fi
 if scope_has Inbounds; then
   [[ -f "$backup_dir/inbound-host.py" && ! -L "$backup_dir/inbound-host.py" ]]
   (cd "$backup_dir" && sha256sum -c inbound-program.sha256 >/dev/null)
@@ -260,6 +275,7 @@ cleanup_role() {
   esac
 }
 
+if scope_has WireGuardTunnel; then python3 "$backup_dir/wireguard-host.py" rollback-prepare "$backup_dir"; fi
 if scope_has Inbounds; then python3 "$backup_dir/inbound-host.py" rollback-prepare "$backup_dir"; fi
 if scope_has TcpForwarding; then
   python3 "$backup_dir/tcp-forwarding.py" rollback-prepare "$backup_dir"
@@ -410,6 +426,7 @@ restore_aux() {
 if scope_has KomariAgent; then restore_aux KomariAgent komari-agent.service; fi
 if scope_has KomariController; then restore_aux KomariController komari.service; fi
 if scope_has Cloudflared; then restore_aux Cloudflared cloudflared.service; fi
+if scope_has WireGuardTunnel; then python3 "$backup_dir/wireguard-host.py" rollback-complete "$backup_dir"; fi
 if scope_has Inbounds; then python3 "$backup_dir/inbound-host.py" rollback-complete "$backup_dir"; fi
 if scope_has TcpForwarding; then python3 "$backup_dir/tcp-forwarding.py" rollback-complete "$backup_dir"; fi
 if scope_has UdpForwarding; then python3 "$backup_dir/udp-forwarding.py" rollback-complete "$backup_dir"; fi
@@ -422,6 +439,13 @@ fi
 ROLLBACK
 chmod 0750 /usr/local/libexec/mxh-protocol-migration-rollback
 
+if [[ -n "${VPS_PARAM_WIREGUARD_PAIR_ID:-}" ]]; then
+  [[ "$VPS_PARAM_WIREGUARD_PAIR_ID" =~ ^[a-f0-9]{32}$ ]]
+  [[ "$components" == WireGuardTunnel || "$components" == WireGuardTunnel,Firewall ]]
+  printf '%s\n' "$VPS_PARAM_WIREGUARD_PAIR_ID" > "$backup_dir/wireguard-pair-id"
+  cp /usr/local/libexec/mxh-protocol-migration-rollback "$backup_dir/wireguard-pair-rollback"
+  (cd "$backup_dir" && sha256sum wireguard-pair-rollback > wireguard-pair-rollback.sha256)
+fi
 if [[ -n "${VPS_PARAM_TCP_CHAIN_ID:-}" ]]; then
   [[ "$VPS_PARAM_TCP_CHAIN_ID" =~ ^[a-f0-9]{32}$ ]]
   [[ "$components" == TcpForwarding || "$components" == TcpForwarding,Firewall || "$components" == UdpForwarding || "$components" == UdpForwarding,Firewall ]]

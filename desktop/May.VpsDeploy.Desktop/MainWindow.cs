@@ -177,7 +177,12 @@ public sealed partial class MainWindow : Window, IUserInteraction
                     Text(status.LastError == "" ? "该归档还不代表已部署完成。" : status.LastError),
                     Text(status.NextAction == "" ? status.NeedsRecovery ? "先取得真实事务状态，不能直接重放部署。" : "继续使用已保存的计划；如要重建，可删除下面的本地归档。" : status.NextAction, 14, true));
                 if (status.CanContinue) followup.Children.Add(Action(status.ContinueKind == OperationKind.ResumeImport ? "继续接入" : "继续部署", () => Submit(new(status.ContinueKind, relative, new())), true));
-                if (status.NeedsRecovery) followup.Children.Add(Action("核对恢复状态", () => Submit(new(OperationKind.Recover, relative, new())), true));
+                if (status.NeedsRecovery)
+                {
+                    var wireguardPending = WireGuardTunnels.List(store).Any(r => WireGuardTunnels.Pending(r) && WireGuardTunnels.Instances(r["Configuration"]!.AsObject()).Contains(relative));
+                    if (wireguardPending) followup.Children.Add(Action("恢复两端隧道", () => WireGuardSheet(relative, plan), true));
+                    else followup.Children.Add(Action("核对恢复状态", () => Submit(new(OperationKind.Recover, relative, new())), true));
+                }
                 details.Children.Add(Card(followup));
             }
             if (status.Managed && !status.NeedsRecovery)
@@ -185,6 +190,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
             details.Children.Add(GroupLabel("日常维护"));
             var forwarding = TcpForwarding.Rules(plan["TcpForwarding"] as JsonObject).ToArray();
             details.Children.Add(SettingsGroup(SettingRow("独立 TCP 端口转发", forwarding.Length == 0 ? "按需激活、来源白名单与实际转发验收" : forwarding.Count(r => r.Flag("Enabled")) + " 条已启用 · " + forwarding.Length + " 条已保存；实际状态需核对", Symbol.Forward, Action("管理转发", () => TcpForwardSheet(relative, plan)))));
+            details.Children.Add(SettingsGroup(SettingRow("WireGuard 实例间隧道", "双端加密 · 对端主机路由 · 统一验收和恢复", Symbol.Link, Action("管理隧道", () => WireGuardSheet(relative, plan)))));
             details.Children.Add(SettingsGroup(SettingRow("跨实例线路编排", "前置 → 中转 → 落地 · 统一依赖、验收与恢复", Symbol.Link, Action("管理线路", () => TcpChainSheet(relative, plan)))));
             details.Children.Add(SettingsGroup(SettingRow("通用多入站", "独立身份、监听、用户、证书、出站与恢复范围", Symbol.AllApps, Action("管理入站", () => InboundsSheet(relative, plan)))));
             var udpForwarding = UdpForwarding.Rules(plan["UdpForwarding"] as JsonObject).ToArray();

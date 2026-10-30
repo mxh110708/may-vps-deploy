@@ -48,6 +48,7 @@ jobs:
           python3 tests/test_tcp_forwarding.py
           python3 tests/test_inbound_host.py
           python3 tests/test_udp_forwarding.py
+          python3 tests/test_wireguard.py
           python3 tests/test_komari_lifecycle.py --bash /bin/bash
           # Only temporary files and fake service/account runners; the Debian
           # container supplies root for checking real uid/gid permission rules.
@@ -68,6 +69,7 @@ jobs:
           .tmp/client-test-runtime/bin/python tests/test_review_repairs.py --bash /bin/bash
           .tmp/client-test-runtime/bin/python tests/test_google_client_policy.py
           .tmp/client-test-runtime/bin/python tests/test_academic_client_policy.py
+          .tmp/client-test-runtime/bin/python tests/test_client_sources.py
           python3 tests/test_scoped_rollback.py --bash /bin/bash
           python3 tests/test_component_installation.py --bash /bin/bash
           python3 tests/test_import_contracts.py --bash /bin/bash
@@ -150,7 +152,7 @@ jobs:
             VPS_PARAM_ALLOWED_IPV4S='192.0.2.30,192.0.2.31' \
             VPS_PARAM_ALLOWED_IPV6S='2001:db8::30' \
             VPS_PARAM_CHECK_ONLY='true' \
-            bash assets/remote/nftables-apply.sh
+            bash -c 'source assets/remote/firewall-tools.sh; source assets/remote/nftables-apply.sh'
       - name: Validate conservative adaptive network template
         shell: bash
         run: |

@@ -24,7 +24,7 @@ def main():
     nodes = []
     if not args.sing_box:
         for proxy in proxies:
-            if proxy.get('type') not in ('vless', 'anytls', 'ss', 'trojan'):
+            if proxy.get('type') not in ('vless', 'anytls', 'ss', 'trojan', 'hysteria2', 'tuic'):
                 continue
             if proxy.get('type') in ('vless', 'trojan') and not proxy.get('reality-opts') and proxy.get('network') not in (('ws', 'grpc', 'xhttp') if proxy.get('type') == 'vless' else ('ws', 'grpc')):
                 continue
@@ -34,7 +34,7 @@ def main():
         name = str(outbound.get('tag', ''))
         proxy = by_name.get(name)
         if not args.clash:
-            if outbound.get('type') not in ('vless', 'anytls', 'shadowsocks', 'trojan'):
+            if outbound.get('type') not in ('vless', 'anytls', 'shadowsocks', 'trojan', 'hysteria2', 'tuic'):
                 continue
             if outbound.get('type') in ('vless', 'trojan') and not outbound.get('tls', {}).get('reality', {}).get('enabled') and outbound.get('transport', {}).get('type') not in (('ws', 'grpc', 'xhttp') if outbound.get('type') == 'vless' else ('ws', 'grpc')):
                 continue
@@ -44,7 +44,7 @@ def main():
         if not proxy:
             continue
         pair = (proxy.get('type'), outbound.get('type'))
-        if pair not in (('vless', 'vless'), ('anytls', 'anytls'), ('ss', 'shadowsocks'), ('trojan', 'trojan')):
+        if pair not in (('vless', 'vless'), ('anytls', 'anytls'), ('ss', 'shadowsocks'), ('trojan', 'trojan'), ('hysteria2', 'hysteria2'), ('tuic', 'tuic')):
             continue
         if pair[0] in ('vless', 'trojan') and not outbound.get('tls', {}).get('reality', {}).get('enabled') and outbound.get('transport', {}).get('type') not in (('ws', 'grpc', 'xhttp') if pair[0] == 'vless' else ('ws', 'grpc')):
             continue

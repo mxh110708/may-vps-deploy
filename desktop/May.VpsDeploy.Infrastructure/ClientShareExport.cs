@@ -8,10 +8,13 @@ public sealed class ClientShareExport(ArchiveStore store)
 {
     public string Generate(JsonObject scheme, ClientSharePreview preview, IReadOnlyList<string> selected, string format)
     {
+        new ClientNodeGroupStore(store).Verify(scheme);
         var text = ClientShareLinks.Generate(scheme, preview, selected, format);
         var chosen = selected.ToHashSet(StringComparer.Ordinal);
         ManagedNodeSources.Verify(store, new JsonArray(scheme["Nodes"]!.AsArray().OfType<JsonObject>().Where(n => chosen.Contains(n.Text("Id")) && n["ManagedOrigin"] != null).Select(n => n["ManagedOrigin"]!.DeepClone()).ToArray()));
         ForwardedNodeSources.VerifyNodes(store, scheme["Nodes"]!.AsArray().OfType<JsonObject>().Where(n => chosen.Contains(n.Text("Id"))));
+        TcpChains.VerifyOrigins(store, new JsonArray(scheme["Nodes"]!.AsArray().OfType<JsonObject>().Where(n => chosen.Contains(n.Text("Id")) && n["TcpChainOrigin"] != null).Select(n => n["TcpChainOrigin"]!.DeepClone()).ToArray()));
+        InboundSources.VerifyOrigins(store, new JsonArray(scheme["Nodes"]!.AsArray().OfType<JsonObject>().Where(n => chosen.Contains(n.Text("Id")) && n["InboundOrigin"] != null).Select(n => n["InboundOrigin"]!.DeepClone()).ToArray()));
         return text;
     }
     public void SaveNew(JsonObject scheme, ClientSharePreview preview, IReadOnlyList<string> selected, string format, string target)

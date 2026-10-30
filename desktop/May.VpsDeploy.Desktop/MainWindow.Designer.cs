@@ -119,6 +119,7 @@ public sealed partial class MainWindow
         var forwarded = Action("添加转发节点", AddForwardedClientNodes); forwarded.Tag = "ClientForwarded.Add"; page.Children.Add(forwarded);
         var inboundNodes = Action("添加独立入站节点", AddInboundClientNodes); inboundNodes.Tag = "ClientInbounds.Add"; page.Children.Add(inboundNodes);
         var subscription = Action("添加订阅来源", AddClientSubscription); subscription.Tag = "ClientSources.Add"; page.Children.Add(subscription); DesignerClientSources();
+        DesignerNodeGroups();
         if (nodes.Count == 0) { page.Children.Add(Card(Column(Text("还没有节点", 18), Text("先添加至少一个入口节点。使用落地时，再添加落地节点并选择它连接的入口组。", 14, true)))); return; }
         var rows = new List<UIElement>();
         CancelNodeReorder(); nodeDropRows.Clear(); nodeDragSession = Guid.NewGuid().ToString("N");

@@ -1775,6 +1775,10 @@ if($pythonCommandForClient){
     if ($LASTEXITCODE -ne 0) { throw 'Tunnel public access probe regressions failed.' }
 }
 if($pythonCommandForClient){
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_client_sources.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Native QUIC client source extraction regression failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_wireguard.py')
+    if ($LASTEXITCODE -ne 0) { throw 'WireGuard ownership and scoped recovery regressions failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_inbound_host.py')
     if ($LASTEXITCODE -ne 0) { throw 'Independent inbound ownership regression failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_hysteria_hopping.py')

@@ -156,7 +156,7 @@ public static partial class InboundRendering
     }
     public static void ValidatePorts(JsonObject plan, JsonObject state, JsonObject model)
     {
-        var reserved = new HashSet<int> { plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue"), plan.Number("Server.BootstrapSshPort"), plan.Number("MayMonitorServer.Port") };
+        var reserved = new HashSet<int> { plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue"), plan.Number("Server.BootstrapSshPort"), plan.Number("MayMonitorServer.Port"), plan.Number("WireGuardTunnel.ListenPort") };
         foreach (var (role, fields) in new[] { ("RealityEntry", new[] { "Ports.XrayPrimary", "Ports.XrayBackup" }), ("AnyTlsEntry", new[] { "Ports.AnyTlsPrimary" }), ("ShadowsocksLanding", new[] { "Ports.LandingShadowsocks" }) }) if (plan.Flag("ProtocolInventory." + role + ".Installed", DeploymentPlans.Uses(plan, role))) foreach (var field in fields) reserved.Add(plan.Number(field));
         foreach (var rule in TcpForwarding.Rules(plan["TcpForwarding"] as JsonObject).Concat(UdpForwarding.Rules(plan["UdpForwarding"] as JsonObject))) reserved.Add(rule.Number("ListenPort"));
         if (plan.Text("Reality.TargetMode") == "LocalOwnedTls") reserved.Add(plan.Number("Reality.LocalHttpsPort"));

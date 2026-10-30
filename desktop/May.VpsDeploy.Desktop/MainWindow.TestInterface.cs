@@ -154,10 +154,12 @@ public sealed partial class MainWindow
             case "suite.may-monitor":
             case "suite.monitor-access":
             case "suite.client-output":
+            case "suite.client-groups":
             case "suite.server-outbound":
             case "suite.client-share":
             case "suite.tcp-forward":
             case "suite.tcp-chain":
+            case "suite.wireguard":
             case "suite.inbounds":
             case "suite.hysteria":
             case "suite.tuic":
@@ -187,9 +189,11 @@ public sealed partial class MainWindow
                         if (command is "suite.run" or "suite.may-monitor") await Run("may_monitor", MayMonitorRegression);
                         if (command is "suite.run" or "suite.monitor-access") await Run("monitor_access", MonitorAccessRegression);
                         if (command is "suite.run" or "suite.client-output") await Run("client_output", ClientOutputRegression);
+                        if (command is "suite.run" or "suite.client-groups") await Run("client_groups", ClientGroupRegression);
                         if (command is "suite.run" or "suite.server-outbound") await Run("server_outbound", ServerOutboundRegression);
                         if (command is "suite.run" or "suite.client-share") await Run("client_share", ClientShareRegression);
                         if (command is "suite.run" or "suite.tcp-forward") await Run("tcp_forward", TcpForwardRegression);
+                        if (command is "suite.run" or "suite.wireguard") await Run("wireguard", WireGuardRegression);
                         if (command is "suite.run" or "suite.tcp-chain") await Run("tcp_chain", TcpChainRegression);
                         if (command is "suite.run" or "suite.inbounds") await Run("inbounds", InboundRegression);
                         if (command is "suite.run" or "suite.hysteria") await Run("hysteria", HysteriaRegression);

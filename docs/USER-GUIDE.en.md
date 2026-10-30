@@ -1,6 +1,6 @@
 # Desktop walkthrough
 
-Baseline: May VPS Deploy v0.9.38 on Windows amd64. The Chinese [full manual](USER-GUIDE.zh-CN.md) covers all current desktop workflows; this guide gives the installation, acceptance and recovery sequence in English.
+Baseline: May VPS Deploy v0.9.39 on Windows amd64. The Chinese [full manual](USER-GUIDE.zh-CN.md) covers all current desktop workflows; this guide gives the installation, acceptance and recovery sequence in English.
 
 ## Install
 
@@ -35,27 +35,27 @@ Prepare current SSH credentials, a verified host fingerprint and the provider's 
 
 Hysteria2 rate fields use the client's perspective. Both directions at zero select adaptive BBR; positive rates require both values. Provider UDP rules must also permit the selected listener. See the [protocol implementation and acceptance record](HYSTERIA2-ROUND-14-2026-10-25.zh-CN.md) for limits.
 
-Unreleased round 15 source adds managed port hopping and standard Hysteria2 share links. Hopping requires the owned nftables scope and provider rules allowing every UDP port, uses the same service listener and validates each alias. The default interval is 30 seconds; custom intervals require full client configuration export. See the [round 15 instructions](HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md).
+The round 15 features included in v0.9.39 add managed port hopping and standard Hysteria2 share links. Hopping requires the owned nftables scope and provider rules allowing every UDP port, uses the same service listener and validates each alias. The default interval is 30 seconds; custom intervals require full client configuration export. See the [round 15 instructions](HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md).
 
-## TUIC v5 (unreleased source)
+## TUIC v5 (v0.9.39)
 
-Unreleased round 16 adds TUIC v5 in the same independent-inbound editor, using separate UUID/password credentials, verified TLS/SNI and explicit UDP firewall acceptance. The defaults are cubic, native UDP relay, a 10-second heartbeat and a 3-second authentication timeout, with 0-RTT disabled. Both authenticated HTTPS and application UDP must pass before commit. See the [TUIC v5 instructions](TUIC-ROUND-16-2026-10-28.zh-CN.md).
+The round 16 features add TUIC v5 in the same independent-inbound editor, using separate UUID/password credentials, verified TLS/SNI and explicit UDP firewall acceptance. The defaults are cubic, native UDP relay, a 10-second heartbeat and a 3-second authentication timeout, with 0-RTT disabled. Both authenticated HTTPS and application UDP must pass before commit. See the [TUIC v5 instructions](TUIC-ROUND-16-2026-10-28.zh-CN.md).
 
-## Server QUIC next hops (unreleased source)
+## Server QUIC next hops (v0.9.39)
 
-Unreleased round 17 adds Hysteria2/TUIC server next hops for sing-box and native Hysteria2 for the pinned Xray core. Select a saved source in server outbound configuration or independent inbound outbound references. Candidates follow core capabilities; HTTPS alone cannot replace default-path application UDP acceptance. See [server QUIC next hops](SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md) for mapping and recovery boundaries.
+The round 17 features add Hysteria2/TUIC server next hops for sing-box and native Hysteria2 for the pinned Xray core. Select a saved source in server outbound configuration or independent inbound outbound references. Candidates follow core capabilities; HTTPS alone cannot replace default-path application UDP acceptance. See [server QUIC next hops](SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md) for mapping and recovery boundaries.
 
-## External WS/gRPC nodes (unreleased source)
+## External WS/gRPC nodes (v0.9.39)
 
-Round 18 unreleased source adds external VLESS/Trojan over TLS WebSocket or single-stream gRPC, including import, sharing, paired native output and a dedicated editor. Protocol, transport, Host, SNI and service name remain separate. Unsupported options and paths that the pinned cores cannot represent equivalently are rejected during link conversion; retain their full native configuration. See the [round 18 guide](CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md) for exact limits and isolated acceptance.
+Round 18 v0.9.39 source adds external VLESS/Trojan over TLS WebSocket or single-stream gRPC, including import, sharing, paired native output and a dedicated editor. Protocol, transport, Host, SNI and service name remain separate. Unsupported options and paths that the pinned cores cannot represent equivalently are rejected during link conversion; retain their full native configuration. See the [round 18 guide](CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md) for exact limits and isolated acceptance.
 
-## VLESS XHTTP (unreleased source)
+## VLESS XHTTP (v0.9.39)
 
 Round 20 adds four XHTTP modes: stream-one, stream-up, packet-up and auto. TLS supports HTTP/1.1, HTTP/2 and HTTP/3; Reality uses HTTP/2. Keep UUID, SNI, Host and path separate. TLS references an owned certificate; Reality uses its own target and keys. New inbounds still default to HTTP/2 and stream-one, with explicit mode/version selection and advanced extra review. Managed server outbound remains direct-only.
 
 Client schemes can select native May Core output, equivalent Mihomo output, or both. Native XHTTP validation requires the matching May Core and its source/capability manifest; official sing-box 1.14.2 is not a substitute. Import separate download settings from a complete client source or standard share URI; unrelated servers do not automatically share sessions. Reject lossy links/conversions while retaining full native output. See the [round 20 guide](XHTTP-ROUND-20-2026-10-29.zh-CN.md) for maintenance, certificate/key rotation, core upgrades and scoped recovery.
 
-## Cross-instance chains (unreleased source)
+## Cross-instance chains (v0.9.39)
 
 Round 21 extends the existing three-instance topology with IPv6 TCP and IPv4/IPv6 UDP for fixed-port Hysteria2 or TUIC v5 inbounds. Save the validated original exit source first, then open chain management on the front instance and select the family, transport, relay, exit, ports and source whitelist. All three hosts use the same family. The relay permits only the front's actual source `/32` or `/128`.
 
@@ -74,3 +74,11 @@ May Monitor runs independently of the Windows app. Use scoped, expiring read cre
 For SSH errors, check the actual address, port, host key, current authentication and rescue console. For protocol errors, check listener ownership, credentials, SNI, address family and the real client path. For stale monitoring, check scope, expiry, TLS, installation UUID and advancing reports. Missing data is unknown, not zero load.
 
 For uncertain writes or blocked recovery, retain the operation identity, phase, version, error code and redacted logs. Do not delete transaction records or run an unrelated historical rollback script. See [maintenance](MAINTENANCE.zh-CN.md), [client paths](CLIENT-AND-LINES.zh-CN.md), [monitor operations](MONITOR-OPERATIONS.zh-CN.md) and the [documentation index](README.md).
+
+## WireGuard host-to-host channel (v0.9.39)
+
+Open **Manage tunnel** from an instance and select a second trusted managed host. This round supports IPv4 or IPv6 outer UDP endpoints and one private IPv4 /32 peer route per host. Review both hosts, ports, MTU, keepalive and firewall access before applying. Private keys remain on the hosts; acceptance requires TCP and UDP challenge responses in both directions. The kernel channel has no persistent userspace tunnel process. Pending operations use the shared two-host recovery entry. Default routes, DNS and existing three-host chains are not rewritten. See the [round 22 guide](WIREGUARD-ROUND-22-2026-10-30.zh-CN.md) for scope and verification.
+
+## Reusable node groups (v0.9.39)
+
+In the Nodes step, save selected members together with their upstream dependencies. Reuse the encrypted snapshot in another scheme, review changes before synchronizing, and regenerate/validate before export. Local conflicts are not overwritten. Detach to retain an independent snapshot. A changed or missing group invalidates old exports; native Hysteria2 and TUIC sources are retained without dropping fields. See the [detailed workflow](CLIENT-GROUPS-ROUND-23-2026-10-30.zh-CN.md).

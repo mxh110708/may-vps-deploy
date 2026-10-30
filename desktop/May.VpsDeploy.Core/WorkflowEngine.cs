@@ -14,6 +14,8 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
 
     public async Task<TaskOutcome> ExecuteAsync(OperationRequest request, string taskId, IProgress<TaskProgress> progress, CancellationToken cancellationToken)
     {
+        if (request.Kind == OperationKind.WireGuardTunnel) return await ConfigureWireGuard(request, taskId, progress, cancellationToken);
+        WireGuardTunnels.GuardOperation(store, request);
         if (request.Kind == OperationKind.TcpChain) return await ConfigureTcpChain(request, taskId, progress, cancellationToken);
         TcpChains.GuardOperation(store, request);
         var directory = store.Paths.Instance(request.InstanceRelativePath);
@@ -211,7 +213,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         public async Task<CommandResult> Run(string asset, Dictionary<string, string>? parameters = null, bool mutation = false, int timeout = 600, string? marker = null, int? port = null, bool bootstrap = false)
         {
             Cancellation.ThrowIfCancellationRequested(); parameters ??= [];
-            if (mutation && !asset.StartsWith("kernel-", StringComparison.Ordinal) && asset is not ("may-monitor-lifecycle.sh" or "tcp-chain-rollback.sh" or "protocol-migration-trigger-rollback.sh" or "maintenance-transaction-commit.sh" or "maintenance-transaction-status.sh") && Pending?.Text("RemoteBackup") is { Length: > 0 } backup) parameters["EXPECTED_TRANSACTION"] = backup;
+            if (mutation && !asset.StartsWith("kernel-", StringComparison.Ordinal) && asset is not ("may-monitor-lifecycle.sh" or "tcp-chain-rollback.sh" or "wireguard-pair-rollback.sh" or "protocol-migration-trigger-rollback.sh" or "maintenance-transaction-commit.sh" or "maintenance-transaction-status.sh") && Pending?.Text("RemoteBackup") is { Length: > 0 } backup) parameters["EXPECTED_TRANSACTION"] = backup;
             Report(asset[..^3], mutation ? "正在执行受管步骤，取消将在安全边界处理。" : "正在读取远端状态。");
             await using var session = await Session(port, bootstrap: bootstrap);
             if (mutation) { MutationStarted = true; if (Pending != null) { Pending["Stage"] = asset; Save(); } }

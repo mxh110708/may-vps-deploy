@@ -14,6 +14,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
     public ReviewedOperation Review(OperationRequest request)
     {
         var snapshot = request.Snapshot(); OperationPolicy.Validate(snapshot);
+        WireGuardTunnels.GuardOperation(store, snapshot);
         TcpChains.GuardOperation(store, snapshot);
         var planHash = ArchiveFingerprint(snapshot);
         JsonObject? kernelCatalog = null;
@@ -26,6 +27,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         if (snapshot.Kind == OperationKind.MayMonitor) summary = MayMonitorLifecycle.Summary(snapshot, store.Paths);
         if(snapshot.Kind==OperationKind.Recover&&snapshot.Options["MayAgentConfiguration"] is JsonObject repair)summary="恢复 May Agent 连接 · 显式输入新凭据\n目标 "+repair.Text("Endpoint")+"\n节点 "+repair.Text("ClientUUID")+"\n服务身份 "+repair.Text("ServerInstanceId")+"\n仅处理该实例未完成的 Agent 配置事务；重新核对归属、鉴权及实际新上报后提交。";
         if (snapshot.Kind == OperationKind.MayMonitorAccess) summary = MayMonitorAccess.Summary(store, snapshot);
+        if (snapshot.Kind == OperationKind.WireGuardTunnel) summary = WireGuardTunnels.Prepare(store, snapshot).Summary;
         if (snapshot.Kind == OperationKind.TcpChain) summary = TcpChains.Prepare(store, snapshot).Summary;
         if (snapshot.Kind == OperationKind.Inbounds) { var preview = InboundCatalog.Prepare(store, snapshot); summary = preview.Summary; preview.Credentials.Clear(); preview.Payload["Configurations"]!.AsObject().Clear(); }
         return new(snapshot, Fingerprint(snapshot), planHash, summary);
@@ -41,6 +43,14 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         {
             foreach (var asset in new[] { "config/versions.json", "scripts/inbound-host.py", "assets/remote/inbound-read.sh", "assets/remote/inbound-apply.sh", "assets/remote/audit.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/protocol-migration-trigger-rollback.sh", "assets/remote/maintenance-transaction-status.sh", "assets/remote/maintenance-transaction-commit.sh", "assets/remote/maintenance-mutation-guard.sh", "assets/remote/nftables-apply.sh", "assets/remote/firewall-tools.sh", "assets/remote/firewall-preflight.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(asset));
             foreach (var outbound in InboundCatalog.Items(request.Options["Model"]!.AsObject(), "Outbounds").Where(o => o.Text("Kind") == "Proxy")) files["InboundSource:" + outbound.Text("Id")] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, outbound.Text("Source.SchemeId")));
+        }
+        if (request.Kind == OperationKind.WireGuardTunnel)
+        {
+            var configuration = request.Options["Configuration"]!.AsObject();
+            foreach (var instance in WireGuardTunnels.Instances(configuration))
+                foreach (var name in new[] { "deployment-plan.json", "deployment-state.json", "secrets.dotnet.private.json", "operation-pending.dotnet.json" }) files[instance + ":" + name] = ClientSchemes.SourceFingerprint(SafePath.Resolve(store.Paths.Instance(instance), name));
+            files["WireGuardRecord"] = ClientSchemes.SourceFingerprint(WireGuardTunnels.FileName(store.Paths, configuration.Text("Id")));
+            foreach (var name in new[] { "scripts/forwarding-host.py", "scripts/wireguard-host.py", "scripts/wireguard-runtime.py", "assets/remote/wireguard-read.sh", "assets/remote/wireguard-key.sh", "assets/remote/wireguard-apply.sh", "assets/remote/wireguard-proof.sh", "assets/remote/wireguard-tools-install.sh", "assets/remote/wireguard-backup-proof.sh", "assets/remote/wireguard-pair-rollback.sh", "assets/remote/audit.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/protocol-migration-trigger-rollback.sh", "assets/remote/maintenance-transaction-status.sh", "assets/remote/maintenance-transaction-commit.sh", "assets/remote/maintenance-mutation-guard.sh", "assets/remote/nftables-apply.sh", "assets/remote/firewall-tools.sh", "assets/remote/firewall-preflight.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
         }
         if (request.Kind == OperationKind.TcpChain)
         {
@@ -117,6 +127,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         try
         {
             using var instanceLock = LockParticipants(current);
+            WireGuardTunnels.GuardOperation(store, current);
             TcpChains.GuardOperation(store, current);
             var planHash = ArchiveFingerprint(current);
             if (planHash != review.PlanFingerprint) throw new OperationException("实例归档在审阅后发生变化，请重新读取并审阅。");
@@ -145,7 +156,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         var locks = new ParticipantLocks();
         try
         {
-            var instances = request.Kind == OperationKind.TcpChain ? TcpChains.Instances(request.Options["Configuration"]!.AsObject()) : [request.InstanceRelativePath];
+            var instances = request.Kind == OperationKind.WireGuardTunnel ? WireGuardTunnels.Instances(request.Options["Configuration"]!.AsObject()) : request.Kind == OperationKind.TcpChain ? TcpChains.Instances(request.Options["Configuration"]!.AsObject()) : [request.InstanceRelativePath];
             foreach (var instance in instances.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase)) locks.Items.Add(store.LockInstance(instance));
             return locks;
         }
@@ -165,6 +176,7 @@ public static class OperationPolicy
     public static void Validate(OperationRequest request)
     {
         if (!Enum.IsDefined(request.Kind)) throw new OperationException("未知任务类型。");
+        if (request.Kind == OperationKind.WireGuardTunnel) WireGuardTunnels.Validate(request);
         if (request.Kind == OperationKind.TcpChain) TcpChains.Validate(request);
         if (request.Kind == OperationKind.Inbounds) InboundCatalog.ValidateOptions(request.Options);
         if (request.Kind == OperationKind.ServerOutbound) ServerOutboundRouting.ValidateOptions(request.Options);
@@ -212,6 +224,7 @@ public static class OperationPolicy
     }
     public static string TargetLabel(OperationRequest request) => request.Kind switch
     {
+        OperationKind.WireGuardTunnel => "WireGuard 实例间加密通道",
         OperationKind.TcpChain => "跨实例前置 → 中转 → 落地",
         OperationKind.Inbounds => "通用多入站资源 · " + (request.Options.Text("Action") == "Check" ? "只读检查" : "审阅变更范围"),
         OperationKind.MayMonitor => MayMonitorLifecycle.Label(request.Options.Text("Role")) + " · " + request.Options.Text("Action"),

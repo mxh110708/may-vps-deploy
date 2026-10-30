@@ -7,6 +7,23 @@ from pathlib import Path
 action = sys.argv[1]
 config = Path('/etc/nftables.conf')
 
+def wireguard_rules():
+    value = json.loads(os.environ.get('VPS_PARAM_WIREGUARD_RULE', 'null'))
+    if value is None: return []
+    # Only generated peer fields are consumed; no user-provided nft expressions.
+    if not isinstance(value, dict): raise SystemExit('Invalid WireGuard firewall record.')
+    try:
+        endpoint = ipaddress.ip_address(value['Endpoint'])
+        local, peer = (ipaddress.ip_address(value[k]) for k in ('LocalAddress', 'PeerAddress'))
+        port = value['ListenPort']
+    except (KeyError, ValueError, TypeError): raise SystemExit('Invalid WireGuard firewall addresses.')
+    if type(port) is not int or not 1024 <= port <= 65535 or local.version != 4 or peer.version != 4 or local == peer or not local.is_private or not peer.is_private or endpoint.is_loopback or endpoint.is_unspecified or endpoint.is_multicast: raise SystemExit('Invalid WireGuard firewall scope.')
+    prefix = 'ip6' if endpoint.version == 6 else 'ip'
+    return [prefix+' saddr '+str(endpoint)+' udp dport '+str(port)+' accept', 'iifname "maywg0" ip saddr '+str(peer)+' ip daddr '+str(local)+' accept']
+
+if action == 'render-wireguard':
+    print('\n'.join('    '+rule for rule in wireguard_rules()), end=''); raise SystemExit(0)
+
 def hysteria_redirects():
     mappings = json.loads(os.environ.get('VPS_PARAM_HYSTERIA_REDIRECTS', '[]'))
     if not isinstance(mappings, list) or len(mappings) > 16: raise SystemExit('Invalid Hysteria redirect catalogue.')
@@ -55,7 +72,7 @@ def canonical(text):
         return 'ct state '+expression+' '+match[2]
     text = re.sub(r'ct state (0x[0-9a-f]+(?:,0x[0-9a-f]+)*) (accept|drop)', states, text)
     text = re.sub(r'ct state (established,related|related,established)', 'ct state { established, related }', text)
-    if any(value != 'lo' for value in re.findall(r'"([^"\n]*)"', text)): raise SystemExit('Unsupported firewall string expression.')
+    if any(value not in ('lo', 'maywg0') for value in re.findall(r'"([^"\n]*)"', text)): raise SystemExit('Unsupported firewall string expression.')
     def address(match):
         try: return str(ipaddress.ip_address(match.group()))
         except ValueError: return match.group()
@@ -164,6 +181,7 @@ def verify_archive():
             if any(p.version != family for p in values): raise SystemExit('Invalid trusted family.')
             if values:
                 for protocol in ('tcp', 'udp'): rules.append(prefix+' saddr { '+','.join(map(str, values))+' } '+protocol+' dport '+restricted+' accept')
+    rules += wireguard_rules()
     rules += ['udp sport 67 udp dport 68 accept', 'udp sport 547 udp dport 546 accept', 'ip protocol icmp accept', 'ip6 nexthdr ipv6-icmp accept']
     expected = 'table inet filter {\n  chain input {\n type filter hook input priority 0;\n policy drop;\n'+'\n'.join(rules)+'\n}\nchain forward {\n type filter hook forward priority 0; policy drop;\n}\nchain output {\n type filter hook output priority 0; policy accept;\n}\n'+hysteria_redirects()+'}'
     if canonical(config.read_text()) != canonical(expected): raise SystemExit('Firewall differs from the managed archive; review required.')

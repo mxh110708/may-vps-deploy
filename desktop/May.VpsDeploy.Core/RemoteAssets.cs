@@ -31,9 +31,15 @@ public sealed class RemoteAssets(AppPaths paths)
             // Pin the UDP worker inside the recovery program as well as the
             // managed file; old snapshots must not depend on the current app.
             if (variable == "VPS_UDP_FORWARD_PROGRAM") program = "UDP_WORKER_SOURCE = " + System.Text.Json.JsonSerializer.Serialize(File.ReadAllText(paths.Resolve("scripts/udp-forward-worker.py")).Replace("\r\n", "\n")) + "\n" + program;
+            if (variable == "VPS_WIREGUARD_PROGRAM")
+            {
+                var runtime = File.ReadAllText(paths.Resolve("scripts/wireguard-runtime.py")).Replace("\r\n", "\n");
+                program = "WIREGUARD_RUNTIME_SOURCE = " + System.Text.Json.JsonSerializer.Serialize(runtime) + "\nexec(WIREGUARD_RUNTIME_SOURCE.split(\"\\nif __name__ ==\", 1)[0])\n" + program;
+            }
             var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(program));
             text.Append("export ").Append(variable).Append("=\"$(printf '%s' '").Append(encoded).Append("' | base64 -d)\"\n");
         }
+        if (asset.StartsWith("wireguard-", StringComparison.Ordinal) && asset != "wireguard-pair-rollback.sh" || asset == "protocol-migration-arm-rollback.sh" && parameters.TryGetValue("COMPONENTS", out var wgScopes) && wgScopes.Split(',').Contains("WireGuardTunnel")) Program("VPS_WIREGUARD_PROGRAM", "scripts/forwarding-host.py", "scripts/wireguard-host.py");
         if (asset == "network-audit.sh" || asset.StartsWith("kernel-", StringComparison.Ordinal)) Program("VPS_BBR_PROGRAM", "scripts/bbr-runtime.py");
         if (asset.StartsWith("kernel-", StringComparison.Ordinal))
         {

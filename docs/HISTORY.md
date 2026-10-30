@@ -6,6 +6,7 @@
 
 | 记录 | 原文件 |
 | --- | --- |
+| [第二十二轮：WireGuard 实例间加密通道](WIREGUARD-ROUND-22-2026-10-30.zh-CN.md) | `WIREGUARD-ROUND-22-2026-10-30.zh-CN.md` |
 | [第二十一轮：双地址族 TCP 与限定 UDP 编排](CHAIN-ROUND-21-2026-10-30.zh-CN.md) | `CHAIN-ROUND-21-2026-10-30.zh-CN.md` |
 | [第二十轮：完整 XHTTP 客户端与配套流程](XHTTP-ROUND-20-2026-10-29.zh-CN.md) | `XHTTP-ROUND-20-2026-10-29.zh-CN.md` |
 | [第十九轮：VLESS TLS／Reality XHTTP](XHTTP-ROUND-19-2026-10-29.zh-CN.md) | `XHTTP-ROUND-19-2026-10-29.zh-CN.md` |
@@ -90,3 +91,5 @@
 | [第十轮：UDP 转发的 Shadowsocks／SS2022 验收](UDP-PROXY-ROUND-10-2026-10-23.zh-CN.md) | `UDP-PROXY-ROUND-10-2026-10-23.zh-CN.md` |
 | [本轮升级验收记录](UPGRADE-VERIFICATION-2026-09-09.md) | `UPGRADE-VERIFICATION-2026-09-09.md` |
 | [方案工作台与事务恢复](WORKBENCH-AND-RECOVERY.zh-CN.md) | `WORKBENCH-AND-RECOVERY.zh-CN.md` |
+
+- [第二十三轮：节点组与导出一致性](CLIENT-GROUPS-ROUND-23-2026-10-30.zh-CN.md)，纳入 v0.9.39；各旧轮次的原始验证记录保留当时范围。

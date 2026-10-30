@@ -25,10 +25,17 @@ def main():
     parser.add_argument('--core-archive', required=True, type=Path)
     parser.add_argument('--project', required=True, type=Path)
     parser.add_argument('--round21', action='store_true')
+    parser.add_argument('--wireguard', action='store_true')
+    parser.add_argument('--guest-apt-proxy', help='Optional test-only HTTP proxy through QEMU host gateway; no authentication.')
     parser.add_argument('--lifetime', type=int, default=3600, choices=range(180,3601))
     args = parser.parse_args()
     if os.geteuid() != 0 or not Path('/dev/kvm').exists():
         raise RuntimeError('Explicit disposable KVM fixture requires WSL root and KVM.')
+    if args.guest_apt_proxy:
+        import urllib.parse
+        proxy = urllib.parse.urlsplit(args.guest_apt_proxy)
+        if proxy.scheme != 'http' or proxy.hostname != '10.0.2.2' or not proxy.port or proxy.username or proxy.password or proxy.path or proxy.query or proxy.fragment:
+            raise ValueError('Fixture APT proxy must be an unauthenticated QEMU host gateway URL.')
     root = args.output.resolve()
     if '/Pywork/.codex-tmp/' not in str(root):
         raise RuntimeError('Use a new workspace .codex-tmp output directory.')
@@ -58,6 +65,8 @@ def main():
         ('Relay', 13, '192.0.2.20', [('52:54:00:12:02:01', '192.0.2.20/24', 'listen=127.0.0.1:' + str(link12)), ('52:54:00:12:02:02', '198.51.100.20/24', 'connect=127.0.0.1:' + str(link23))]),
         ('Front', 12, '192.0.2.10', [('52:54:00:12:01:01', '192.0.2.10/24', 'connect=127.0.0.1:' + str(link12))]),
     ]
+    if args.wireguard:
+        specs = [('Relay', 13, '192.0.2.20', [('52:54:00:12:02:01', '192.0.2.20/24', 'listen=127.0.0.1:' + str(link12))]), specs[2]]
     try:
         for name, version, address, links in specs:
             work = root / name
@@ -67,6 +76,12 @@ def main():
             identity = str(uuid.uuid4())
             (work / 'meta-data').write_text('instance-id: may-tcp-chain-' + identity + '\nlocal-hostname: may-chain-' + name.lower() + '\n')
             (work / 'user-data').write_text('#cloud-config\ndisable_root: false\nssh_pwauth: false\nssh_authorized_keys:\n  - ' + key.with_suffix('.pub').read_text().strip() + '\npackage_update: true\npackages: [nftables, python3, iproute2]\nwrite_files:\n  - path: /etc/may-tcp-chain-fixture\n    permissions: "0600"\n    content: ' + identity + '\n  - path: /etc/ssh/sshd_config.d/30-may-test-ports.conf\n    content: |\n      Port 22\n      Port 2222\nruncmd:\n  - [systemctl, restart, ssh]\n')
+            if args.wireguard:
+                cloud = (work / 'user-data').read_text()
+                cloud = cloud.replace('packages: [nftables, python3, iproute2]', 'packages: [nftables, python3, iproute2, wireguard-tools]')
+                if args.guest_apt_proxy:
+                    cloud = cloud.replace('package_update: true', 'apt:\n  proxy: "'+args.guest_apt_proxy+'"\npackage_update: true')
+                (work / 'user-data').write_text(cloud)
             command([qemu / 'usr/bin/genisoimage', '-quiet', '-output', work / 'seed.iso', '-volid', 'cidata', '-joliet', '-rock', work / 'user-data', work / 'meta-data'], env=env)
             image = args.runtime / 'images' / ('debian-' + str(version) + '-genericcloud-amd64.qcow2')
             overlay = work / 'disk.qcow2'
@@ -100,7 +115,7 @@ def main():
             network = "import json,subprocess\nlinks=" + repr([(mac, ip) for mac, ip, _ in links]) + "\nfor mac,address in links:\n for link in json.loads(subprocess.check_output(['ip','-j','link'])):\n  if link.get('address','').lower()==mac:\n   subprocess.run(['ip','link','set',link['ifname'],'up'],check=True)\n   subprocess.run(['ip','address','replace',address,'dev',link['ifname']],check=True)\n"
             script = "set -euo pipefail\ninstall -d -m 0700 /opt/may-tcp-chain-fixture\nprintf '%s' '" + base64.b64encode(network.encode()).decode() + "' | base64 -d > /opt/may-tcp-chain-fixture/network.py\ncat > /etc/systemd/system/may-tcp-chain-network.service <<'EOF'\n[Unit]\nDescription=Disposable TCP chain test NICs\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 /opt/may-tcp-chain-fixture/network.py\nRemainAfterExit=yes\n[Install]\nWantedBy=multi-user.target\nEOF\nsystemctl daemon-reload\nsystemctl enable --now may-tcp-chain-network.service\n"
             command(ssh + ['bash -se'], input=script, timeout=30)
-            if args.round21:
+            if args.round21 or args.wireguard:
                 addresses={
                     '192.0.2.10/24':'2001:db8:21:1::10/64', '192.0.2.20/24':'2001:db8:21:1::20/64',
                     '198.51.100.20/24':'2001:db8:21:2::20/64', '198.51.100.30/24':'2001:db8:21:2::30/64'}
@@ -108,7 +123,7 @@ def main():
                 addition="\nfor mac,address in "+repr(ipv6)+":\n for link in json.loads(subprocess.check_output(['ip','-j','link'])):\n  if link.get('address','').lower()==mac:\n   subprocess.run(['ip','-6','address','replace',address,'dev',link['ifname'],'nodad'],check=True)\n"
                 command(ssh+['bash -se'],input="printf '%s' '"+base64.b64encode(addition.encode()).decode()+"' | base64 -d >> /opt/may-tcp-chain-fixture/network.py\nsystemctl restart may-tcp-chain-network.service\n",timeout=15)
                 nodes[name]['IPv6']=addresses[links[0][1]].split('/')[0]
-                if name in ('Front','Landing'):
+                if args.round21 and name in ('Front','Landing'):
                     import importlib.util
                     spec=importlib.util.spec_from_file_location('ingress',args.project/'tests/chain-fixture-channel.py');channel=importlib.util.module_from_spec(spec);spec.loader.exec_module(channel)
                     for family,target in [('IPv4',address),('IPv6',nodes[name]['IPv6'])]:
@@ -130,7 +145,7 @@ def main():
                 subprocess.run(ssh + ['tar -xzf - -C /opt/may-tcp-chain-fixture'], input=payload.getvalue(), check=True, timeout=60)
         manifest = {'Version': 1, 'SyntheticOnly': True, 'Nodes': nodes, 'StopFile': str(root / 'stop'), 'CreatedAt': time.time()}
         (root / 'manifest.private.json').write_text(json.dumps(manifest, indent=2))
-        print('READY: three disposable guests; waiting for explicit stop marker', flush=True)
+        print('READY:', len(nodes), 'disposable guests; waiting for explicit stop marker', flush=True)
         for _ in range(args.lifetime):
             if (root / 'stop').exists():
                 break

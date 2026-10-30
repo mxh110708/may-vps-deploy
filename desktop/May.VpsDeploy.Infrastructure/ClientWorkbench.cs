@@ -47,6 +47,7 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
     }
     public async Task<JsonObject> BuildAsync(JsonObject scheme, CancellationToken cancellationToken)
     {
+        new ClientNodeGroupStore(store).Verify(scheme);
         ClientSchemes.UpgradeLayout(scheme);
         MigrateManagedSources(scheme);
         if (scheme.Text("SourceMode") == "ExistingAuthority" && scheme["AuthorityNodes"] == null)
@@ -71,6 +72,7 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
         result.RequireSuccess("候选生成失败，请检查节点、连接关系与分组。");
         var candidate = new JsonObject { ["SchemeId"] = scheme.Text("Id"), ["OutputClients"] = scheme.Text("OutputClients", "Both"), ["Sources"] = sources, ["SpecFingerprint"] = ArchiveStore.Fingerprint(specification), ["ValidationStatus"] = "Pending", ["Targets"] = new JsonObject() };
         candidate["ManagedSources"] = origins;
+        candidate["NodeGroupSnapshot"] = new JsonObject { ["Nodes"] = scheme["Nodes"]!.DeepClone(), ["GroupReferences"] = scheme["GroupReferences"]?.DeepClone() ?? new JsonArray() };
         candidate["ForwardedSources"] = new JsonArray(specification["manual_nodes"]!.AsArray().OfType<JsonObject>().Where(n => n["ForwardedOrigin"] != null).Select(n => n["ForwardedOrigin"]!.DeepClone()).ToArray());
         candidate["ChainSources"] = new JsonArray(specification["manual_nodes"]!.AsArray().OfType<JsonObject>().Where(n => n["TcpChainOrigin"] != null).Select(n => n["TcpChainOrigin"]!.DeepClone()).ToArray());
         candidate["InboundSources"] = new JsonArray(specification["manual_nodes"]!.AsArray().OfType<JsonObject>().Where(n => n["InboundOrigin"] != null).Select(n => n["InboundOrigin"]!.DeepClone()).ToArray());
@@ -79,6 +81,7 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
     }
     private void VerifySources(JsonObject candidate)
     {
+        if (candidate["NodeGroupSnapshot"] is JsonObject groups) new ClientNodeGroupStore(store).Verify(groups);
         foreach (var source in candidate["Sources"]!.AsObject()) if (ClientSchemes.SourceFingerprint(source.Key) != source.Value!.ToString()) throw new OperationException("来源已变化，请重新生成候选。");
         if (candidate["ManagedSources"] is JsonArray origins) ManagedNodeSources.Verify(store, origins);
         if (candidate["ForwardedSources"] is JsonArray forwarding) ForwardedNodeSources.VerifyOrigins(store, forwarding);
@@ -87,6 +90,7 @@ public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tool
     }
     private void VerifyCandidate(JsonObject scheme, JsonObject candidate)
     {
+        new ClientNodeGroupStore(store).Verify(scheme);
         if (candidate.Text("OutputClients", "Both") != scheme.Text("OutputClients", "Both") || candidate.Text("SpecFingerprint") != ArchiveStore.Fingerprint(ClientSchemes.Specification(scheme))) throw new OperationException("方案已变化，请重新生成候选。");
         foreach (var format in ClientSchemes.Formats(scheme)) if (ClientSchemes.SourceFingerprint(candidate.Text(format)) != candidate.Text(format + "Hash")) throw new OperationException("候选已被外部修改。");
         if (candidate["Sources"] != null) VerifySources(candidate);

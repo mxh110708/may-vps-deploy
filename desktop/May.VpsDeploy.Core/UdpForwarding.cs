@@ -116,6 +116,7 @@ public static class UdpForwarding
         var ports = Rules(config).Select(r => r.Number("ListenPort")).ToHashSet();
         foreach (var rule in Rules(config))
         {
+            if (rule.Number("ListenPort") == plan.Number("WireGuardTunnel.ListenPort")) throw new OperationException("UDP 转发与受管 WireGuard 端口冲突。");
             if (InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").SelectMany(Hysteria2Ports.ListenerPorts).Contains(rule.Number("ListenPort"))) throw new OperationException("UDP 转发与已保留的独立入站或跳跃端口冲突。");
             if (plan.Flag("ProtocolInventory.ShadowsocksLanding.Installed", DeploymentPlans.Uses(plan, "ShadowsocksLanding")) && rule.Number("ListenPort") == plan.Number("Ports.LandingShadowsocks")) throw new OperationException("UDP 转发与已安装 Shadowsocks 的 UDP 端口冲突。");
             _ = TcpForwarding.ProbeAddresses(plan, rule);

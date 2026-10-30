@@ -40,6 +40,7 @@ public sealed partial class MainWindow
     {
         var request = review.Request;
         if (request.Kind == OperationKind.Inbounds) return await ShowDialog(OperationDialog("审阅通用入站变更", DialogScroll(Column(Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
+        if (request.Kind == OperationKind.WireGuardTunnel) return await ShowDialog(OperationDialog("审阅 WireGuard 隧道", DialogScroll(Column(Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
         if (request.Kind == OperationKind.TcpChain) return await ShowDialog(OperationDialog("审阅跨实例线路", DialogScroll(Column(Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
         if (request.Kind == OperationKind.ServerOutbound) return await ShowDialog(OperationDialog("审阅服务器固定下一跳", DialogScroll(Column(Text(request.InstanceRelativePath.Replace("/May-VPS-Deploy", ""), 17), Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
         if (request.Kind == OperationKind.TcpForward) return await ShowDialog(OperationDialog(request.Options.Text("Action") == "Check" ? "审阅 TCP 转发检查" : "审阅 TCP 转发变更", DialogScroll(Column(Text(request.InstanceRelativePath.Replace("/May-VPS-Deploy", ""), 17), Text(review.Summary))), "确认并执行")) == ContentDialogResult.Primary;
@@ -78,6 +79,7 @@ public sealed partial class MainWindow
     }
     private static string StageLabel(string stage) => stage switch
     {
+        "wg-preflight" => "核对两端隧道", "wg-backup" => "建立两端恢复点", "wg-apply" => "应用 WireGuard 通道", "wg-validation" => "双向 TCP 与 UDP 验收", "wg-commit" => "提交两端隧道", "wg-recovery" => "协调恢复两端隧道",
         "inbound-preflight" => "核对入站资源与引用", "inbound-backup" => "建立入站范围恢复点", "inbound-apply" => "应用入站资源", "inbound-validation" => "验收入站用户与代理", "inbound-commit" => "提交入站目录", "inbound-read" => "读取入站实际状态",
         "chain-preflight" => "核对三台依赖与端口", "chain-backup" => "建立两台恢复点", "chain-apply" => "应用跨实例线路",
         "chain-validation" => "验收实际线路与既有规则", "chain-commit" => "协调提交与归档", "chain-recovery" or "tcp-chain-rollback" => "协调恢复整条线路", "tcp-chain-probe" => "检查分段 TCP 连接",

@@ -155,6 +155,16 @@ internal sealed partial class BoundaryTests
             public Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken ct) => inner.RunAsync(command, timeout, ct);
             public async Task<CommandResult> RunScriptAsync(string payload, TimeSpan timeout, bool mutation, CancellationToken ct)
             {
+                if (owner.Fault == "wireguard-udp-proof" && payload.StartsWith("# MXH asset: wireguard-proof.sh\n", StringComparison.Ordinal))
+                {
+                    var value = System.Text.RegularExpressions.Regex.Match(payload, "export VPS_PARAM_ACTION=.+?'([A-Za-z0-9+/=]*)' ");
+                    if (value.Success && Encoding.UTF8.GetString(Convert.FromBase64String(value.Groups[1].Value)) == "proof")
+                    {
+                        owner.Fault = "";
+                        var block = "set -euo pipefail\nnft add table inet may_fixture_wg_udp_block\nnft 'add chain inet may_fixture_wg_udp_block input { type filter hook input priority -110; policy accept; }'\nnft add rule inet may_fixture_wg_udp_block input iifname maywg0 ip protocol udp drop\n";
+                        (await inner.RunScriptAsync(block, TimeSpan.FromSeconds(15), true, ct)).RequireSuccess("Disposable WireGuard UDP interruption failed.");
+                    }
+                }
                 var result = await inner.RunScriptAsync(payload, timeout, mutation, ct);
                 if (result.ExitCode != 0) Console.WriteLine("VM remote failure: " + payload.Split('\n')[0] + " " + result.Error);
                 if (name == "Inbound" && owner.Fault == "inbound-commit-ack" && payload.StartsWith("# MXH asset: maintenance-transaction-commit.sh\n", StringComparison.Ordinal) && result.ExitCode == 0)

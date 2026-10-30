@@ -60,3 +60,11 @@ pwsh -NoProfile -File .\scripts\New-VpsReleasePackage.ps1 -Destination '<本地�
 解析／静态检查证明格式；模拟测试证明分支和事务判断；临时 Debian 的真实 systemd 测试证明相应生命周期；真实协议验收证明指定路径；生产观察与长测还需时间、报告新鲜度、同阶段资源和清理证据。报告必须写清缺口，不能用前一层替代后一层。
 
 所有公开文档和夹具使用占位符。不要提交私人目录、实际实例信息、签名材料或完整运行配置。上游模块名、协议字段、历史文件名和许可证按其技术含义保留，不能为了品牌统一进行盲目替换。
+
+## WireGuard 专项回归
+
+`--wireguard-only` 验证两端锁、归属、确认丢失、实际证据和恢复续做，已纳入 `--group chains`。`tests/test_wireguard.py` 的 Linux 文件边界检查在 Windows／macOS 明确跳过，由 Linux CI 补齐。完整内核与重启证据使用显式临时清单 `--wireguard-vm <manifest>`；夹具 `tests/tcp-chain-vm-fixture.py --wireguard` 只启动两台一次性 Debian，必须核对 DMI／标记并最终停止。可选 `--guest-apt-proxy` 只接受无认证 QEMU 主机网关代理，不能修改宿主或生产网络设置。
+
+原生表单用已有后台接口 `suite.wireguard`，要求零窗口激活、零前台采样。测试不允许在生产归档中生成密钥、安装组件或重启机器。详见[第二十二轮](WIREGUARD-ROUND-22-2026-10-30.zh-CN.md)。
+
+节点组原生后台回归：`suite.client-groups`（仅合成归档）；跨平台 .NET `clients` 组包含来源版本、双方案、冲突、实际配置生成／核心校验与导出拒绝测试。`tests/test_client_sources.py` 检查 Hysteria2／TUIC 的两种原生来源及联合读取。
