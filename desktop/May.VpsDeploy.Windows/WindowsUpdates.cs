@@ -46,7 +46,7 @@ public sealed class WindowsUpdates : IDisposable
             if (url != "https://github.com/mxh110708/may-vps-deploy/releases/download/" + tag + "/" + filename) throw new OperationException("发行资产来源异常。");
             return new(filename, url, digest[7..], bytes);
         }
-        return new(version, Asset(name + "-setup.exe", 300L * 1024 * 1024), Asset(name + ".files.json", 2 * 1024 * 1024), Asset("SHA256SUMS.txt", 1024 * 1024), release.Text("body"));
+        return new(version, Asset(name + "-setup.exe", 512L * 1024 * 1024), Asset(name + ".files.json", 2 * 1024 * 1024), Asset("SHA256SUMS.txt", 1024 * 1024), release.Text("body"));
     }
     public Task<string> PrepareAsync(ApplicationUpdate update, CancellationToken cancellationToken) => PrepareAsync(update, null, cancellationToken);
     public async Task<string> PrepareAsync(ApplicationUpdate update, IProgress<ApplicationUpdateProgress>? progress, CancellationToken cancellationToken)

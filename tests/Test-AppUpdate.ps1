@@ -140,6 +140,18 @@ try {
         try{Get-VpsApplicationUpdate $Root}finally{Remove-Item Function:\Invoke-RestMethod;Remove-Variable FixtureRelease -Scope Script}
     } $installed $installerRelease
     Assert-Update ($installerInfo.Available -and $installerInfo.Distribution -eq 'Installed' -and $installerInfo.Installer.name.EndsWith('-setup.exe')) 'installed app selects verified setup EXE and file manifest'
+    $installerRelease.assets[0].size=335718775
+    $largeInfo=& $updateModule {param($Root,$Release)
+        $script:FixtureRelease=$Release;function Invoke-RestMethod {return $script:FixtureRelease}
+        try{Get-VpsApplicationUpdate $Root}finally{Remove-Item Function:\Invoke-RestMethod;Remove-Variable FixtureRelease -Scope Script}
+    } $installed $installerRelease
+    Assert-Update ($largeInfo.Available -and $largeInfo.Archive.size -eq 335718775) 'complete paired-core portable asset accepted above old 300 MiB limit'
+    $installerRelease.assets[0].size=536870913
+    Assert-UpdateThrows {& $updateModule {param($Root,$Release)
+        $script:FixtureRelease=$Release;function Invoke-RestMethod {return $script:FixtureRelease}
+        try{Get-VpsApplicationUpdate $Root}finally{Remove-Item Function:\Invoke-RestMethod;Remove-Variable FixtureRelease -Scope Script}
+    } $installed $installerRelease} 'release assets still bounded at 512 MiB'
+    $installerRelease.assets[0].size=20
     $installerRelease.assets[2].browser_download_url='https://example.invalid/installer.exe'
     Assert-UpdateThrows {& $updateModule {param($Root,$Release)
         $script:FixtureRelease=$Release;function Invoke-RestMethod {return $script:FixtureRelease}

@@ -55,7 +55,8 @@ try
     Check(!File.Exists(partial + ".pub"), "public file was written before failed permission preparation");
     retryManager.Prepare(interrupted, "");
     Check(Protected(partial) && File.Exists(partial + ".pub") && partialBytes.SequenceEqual(File.ReadAllBytes(partial)), "retry replaced the private key or skipped permission repair");
-    Console.WriteLine($"PASS: {assertions} actual Windows managed-key and ACL assertions; isolated files only.");
+    await UpdateMetadataTests.Run(root, Check);
+    Console.WriteLine($"PASS: {assertions} actual Windows managed-key, ACL and bounded update metadata assertions; isolated files only.");
     using var identity = WindowsIdentity.GetCurrent();
     Console.WriteLine("elevated_administrator=" + new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator));
 }

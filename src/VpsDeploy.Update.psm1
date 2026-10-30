@@ -55,7 +55,7 @@ function Get-VpsApplicationUpdate {
     }
     foreach ($asset in $required) {
         Assert-VpsUpdateAssetUri $asset.browser_download_url $tag
-        if ($asset.size -le 0 -or $asset.size -gt 314572800) { throw '发布附件大小异常。' }
+        if ($asset.size -le 0 -or $asset.size -gt 536870912) { throw '发布附件大小异常。' }
         if ($asset.digest -notmatch '^sha256:[0-9a-f]{64}$') { throw '发布附件缺少 SHA-256。' }
     }
     $result.Archive = $archives[0]; $result.Checksums = $checksums[0]
