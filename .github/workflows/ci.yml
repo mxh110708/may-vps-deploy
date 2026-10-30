@@ -12,6 +12,7 @@ jobs:
     name: Debian ${{ matrix.debian }} VPS remote contract
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         debian: ['12', '13']
     container: debian:${{ matrix.debian }}-slim

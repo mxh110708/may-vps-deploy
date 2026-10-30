@@ -239,12 +239,15 @@ def anytls_fixture(binary,root):
 
 def exercise_ss(binary, root, server, client, http_port, echo_port, mihomo=None, ipv6=False):
     server_path = write_json(root / 'server-run.json', server)
-    tcp_port = port(); udp_port = port(kind=socket.SOCK_DGRAM)
-    client['inbounds'] = [
-        {'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': tcp_port},
-        {'type': 'direct', 'listen': '127.0.0.1', 'listen_port': udp_port, 'network': 'udp', 'override_address': '::1' if ipv6 else '127.0.0.1', 'override_port': echo_port}]
-    client_path = write_json(root / 'client-run.json', client)
     with running(binary, server_path, root, server['inbounds'][0]['listen_port']):
+        # The server owns both TCP and UDP at its chosen number. Allocate
+        # client ports only after both have been bound, otherwise an ephemeral
+        # UDP probe may select the not-yet-bound server port (seen on Debian 13).
+        tcp_port = port(); udp_port = port(kind=socket.SOCK_DGRAM)
+        client['inbounds'] = [
+            {'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': tcp_port},
+            {'type': 'direct', 'listen': '127.0.0.1', 'listen_port': udp_port, 'network': 'udp', 'override_address': '::1' if ipv6 else '127.0.0.1', 'override_port': echo_port}]
+        client_path = write_json(root / 'client-run.json', client)
         with running(binary, client_path, root, tcp_port):
             socks_http(tcp_port, http_port, ipv6)
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
