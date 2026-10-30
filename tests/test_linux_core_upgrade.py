@@ -33,10 +33,14 @@ def command(args, **kwargs):
     return result.stdout
 
 
-def port(family=socket.AF_INET, kind=socket.SOCK_STREAM):
-    with socket.socket(family, kind) as sock:
-        sock.bind(('::1' if family == socket.AF_INET6 else '127.0.0.1', 0))
-        return sock.getsockname()[1]
+def port(family=socket.AF_INET, kind=socket.SOCK_STREAM, exclude=()):
+    for _ in range(64):
+        with socket.socket(family, kind) as sock:
+            sock.bind(('::1' if family == socket.AF_INET6 else '127.0.0.1', 0))
+            selected = sock.getsockname()[1]
+            if selected not in exclude:
+                return selected
+    raise AssertionError('No distinct loopback test port available')
 
 
 def write_json(path, value):
@@ -243,7 +247,7 @@ def exercise_ss(binary, root, server, client, http_port, echo_port, mihomo=None,
         # The server owns both TCP and UDP at its chosen number. Allocate
         # client ports only after both have been bound, otherwise an ephemeral
         # UDP probe may select the not-yet-bound server port (seen on Debian 13).
-        tcp_port = port(); udp_port = port(kind=socket.SOCK_DGRAM)
+        tcp_port = port(); udp_port = port(kind=socket.SOCK_DGRAM, exclude=(server['inbounds'][0]['listen_port'], tcp_port))
         client['inbounds'] = [
             {'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': tcp_port},
             {'type': 'direct', 'listen': '127.0.0.1', 'listen_port': udp_port, 'network': 'udp', 'override_address': '::1' if ipv6 else '127.0.0.1', 'override_port': echo_port}]
