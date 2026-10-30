@@ -43,7 +43,7 @@ public sealed partial class MainWindow
             }
             await Refuses("foreign_asset_url", t => t.Release["assets"]!.AsArray()[0]!["browser_download_url"] = "https://example.invalid/installer.exe", false);
             await Refuses("missing_github_digest", t => t.Release["assets"]!.AsArray()[0]!["digest"] = "", false);
-            await Refuses("oversized_asset", t => t.Release["assets"]!.AsArray()[0]!["size"] = 300L * 1024 * 1024 + 1, false);
+            await Refuses("oversized_asset", t => t.Release["assets"]!.AsArray()[0]!["size"] = WindowsUpdates.MaximumInstallerBytes + 1, false);
             await Refuses("checksum_tamper", t => t.Corrupt = "SHA256SUMS.txt", true);
             await Refuses("installer_tamper", t => t.Corrupt = Path.GetFileName(t.Release["assets"]!.AsArray()[0]!.Text("browser_download_url")), true);
             await Refuses("download_size_overrun", t => t.Release["assets"]!.AsArray()[0]!["size"] = 1, true);

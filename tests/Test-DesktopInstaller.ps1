@@ -173,6 +173,8 @@ try{
 }catch{
  $fixtureFailure=$_
  Write-Host ('Installer lifecycle failure before cleanup: '+$_.Exception.Message)
+ $updateDiagnostic=Join-Path $app '.tmp/ui-update-proof.json'
+ if(Test-Path -LiteralPath $updateDiagnostic){Write-Host ('Installed update proof: '+(Get-Content -Raw -LiteralPath $updateDiagnostic))}
  try{
   $nativeArtifact=Join-Path $fixture 'background-native/test-artifacts'
   $flowPath=Join-Path $nativeArtifact 'native-flow.json'
