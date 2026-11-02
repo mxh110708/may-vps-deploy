@@ -99,7 +99,7 @@ internal sealed partial class BoundaryTests
         public int Port => port;
         public static async Task<Round15Client> Start(string name, string executable, JsonObject node, X509Certificate2 certificate, string directory, CancellationToken ct)
         {
-            var port = TcpPort(); JsonObject config; var controller = TcpPort(); var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+            var port = MixedPort(); JsonObject config; var controller = TcpPort(); var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
             if (name == "sing-box")
             {
                 var outbound = node["sing_box"]!.DeepClone().AsObject(); outbound["tag"] = "review"; outbound["tls"]!["certificate"] = new JsonArray(certificate.ExportCertificatePem());

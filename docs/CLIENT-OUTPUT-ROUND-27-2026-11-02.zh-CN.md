@@ -75,4 +75,6 @@ trojan://<PASSWORD>@<HOST>:<PORT>?security=tls&type=tcp&sni=<SNI>#<NAME>
 
 WinUI 通过既有后台接口 `suite.client-roundtrip` 验证12项行为，包括Base64预览、取消、输入清理、脱敏、正确编辑器、改名保留身份、复制接收器和重导入；零窗口激活、零前台采样，不读取或改写系统剪贴板。另回归原 `suite.client-share`。
 
+发行前 Actions 发现 Windows 混合监听夹具仅检查了 TCP 可用性，所选端口的 UDP 被系统拒绝。测试端口分配已改为在回环同时独占检查 TCP／UDP，加入两种单端占用和双端可用性断言；不改宿主网络、不忽略失败的协议检查。其后按新提交重建发行附件并复核 Actions。
+
 维护者使用 `--client-roundtrip-only`，模型子集为 `--client-roundtrip-model-only`；完整流程已纳入 `.NET --group clients`。Python原生来源读取测试覆盖两种QUIC、普通TLS、单／双来源及未知传输边界。主线状态见[路线图](DEPLOY-ROADMAP-2026-10-24.zh-CN.md)，其他客户端格式待明确实际需求后逐项加入。
