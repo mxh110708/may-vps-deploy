@@ -14,8 +14,9 @@ import subprocess
 import threading
 
 
-def start(ssh, address, token):
+def start(ssh, address, token, guest_port=18443):
     address=str(ipaddress.ip_address(address))
+    if guest_port not in (18443,18453):raise ValueError('Unreviewed disposable ingress port')
     program="""import os,select,socket,sys
 def readn(fd,n):
  b=b''
@@ -25,7 +26,7 @@ def readn(fd,n):
   b+=p
  return b
 s=socket.socket(socket.AF_INET6 if ':' in sys.argv[1] else socket.AF_INET,socket.SOCK_DGRAM)
-s.connect((sys.argv[1],18443))
+s.connect((sys.argv[1],int(sys.argv[2])))
 try:
  while True:
   ready,_,_=select.select([0,s],[],[],15)
@@ -39,7 +40,7 @@ try:
 except (OSError,EOFError):pass
 finally:s.close()
 """
-    command=ssh+['python3 -c '+shlex.quote(program)+' '+shlex.quote(address)]
+    command=ssh+['python3 -c '+shlex.quote(program)+' '+shlex.quote(address)+' '+str(guest_port)]
     limit=threading.BoundedSemaphore(8)
     children=set();lock=threading.Lock()
     class Handler(socketserver.StreamRequestHandler):
@@ -55,7 +56,7 @@ finally:s.close()
             self.request.settimeout(15);p=None
             try:
                 claim=json.loads(self.rfile.readline(512))
-                if not hmac.compare_digest(claim.get('Token',''),token) or claim.get('Port')!=18443:return
+                if not hmac.compare_digest(claim.get('Token',''),token) or claim.get('Port')!=guest_port:return
                 p=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,bufsize=0)
                 with lock:children.add(p)
                 while True:

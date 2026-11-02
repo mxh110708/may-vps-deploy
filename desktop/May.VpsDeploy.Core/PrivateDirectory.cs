@@ -46,6 +46,7 @@ public sealed class PrivateDirectory(ArchiveStore store)
     private static string Fingerprint(Dictionary<string, string> files) => ArchiveStore.Fingerprint(new JsonObject(files.Select(p => new KeyValuePair<string, JsonNode?>(p.Key, JsonValue.Create(p.Value)))));
     private void Ready(string target)
     {
+        ClientSourceBarrier.RequireNoPending(store);
         var source = Normal(store.Paths.Private);
         if (Directory.Exists(source)) SafePath.CheckTree(source);
         if (source.Equals(target, Comparison) || Inside(source, target) || Inside(target, source)) throw new OperationException("请选择与当前目录相互独立的新文件夹。");

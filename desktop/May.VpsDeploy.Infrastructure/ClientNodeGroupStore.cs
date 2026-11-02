@@ -20,12 +20,14 @@ public sealed class ClientNodeGroupStore(ArchiveStore store)
     {
         ClientNodeGroups.Validate(group); var file = FileName(group.Text("Id"));
         using var guard = Lock(group.Text("Id"));
+        new ClientSourceSync(store).GuardPending("Group",group.Text("Id"));
         if (File.Exists(file) ? expectedRevision == null || ClientNodeGroups.Revision(Read(group.Text("Id"))) != expectedRevision : expectedRevision != null) throw new OperationException("节点组已变化或被删除，请重新读取。");
         VerifyDependencies(group); store.WriteSecret(file, group);
     }
     public void Delete(string id, JsonObject? activeScheme = null)
     {
         using var guard = Lock(id);
+        new ClientSourceSync(store).GuardPending("Group",id);
         Read(id);
         var root = store.Paths.Resolve("private/client-schemes");
         if (Directory.Exists(root)) SafePath.CheckTree(root);
@@ -54,6 +56,7 @@ public sealed class ClientNodeGroupStore(ArchiveStore store)
     }
     public void VerifyDependencies(JsonObject group)
     {
+        new ClientSourceSync(store).GuardPending("Group",group.Text("Id"));
         if (group["Sources"] is JsonObject sources) foreach (var pair in sources) if (ClientSchemes.SourceFingerprint(pair.Key) != pair.Value!.ToString()) throw new OperationException("节点组文件来源已变化，请从更新后的方案重新保存节点组。");
         var nodes = group["Nodes"]!.AsArray().OfType<JsonObject>().ToArray();
         ManagedNodeSources.Verify(store, new JsonArray(nodes.Where(n => n["ManagedOrigin"] != null).Select(n => n["ManagedOrigin"]!.DeepClone()).ToArray()));

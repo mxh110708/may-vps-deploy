@@ -102,6 +102,7 @@ public sealed partial class MainWindow
         var activeScheme = scheme ?? throw new OperationException("请先选择方案。");
         var existing = index.HasValue ? activeScheme["Nodes"]!.AsArray()[index.Value]!.AsObject() : null;
         if (existing?["ForwardedOrigin"] != null || existing?["TcpChainOrigin"] != null || existing?["InboundOrigin"] != null || existing != null && VlessXhttp.IsNode(existing)) { await EditForwardedClientNode(existing); return; }
+        if(existing!=null&&ClientSimpleLinks.IsNode(existing)){await EditClientStreamNode(existing);return;}
         if (existing != null && (existing["sing_box"] is JsonObject native && ClientStreamTransports.IsNative(native) || existing["clash"] is JsonObject paired && ClientStreamTransports.IsClash(paired))) { await EditClientStreamNode(existing); return; }
         string Read(string primary, string fallback, string defaultValue = "") => existing == null ? defaultValue : existing.Text(primary, existing.Text(fallback, defaultValue));
         var echLines = existing?.At("sing_box.tls.ech.config") as JsonArray;

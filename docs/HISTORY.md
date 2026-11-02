@@ -6,6 +6,12 @@
 
 | 记录 | 原文件 |
 | --- | --- |
+| [第二十七轮：分享与客户端输出往返](CLIENT-OUTPUT-ROUND-27-2026-11-02.zh-CN.md) | `CLIENT-OUTPUT-ROUND-27-2026-11-02.zh-CN.md` |
+| [第二十六轮：服务器分类规则与版本恢复（v0.9.40）](SERVER-RULESETS-ROUND-26-2026-11-01.zh-CN.md) | `SERVER-RULESETS-ROUND-26-2026-11-01.zh-CN.md` |
+| [第二十五轮：来源与跨方案同步（v0.9.40）](SOURCE-SYNC-ROUND-25-2026-11-01.zh-CN.md) | `SOURCE-SYNC-ROUND-25-2026-11-01.zh-CN.md` |
+| [追加功能：共享实例的多线路管理（此前误标25，v0.9.40）](SHARED-CHAINS-ROUND-25-2026-11-01.zh-CN.md) | `SHARED-CHAINS-ROUND-25-2026-11-01.zh-CN.md` |
+| [第二十四轮：WireGuard 接入跨实例线路（v0.9.40）](CHAIN-WIREGUARD-ROUND-24-2026-11-01.zh-CN.md) | `CHAIN-WIREGUARD-ROUND-24-2026-11-01.zh-CN.md` |
+| [第二十三轮：节点组复用与输出一致性](CLIENT-GROUPS-ROUND-23-2026-10-30.zh-CN.md) | `CLIENT-GROUPS-ROUND-23-2026-10-30.zh-CN.md` |
 | [第二十二轮：WireGuard 实例间加密通道](WIREGUARD-ROUND-22-2026-10-30.zh-CN.md) | `WIREGUARD-ROUND-22-2026-10-30.zh-CN.md` |
 | [第二十一轮：双地址族 TCP 与限定 UDP 编排](CHAIN-ROUND-21-2026-10-30.zh-CN.md) | `CHAIN-ROUND-21-2026-10-30.zh-CN.md` |
 | [第二十轮：完整 XHTTP 客户端与配套流程](XHTTP-ROUND-20-2026-10-29.zh-CN.md) | `XHTTP-ROUND-20-2026-10-29.zh-CN.md` |
@@ -35,8 +41,8 @@
 | [首页历史内容存档](HISTORICAL-README-2026-10-27.zh-CN.md) | `HISTORICAL-README-2026-10-27.zh-CN.md` |
 | [Hugging Face Hub 与下载 CDN 的路由分类修复](HUGGINGFACE-RESEARCH-ROUTING-2026-10-22.zh-CN.md) | `HUGGINGFACE-RESEARCH-ROUTING-2026-10-22.zh-CN.md` |
 | [原计划第十四轮：Hysteria2 部署与维护闭环](HYSTERIA2-ROUND-14-2026-10-25.zh-CN.md) | `HYSTERIA2-ROUND-14-2026-10-25.zh-CN.md` |
-| [第十五轮：Hysteria2 分享与端口跳跃（未发行）](HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md) | `HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md` |
-| [第十六轮：TUIC v5 独立入站（未发行）](TUIC-ROUND-16-2026-10-28.zh-CN.md) | `TUIC-ROUND-16-2026-10-28.zh-CN.md` |
+| [第十五轮：Hysteria2 分享与端口跳跃（v0.9.40）](HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md) | `HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md` |
+| [第十六轮：TUIC v5 独立入站（v0.9.40）](TUIC-ROUND-16-2026-10-28.zh-CN.md) | `TUIC-ROUND-16-2026-10-28.zh-CN.md` |
 | [原定第十三轮：通用多入站资源模型](INBOUND-MODEL-ROUND-13-2026-10-25.zh-CN.md) | `INBOUND-MODEL-ROUND-13-2026-10-25.zh-CN.md` |
 | [交互维护与回归约定](INTERACTION-MAINTENANCE.md) | `INTERACTION-MAINTENANCE.md` |
 | [Komari 旧备份 Linux 隔离补测](KOMARI-LINUX-SUPPLEMENT-2026-10-11.zh-CN.md) | `KOMARI-LINUX-SUPPLEMENT-2026-10-11.zh-CN.md` |

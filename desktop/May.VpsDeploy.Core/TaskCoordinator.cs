@@ -55,10 +55,26 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         if (request.Kind == OperationKind.TcpChain)
         {
             var config = request.Options["Configuration"]!.AsObject();
-            foreach (var instance in TcpChains.Instances(config))
+            foreach (var instance in TcpChains.Participants(store, request))
                 foreach (var name in new[] { "deployment-plan.json", "deployment-state.json", "secrets.dotnet.private.json", "operation-pending.dotnet.json" }) files[instance + ":" + name] = ClientSchemes.SourceFingerprint(SafePath.Resolve(store.Paths.Instance(instance), name));
+            files["ChainDependencies"] = new JsonArray(TcpChains.List(store).Where(r => TcpChains.Instances(r["Configuration"]!.AsObject()).Intersect(TcpChains.Participants(store, request), StringComparer.OrdinalIgnoreCase).Any()).Select(r => (JsonNode?)r.DeepClone()).ToArray());
+            if (request.Options.Text("Action") is "Apply" or "Remove")
+                foreach (var sibling in TcpChains.Preserved(store, config))
+                {
+                    files["SharedSource:" + sibling.Text("Configuration.Id")] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, sibling.Text("Configuration.Landing.SchemeId")));
+                    if (TcpChainUnderlay.Selected(sibling["Configuration"]!.AsObject()))
+                    {
+                        files["SharedUnderlay:" + sibling.Text("Configuration.Id")] = ClientSchemes.SourceFingerprint(WireGuardTunnels.FileName(store.Paths, sibling.Text("Configuration.WireGuard.Id")));
+                        foreach (var name in new[] { "scripts/wireguard-host.py", "scripts/wireguard-runtime.py", "assets/remote/wireguard-read.sh", "assets/remote/wireguard-proof.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
+                    }
+                }
             files["ChainRecord"] = ClientSchemes.SourceFingerprint(TcpChains.FileName(store.Paths, config.Text("Id")));
             files["ChainSource"] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, config.Text("Landing.SchemeId")));
+            if (TcpChainUnderlay.Selected(config))
+            {
+                files["ChainWireGuard"] = ClientSchemes.SourceFingerprint(WireGuardTunnels.FileName(store.Paths, config.Text("WireGuard.Id")));
+                foreach (var name in new[] { "scripts/wireguard-host.py", "scripts/wireguard-runtime.py", "assets/remote/wireguard-read.sh", "assets/remote/wireguard-proof.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
+            }
             foreach (var name in new[] { "scripts/udp-forwarding.py", "scripts/udp-forward-worker.py", "scripts/inbound-host.py", "assets/remote/udp-forward-read.sh", "assets/remote/udp-forward-apply.sh", "assets/remote/inbound-read.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
             foreach (var name in new[] { "scripts/forwarding-host.py", "scripts/tcp-forwarding.py", "assets/remote/audit.sh", "assets/remote/tcp-chain-probe.sh", "assets/remote/tcp-chain-rollback.sh", "assets/remote/tcp-forward-read.sh", "assets/remote/tcp-forward-apply.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/protocol-migration-trigger-rollback.sh", "assets/remote/maintenance-transaction-commit.sh", "assets/remote/maintenance-transaction-status.sh", "assets/remote/maintenance-mutation-guard.sh", "assets/remote/nftables-apply.sh", "assets/remote/firewall-preflight.sh", "assets/remote/firewall-tools.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
         }
@@ -156,7 +172,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         var locks = new ParticipantLocks();
         try
         {
-            var instances = request.Kind == OperationKind.WireGuardTunnel ? WireGuardTunnels.Instances(request.Options["Configuration"]!.AsObject()) : request.Kind == OperationKind.TcpChain ? TcpChains.Instances(request.Options["Configuration"]!.AsObject()) : [request.InstanceRelativePath];
+            var instances = request.Kind == OperationKind.WireGuardTunnel ? WireGuardTunnels.Instances(request.Options["Configuration"]!.AsObject()) : request.Kind == OperationKind.TcpChain ? TcpChains.Participants(store, request) : [request.InstanceRelativePath];
             foreach (var instance in instances.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase)) locks.Items.Add(store.LockInstance(instance));
             return locks;
         }

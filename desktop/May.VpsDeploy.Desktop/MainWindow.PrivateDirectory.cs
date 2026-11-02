@@ -13,17 +13,27 @@ public sealed partial class MainWindow
     private async Task ChangePrivateDirectory()
     {
         if (backgroundTest) throw new OperationException("后台测试不打开系统目录选择器；归档迁移由隔离回归验证。");
-        if (SchemeChanged && !await ExitScheme(false)) return;
-        var picker = new global::Windows.Storage.Pickers.FolderPicker(); picker.FileTypeFilter.Add("*");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        var folder = await picker.PickSingleFolderAsync(); if (folder == null) return;
-        var mover = new PrivateDirectory(store); var review = await Task.Run(() => mover.Review(folder.Path));
-        if (await ShowDialog(PrivateDirectoryDialog(review)) != ContentDialogResult.Primary) return;
-        PrivateDirectoryResult? result = null;
-        scheme = null;
-        await RunBackground("迁移私人归档", async token => result = await Task.Run(() => mover.Move(review, token, WindowsPrivateDirectoryAccess.Prepare), token));
-        scheme = null; SelectPage("settings");
-        Show(result!.SourceRemoved ? "归档目录已修改，现有数据已迁移并校验，旧副本已移除。" : "新归档目录已启用。旧目录仍有被占用或变化的文件，已保留，请核对后清理。", result.SourceRemoved ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+        if (sourceSyncBusy) throw new OperationException("来源缓存正在刷新，请待本次下载结束后迁移归档。");
+        sourceSyncTimer.Stop();
+        try
+        {
+            if (SchemeChanged && !await ExitScheme(false)) return;
+            var picker = new global::Windows.Storage.Pickers.FolderPicker(); picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var folder = await picker.PickSingleFolderAsync(); if (folder == null) return;
+            var mover = new PrivateDirectory(store); var review = await Task.Run(() => mover.Review(folder.Path));
+            if (await ShowDialog(PrivateDirectoryDialog(review)) != ContentDialogResult.Primary) return;
+            PrivateDirectoryResult? result = null;
+            scheme = null;
+            await RunBackground("迁移私人归档", async token => result = await Task.Run(() => mover.Move(review, token, WindowsPrivateDirectoryAccess.Prepare), token));
+            scheme = null; SelectPage("settings");
+            Show(result!.SourceRemoved ? "归档目录已修改，现有数据已迁移并校验，旧副本已移除。" : "新归档目录已启用。旧目录仍有被占用或变化的文件，已保留，请核对后清理。", result.SourceRemoved ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+        }
+        finally
+        {
+            try { if (!closing && new May.VpsDeploy.Infrastructure.ClientSourceSync(store).HasSchedules()) sourceSyncTimer.Start(); }
+            catch (Exception) { if (!closing) Show("来源定时策略需要核对，请打开来源中心。", InfoBarSeverity.Warning); }
+        }
     }
     private ContentDialog PrivateDirectoryDialog(PrivateDirectoryReview review) => OperationDialog("修改归档目录", Column(
         Text("当前目录", 14), Text(review.Source, 14, true), Text("新目录", 14), Text(review.Destination, 14, true),

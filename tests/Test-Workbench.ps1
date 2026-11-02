@@ -13,7 +13,7 @@ $module=Get-Module VpsDeploy.Core
     [IO.Directory]::CreateDirectory($temporary)|Out-Null
     try{
         $scheme=New-MxhClientScheme $root
-        $node=@{name='Fixture-Entry';kind='entry';region_group=$scheme.Layout.region_groups[0];transit_group=$null;clash=@{name='Fixture-Entry';type='vless';server='192.0.2.20';port=443};sing_box=@{tag='Fixture-Entry';type='vless';server='192.0.2.20';server_port=443;tls=@{reality=@{enabled=$true}}}}
+        $node=@{name='Fixture-Entry';kind='entry';region_group=$scheme.Layout.region_groups[0];transit_group=$null;clash=@{name='Fixture-Entry';type='vless';server='192.0.2.20';port=443;tls=$true};sing_box=@{tag='Fixture-Entry';type='vless';server='192.0.2.20';server_port=443;tls=@{enabled=$true;reality=@{enabled=$true}}}}
         $scheme.Entries=@(@{Id='fixture';Node=$node;Source=@{Kind='Manual'}})
         $hash=Get-MxhSchemeHash $scheme
         Check ($hash -eq (Get-MxhSchemeHash $scheme)) 'spec hash is deterministic'

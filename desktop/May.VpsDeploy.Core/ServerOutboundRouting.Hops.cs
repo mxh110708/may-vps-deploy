@@ -36,6 +36,7 @@ public static partial class ServerOutboundRouting
     public static IReadOnlyDictionary<string, string> HopFamilies(JsonNode? value) => HopReferences(value).OfType<JsonObject>().ToDictionary(h => h.Text("Id"), h => Family(h.Text("ExpectedAddress")), StringComparer.Ordinal);
     private static JsonObject ReadHopNode(ArchiveStore store, string instance, JsonObject reference)
     {
+        ClientSourceBarrier.RequireAvailable(store,"Scheme",reference.Text("SchemeId"));
         var source = store.ReadSecret(SchemeFile(store.Paths, reference.Text("SchemeId")));
         try
         {

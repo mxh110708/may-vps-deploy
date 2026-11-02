@@ -51,7 +51,8 @@ internal sealed partial class BoundaryTests
             Check(rejected.Accepted == 0 && rejected.Rows.All(r => r.Node == null && !r.Message.Contains("synthetic") && !r.Message.Contains("password@")), "unsupported/malformed link accepted or leaked credentials");
         }
         Refuses(() => ClientNodeImport.Preview(new string('x', ClientNodeImport.MaximumCharacters + 1), scheme, "Europe Entry"), "unbounded import accepted");
-        Refuses(() => ClientNodeImport.Preview(new string('\n', 201), scheme, "Europe Entry"), "unbounded import line count");
+        Refuses(() => ClientNodeImport.Preview(string.Join('\n',Enumerable.Repeat("invalid://node",201)), scheme, "Europe Entry"), "unbounded import node line count");
+        Check(ClientNodeImport.Preview(new string('\n',201),scheme,"Europe Entry").Rows.Count==0,"blank padding became importable nodes");
         var regions = ClientTopology.Regions(scheme); Check(regions.Count == 1 && regions[0].Entries.Count == 3 && regions[0].Landings.Count == 1, "topology mixed node roles");
         var route = ClientTopology.DiagnosticRoute(scheme, "Entry", "Landing"); var raw = ArchiveStore.Fingerprint(scheme);
         var directRoute = ClientTopology.DiagnosticRoute(scheme, "Entry"); var directConfig = ClientTopology.DiagnosticConfiguration(directRoute, 12005, 12006);

@@ -52,6 +52,7 @@ public static partial class ServerOutboundRouting
             if (policy.Count > 0) { metadata["DestinationRules"] = policy; metadata["DestinationRulesNetwork"] = "tcp"; }
             if (named.Count > 0) metadata["AdditionalHops"] = named;
         }
+        RequireBoundedConfiguration(result);
         return new(result, metadata, Summary("RealityEntry", string.Join("、", tags) + "（主／备用与双栈监听共同使用此出口）", previous, metadata));
     }
 }

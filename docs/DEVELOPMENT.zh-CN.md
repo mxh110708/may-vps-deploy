@@ -1,6 +1,6 @@
 # 开发与验证
 
-日常使用请下载发行包；本页面向修改源码的维护者。先读[仓库约定](../AGENTS.md)、[安全说明](SECURITY.md)和[架构](DOTNET-ARCHITECTURE.zh-CN.md)。文档以 v0.9.38 的目录和脚本为基准。
+日常使用请下载发行包；本页面向修改源码的维护者。先读[仓库约定](../AGENTS.md)、[安全说明](SECURITY.md)和[架构](DOTNET-ARCHITECTURE.zh-CN.md)。发行基线为 v0.9.40，后续未发行源码的范围与验证以各轮记录为准。
 
 ## 结构
 
@@ -63,8 +63,20 @@ pwsh -NoProfile -File .\scripts\New-VpsReleasePackage.ps1 -Destination '<本地�
 
 ## WireGuard 专项回归
 
+共享实例追加功能的 `--shared-chains-only` 已纳入 `--group chains`，覆盖共享前置／中转、角色交叉、共享落地、TCP／UDP 共存、逐线路来源、待恢复和补偿。实际双线路用 `--shared-chains-vm <全新三机清单> IPv4` 与 `IPv6`；夹具 `tests/tcp-chain-vm-fixture.py --round21 --shared-chains` 仅开放两个固定测试入口，IPv6 矩阵另加 `--chain-underlay` 验证共享 WireGuard。各组显式预算、后台执行并清理；WinUI 仍用 `suite.tcp-chain`，详见[追加功能](SHARED-CHAINS-ROUND-25-2026-11-01.zh-CN.md)。原未发行入口曾误称 `chain25`，现按功能命名，历史日志不改写。
+
 `--wireguard-only` 验证两端锁、归属、确认丢失、实际证据和恢复续做，已纳入 `--group chains`。`tests/test_wireguard.py` 的 Linux 文件边界检查在 Windows／macOS 明确跳过，由 Linux CI 补齐。完整内核与重启证据使用显式临时清单 `--wireguard-vm <manifest>`；夹具 `tests/tcp-chain-vm-fixture.py --wireguard` 只启动两台一次性 Debian，必须核对 DMI／标记并最终停止。可选 `--guest-apt-proxy` 只接受无认证 QEMU 主机网关代理，不能修改宿主或生产网络设置。
 
 原生表单用已有后台接口 `suite.wireguard`，要求零窗口激活、零前台采样。测试不允许在生产归档中生成密钥、安装组件或重启机器。详见[第二十二轮](WIREGUARD-ROUND-22-2026-10-30.zh-CN.md)。
 
 节点组原生后台回归：`suite.client-groups`（仅合成归档）；跨平台 .NET `clients` 组包含来源版本、双方案、冲突、实际配置生成／核心校验与导出拒绝测试。`tests/test_client_sources.py` 检查 Hysteria2／TUIC 的两种原生来源及联合读取。
+
+第二十四轮的 `--chain24-only` 已纳入 `--group chains`，覆盖两段 WireGuard 引用、旧线路回归、业务证据和补偿。实际矩阵分别用 `--chain24-vm <全新三机清单> FrontRelay` 与 `RelayLanding`，每段使用另一套全新夹具；`tests/tcp-chain-vm-fixture.py --round21 --chain-underlay` 安装测试所需的 WireGuard 工具并限制启动预算。界面复用 `suite.tcp-chain`，禁止可见窗口。此入口不授权生产操作，详见[第二十四轮](CHAIN-WIREGUARD-ROUND-24-2026-11-01.zh-CN.md)。
+
+## 来源同步与服务器分类专项
+
+原定第二十五、二十六轮分别使用 `--source-sync-only` 和 `--server-rule-sets-only`，并纳入 `--group clients`。前者覆盖调度、真实回环下载／代理、多个方案与节点组的批量事务及恢复；后者包含模型及固定核心的 AnyTLS／Reality 分类、附加落地、新旧版本实际路径。模型子集 `--server-rule-sets-model-only` 不等于实际连接验收。使用固定 `MAY_TEST_XRAY`，测试会核对其摘要；缺少核心不能记为通过。
+
+第二十七轮使用 `--client-roundtrip-only`；其模型子集为 `--client-roundtrip-model-only`，完整模型及双核心真实协议矩阵已纳入 clients 组。原生后台接口新增 `suite.client-roundtrip` 并回归 `suite.client-share`；只用合成数据、隔离复制接收器和原生控件接口，不弹窗或修改系统剪贴板。详见[第二十七轮](CLIENT-OUTPUT-ROUND-27-2026-11-02.zh-CN.md)。
+
+WinUI 使用既有隐藏接口 `suite.source-sync`、`suite.server-rule-sets`，继续回归 `suite.server-outbound`。合成归档中的定时器禁止联网，下载另由受控本机服务器验证；全部要求零窗口激活与零前台采样。调度身份索引不含 URL，实际缓存和事务使用加密私人归档，不可作为公开测试附件。用例、使用与边界见[第二十五轮](SOURCE-SYNC-ROUND-25-2026-11-01.zh-CN.md)、[第二十六轮](SERVER-RULESETS-ROUND-26-2026-11-01.zh-CN.md)。

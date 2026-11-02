@@ -11,8 +11,8 @@ public sealed partial class MainWindow
     {
         var selected = scheme ?? throw new OperationException("请先打开方案。");
         var model = new JsonObject { ["Region"] = selected["Layout"]!.Strings("region_groups").First(), ["Role"] = "Auto" };
-        var input = new TextBox { Header = "每行一个分享链接", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 180, MaxLength = ClientNodeImport.MaximumCharacters, Tag = "ClientLinks.Input" };
-        var panel = Column(Text("支持 VLESS Reality + Vision、TLS WS／gRPC 的 VLESS／Trojan、AnyTLS、Shadowsocks、Hysteria2（含标准多端口）。先逐条预览，不支持的参数会明确拒绝。链接含凭据，只保存到方案的加密私人归档。", 14, true), input,
+        var input = new TextBox { Header = "分享链接列表（纯文本或 Base64）", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 180, MaxLength = ClientNodeImport.MaximumInputCharacters, Tag = "ClientLinks.Input" };
+        var panel = Column(Text("支持 VLESS Reality／TLS、TLS WS／gRPC 的 VLESS／Trojan、普通 TLS Trojan、AnyTLS、Shadowsocks、Hysteria2 和 TUIC v5。最多200个节点，解码后256 KiB；先逐条预览，不能完整表达的参数会明确拒绝。链接含凭据，只保存到方案的加密私人归档。", 14, true), input,
             Choice("入口归属 / 落地连接的入口组", model, "Region", selected["Layout"]!.Strings("region_groups").Select(r => (r, r))),
             Choice("节点用途", model, "Role", [("Auto", "默认：SS 作为落地，其余作为入口"), ("entry", "全部作为入口"), ("landing", "全部作为落地")]));
         var dialog = OperationDialog("导入外部节点", panel, "预览");

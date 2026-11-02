@@ -135,6 +135,15 @@ internal sealed partial class BoundaryTests
     {
         public string Address => address; public FakeRemote Inner { get; } = new(); public JsonObject? Configuration { get; set; } public JsonObject? InboundState { get; set; } private JsonObject? original;
         public bool Unavailable { get; set; } public bool Drift { get; set; } public string Failure { get; set; } = ""; public string? MachineAddress { get; set; } public int ApplyCalls { get; private set; } public int Compensations { get; private set; }
+        public JsonObject? WireGuard { get; set; }
+        public bool SplitTransports { get; set; }
+        public JsonObject? UdpConfiguration { get; set; }
+        private JsonObject? originalUdp;
+        private bool udpTransaction;
+        public string WireGuardFailure { get; set; } = "";
+        public int WireGuardReads { get; private set; }
+        public int WireGuardProofStarts { get; private set; }
+        public int WireGuardProofStops { get; private set; }
         public Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken ct) => Inner.RunAsync(command, timeout, ct);
         public async Task<CommandResult> RunScriptAsync(string payload, TimeSpan timeout, bool mutating, CancellationToken ct)
         {
@@ -142,12 +151,36 @@ internal sealed partial class BoundaryTests
             string Parameter(string name) { var match = Regex.Match(payload, "export VPS_PARAM_" + name + "=.+?'([A-Za-z0-9+/=]*)' "); return match.Success ? Encoding.UTF8.GetString(Convert.FromBase64String(match.Groups[1].Value)) : ""; }
             static string Marker(string name, string value) => "VPSDEPLOY_" + name + "_B64=" + Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) + "\n";
             var prefix = asset.StartsWith("udp-", StringComparison.Ordinal) ? "UDP_FORWARD" : "TCP_FORWARD";
-            if (asset is "tcp-forward-read.sh" or "udp-forward-read.sh") return new(0, Marker(prefix + "_STATE", new JsonObject { ["Hash"] = Drift ? new string('f', 64) : Configuration == null ? "Absent" : ArchiveStore.Fingerprint(Configuration), ["Configuration"] = Configuration?.DeepClone(), ["TemplateCurrent"] = true }.ToJsonString()) + "VPSDEPLOY_" + prefix + "_READ\n", "");
+            if (asset == "wireguard-read.sh")
+            {
+                WireGuardReads++;
+                var drift = WireGuardFailure == "wg-drift" || WireGuardFailure == "wg-late-drift" && WireGuardReads >= 3;
+                return new(0, Marker("WIREGUARD_STATE", new JsonObject { ["Hash"] = drift ? new string('f',64) : ArchiveStore.Fingerprint(WireGuard!), ["Configuration"] = WireGuard?.DeepClone(), ["Healthy"] = true }.ToJsonString()) + "VPSDEPLOY_WIREGUARD_READ\n", "");
+            }
+            if (asset == "wireguard-proof.sh")
+            {
+                if (Parameter("ACTION") == "proof-start") WireGuardProofStarts++;
+                else if (Parameter("ACTION") == "proof-stop") WireGuardProofStops++;
+                else
+                {
+                    var proof = new JsonObject { ["Status"] = "Passed", ["Scope"] = "WireGuardPeerApplication", ["TCP"] = true, ["UDP"] = WireGuardFailure != "wg-missing-udp", ["ResponseMatched"] = true,
+                        ["ChallengeDigest"] = WireGuardFailure == "wg-stale" ? new string('f',64) : ArchiveStore.Digest(Encoding.UTF8.GetBytes("may-wireguard:" + Parameter("PROOF_NONCE"))) };
+                    return new(0, Marker("WIREGUARD_PROOF", proof.ToJsonString()) + "VPSDEPLOY_WIREGUARD_PROOF_DONE\n", "");
+                }
+                return new(0,"VPSDEPLOY_WIREGUARD_PROOF_DONE\n","");
+            }
+            if (asset.StartsWith("wireguard-", StringComparison.Ordinal)) throw new Exception("Chain attempted to mutate or rebuild the existing WireGuard component");
+            if (asset is "tcp-forward-read.sh" or "udp-forward-read.sh")
+            {
+                var config=SplitTransports && asset=="udp-forward-read.sh"?UdpConfiguration:Configuration;
+                return new(0, Marker(prefix + "_STATE", new JsonObject { ["Hash"] = Drift ? new string('f', 64) : config == null ? "Absent" : ArchiveStore.Fingerprint(config), ["Configuration"] = config?.DeepClone(), ["TemplateCurrent"] = true }.ToJsonString()) + "VPSDEPLOY_" + prefix + "_READ\n", "");
+            }
             if (asset == "inbound-read.sh") return new(0, Marker("INBOUND_STATE", InboundState!.ToJsonString()) + "VPSDEPLOY_INBOUND_READ\n", "");
-            if (asset == "protocol-migration-arm-rollback.sh") { original = Configuration?.DeepClone().AsObject(); Inner.StatusTaskId = Parameter("CONTROL_TASK_ID"); Inner.StatusPhase = Failure == "arm-before" ? "Preparing" : "Armed"; if (Failure is "arm-ack" or "arm-before") throw new IOException("synthetic lost snapshot acknowledgement"); }
+            if (asset == "protocol-migration-arm-rollback.sh") { udpTransaction=SplitTransports && Parameter("COMPONENTS").Split(',').Contains("UdpForwarding");original = Configuration?.DeepClone().AsObject(); originalUdp=UdpConfiguration?.DeepClone().AsObject(); Inner.StatusTaskId = Parameter("CONTROL_TASK_ID"); Inner.StatusPhase = Failure == "arm-before" ? "Preparing" : "Armed"; if (Failure is "arm-ack" or "arm-before") throw new IOException("synthetic lost snapshot acknowledgement"); }
             if (asset is "tcp-forward-apply.sh" or "udp-forward-apply.sh")
             {
-                owner.Events.Add(address + ":apply"); ApplyCalls++; Configuration = Parameter("ACTION") == "Remove" ? null : JsonNode.Parse(Parameter("CONFIG_JSON"))!.AsObject();
+                owner.Events.Add(address + ":apply"); ApplyCalls++; var config = Parameter("ACTION") == "Remove" ? null : JsonNode.Parse(Parameter("CONFIG_JSON"))!.AsObject();
+                if(SplitTransports && asset=="udp-forward-apply.sh")UdpConfiguration=config;else Configuration=config;
                 if (Failure == "apply-ack") throw new IOException("synthetic lost apply acknowledgement");
                 return new(0, "VPSDEPLOY_" + prefix + "_APPLIED\n", "");
             }
@@ -162,7 +195,7 @@ internal sealed partial class BoundaryTests
             if (asset is "protocol-migration-trigger-rollback.sh" or "tcp-chain-rollback.sh")
             {
                 if (Failure == "rollback") throw new IOException("synthetic recovery disconnected");
-                Configuration = original?.DeepClone().AsObject();
+                if(udpTransaction)UdpConfiguration=originalUdp?.DeepClone().AsObject();else Configuration = original?.DeepClone().AsObject();
                 if (asset == "tcp-chain-rollback.sh") { Compensations++; Inner.StatusPhase = "ChainRolledBack"; if (Failure == "compensation-ack") throw new IOException("synthetic lost compensation acknowledgement"); return new(0, "VPSDEPLOY_TCP_CHAIN_ROLLED_BACK\n", ""); }
             }
             return await Inner.RunScriptAsync(payload, timeout, mutating, ct);

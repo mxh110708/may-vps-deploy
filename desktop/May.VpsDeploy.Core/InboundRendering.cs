@@ -16,7 +16,7 @@ public static partial class InboundRendering
     public static JsonObject ResolveOutbound(ArchiveStore store, string instance, JsonObject outbound)
     {
         if (outbound.Text("Kind") == "Direct") return new JsonObject { ["type"] = "direct", ["tag"] = "egress", ["domain_resolver"] = new JsonObject { ["server"] = "local", ["strategy"] = outbound.Text("Family") switch { "IPv4" => "ipv4_only", "IPv6" => "ipv6_only", _ => "prefer_ipv4" } } };
-        var reference = outbound["Source"]!; var scheme = store.ReadSecret(ServerOutboundRouting.SchemeFile(store.Paths, reference.Text("SchemeId")));
+        var reference = outbound["Source"]!;ClientSourceBarrier.RequireAvailable(store,"Scheme",reference.Text("SchemeId")); var scheme = store.ReadSecret(ServerOutboundRouting.SchemeFile(store.Paths, reference.Text("SchemeId")));
         try
         {
             var node = scheme["Nodes"]!.AsArray().OfType<JsonObject>().SingleOrDefault(n => n.Text("Id") == reference.Text("NodeId")) ?? throw new OperationException("出站来源节点已移除。");

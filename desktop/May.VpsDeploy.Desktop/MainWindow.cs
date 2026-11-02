@@ -91,9 +91,10 @@ public sealed partial class MainWindow : Window, IUserInteraction
                 catch (Exception error) { Show(error is OperationException safe ? safe.Message : "方案未能保存，窗口保持打开。", InfoBarSeverity.Error); }
             }
         };
-        Closed += (_, _) => { CancelNodeReorder(); StopNetworkScheduler(); StopMonitoring(); trayIcon?.Dispose(); trayIcon = null; };
+        Closed += (_, _) => { CancelNodeReorder(); StopNetworkScheduler(); StopMonitoring(); StopSourceSync(); trayIcon?.Dispose(); trayIcon = null; };
         SetAppearance(settings.Text("Appearance", "Dark"));
         InitializeMonitoring();
+        InitializeSourceSync();
         InitializeWindowPlacement();
         root.Loaded += (_, _) => { Program.Trace(arguments, "Root Loaded"); StartNetworkScheduler(); };
         root.Loaded += async (_, _) => { SelectPage("overview"); if (fontFallback) Show("所选字体暂时不可用，已使用内置原版字体。可在设置中重新选择或导入。", InfoBarSeverity.Warning); if (testSession != null) { StartTestSession(); return; } if (arguments.Contains("--verify-installed-update")) { await InstalledUpdateSmoke(); return; } if (arguments.Contains("--ui-smoke") || arguments.Contains("--verify-runtime")) { await UiSmoke(); return; } if (settings.Flag("AutoCheckUpdates")) await CheckUpdates(true); };
@@ -205,7 +206,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
             {
                 var route = plan.At("ServerOutbound." + role) as JsonObject;
                 var description = route == null ? "指定 Shadowsocks 落地，执行前审阅并备份" : route.Text("Name") + " · " + route.Text("EgressFamily") + "\n" + ServerOutboundRouting.SourcesSummary(store, route);
-                details.Children.Add(SettingsGroup(SettingRow(ServerOutboundRouting.Label(role) + " · 固定下一跳", description, Symbol.Forward, Action("配置出站", () => ServerOutboundSheet(relative, plan, role)))));
+                details.Children.Add(SettingsGroup(SettingRow(ServerOutboundRouting.Label(role) + " · 固定下一跳", description, Symbol.Forward, Row(Action("配置出站", () => ServerOutboundSheet(relative, plan, role)),Action("分类规则库",ServerRuleSetLibrary)))));
             }
             var health = InstanceState(relative)["HealthReport"] as JsonObject;
             if (health?["Checks"] is JsonArray checks)

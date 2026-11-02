@@ -5,7 +5,7 @@ using May.VpsDeploy.Core;
 
 namespace May.VpsDeploy.Infrastructure;
 
-public sealed class ClientSubscriptionDownload
+public sealed class ClientSubscriptionDownload : IClientSourceFetch
 {
     public const int MaximumBytes = 524288;
     public async Task<string> FetchAsync(JsonObject source, CancellationToken cancellationToken)

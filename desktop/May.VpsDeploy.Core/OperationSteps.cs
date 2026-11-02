@@ -28,13 +28,17 @@ public static class OperationSteps
         if (request.Kind == OperationKind.TcpChain)
         {
             if (request.Options.Text("Action") == "Recover") { Add("chain-recovery", "协调恢复整条线路", "按原任务身份恢复前置与中转，核对原资源和管理连接。"); return steps; }
-            Add("chain-preflight", "核对三台依赖与端口", "核对实际机器身份、管理连接、配置摘要、端口及来源限制。");
+            var removingChain = request.Options.Text("Action") == "Remove";
+            var checksUnderlay = !removingChain && TcpChainUnderlay.Selected(request.Options["Configuration"]!.AsObject());
+            Add("chain-preflight", "核对三台依赖与端口", "核对实际机器身份、管理连接、配置摘要、端口及来源限制。" + (checksUnderlay ? "同时核对所选 WireGuard 双端的实际身份与路由。" : ""));
             if (request.Options.Text("Action") != "Check")
             {
                 Add("chain-backup", "建立两台恢复点", "分别保存本次转发与必要的受管防火墙，启用限时回退。");
                 Add("chain-apply", request.Options.Text("Action") == "Remove" ? "从前向后移除线路" : "从后向前应用线路", "逐台核对实际规则；保留其他转发及落地代理。");
             }
-            Add("chain-validation", "验收实际线路与既有规则", "分段 TCP 与整链代理 HTTPS 分别核验，再核对资源和管理连接。");
+            Add("chain-validation", removingChain ? "验收移除与既有规则" : "验收实际线路与既有规则", removingChain
+                ? "核对本线路规则已移除、既有转发及管理连接；保留独立 WireGuard，不要求通道健康。"
+                : "分段 TCP 与整链代理 HTTPS 分别核验，再核对资源和管理连接。" + (checksUnderlay ? "WireGuard 双向 TCP／UDP 随机挑战必须通过。" : ""));
             if (request.Options.Text("Action") != "Check") Add("chain-commit", "协调提交与归档", "逐台提交后同步依赖；部分提交失败时按本次快照补偿。");
             return steps;
         }

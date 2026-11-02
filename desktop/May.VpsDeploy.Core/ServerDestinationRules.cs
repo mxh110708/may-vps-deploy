@@ -13,7 +13,7 @@ public sealed record ServerDestinationDecision(string Action, string Target);
 public static class ServerDestinationRules
 {
     public const int MaximumRules = 32;
-    public static string KindLabel(string kind) => kind switch { "Domain" => "完整域名", "Suffix" => "域名及其子域名", "Cidr" => "目标 IP 网段", _ => throw new OperationException("请选择受支持的匹配类型。") };
+    public static string KindLabel(string kind) => kind switch { "Domain" => "完整域名", "Suffix" => "域名及其子域名", "Cidr" => "目标 IP 网段", "RuleSet" => "分类规则集", _ => throw new OperationException("请选择受支持的匹配类型。") };
     public static string ActionLabel(string action) => action switch { "NextHop" => "所选落地", "Direct" => "入口机直连", "Reject" => "阻断", _ => throw new OperationException("请选择受支持的出站动作。") };
     public static JsonArray Normalize(JsonNode? value)
     {
@@ -22,13 +22,18 @@ public static class ServerDestinationRules
         var result = new JsonArray(); var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in input)
         {
-            if (item is not JsonObject rule || rule.Count is < 3 or > 4 || rule.Any(p => p.Key is not ("Kind" or "Value" or "Action" or "Target") || p.Value is not JsonValue text || !text.TryGetValue<string>(out _))) throw new OperationException("分流规则字段无效。");
+            if (item is not JsonObject rule || rule.Count is < 3 or > 5 || rule.Any(p => p.Key is not ("Kind" or "Value" or "Action" or "Target" or "RuleSet") || p.Key!="RuleSet"&&(p.Value is not JsonValue text || !text.TryGetValue<string>(out _)))) throw new OperationException("分流规则字段无效。");
             var kind = rule.Text("Kind"); var action = rule.Text("Action"); KindLabel(kind); ActionLabel(action);
             var target = rule.Text("Target"); if (target != "") { if (action != "NextHop") throw new OperationException("只有落地动作可以指定附加落地。"); ServerOutboundRouting.HopId(target); }
             var raw = rule.Text("Value");
             if (raw.Length is < 1 or > 300 || raw.Any(char.IsControl)) throw new OperationException("请填写一个域名或 CIDR 网段，不支持控制字符。");
             string canonical;
-            if (kind == "Cidr")
+            if (kind == "RuleSet")
+            {
+                canonical=ServerRuleSets.Id(raw);var snapshot=ServerRuleSets.Normalize(rule["RuleSet"]);if(snapshot.Text("Id")!=canonical)throw new OperationException("分类引用与规则集快照身份不同。");
+            }
+            else if(rule.ContainsKey("RuleSet"))throw new OperationException("只有分类匹配可以持有规则集快照。");
+            else if (kind == "Cidr")
             {
                 var parts = raw.Trim().Split('/');
                 if (parts.Length != 2 || !IPAddress.TryParse(parts[0], out var address) || address.IsIPv4MappedToIPv6 || parts[0].Contains('%') || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var prefix) || prefix < 0 || prefix > address.GetAddressBytes().Length * 8) throw new OperationException("网段需为 IPv4/前缀或 IPv6/前缀，不支持主机名、范围或作用域标识。");
@@ -38,8 +43,9 @@ public static class ServerDestinationRules
             }
             else canonical = Domain(raw);
             if (!seen.Add(kind + ":" + canonical)) throw new OperationException("存在重复匹配项，请删除重复项或调整范围。");
-            var normalized = new JsonObject { ["Kind"] = kind, ["Value"] = canonical, ["Action"] = action }; if (target != "") normalized["Target"] = target; result.Add(normalized);
+            var normalized = new JsonObject { ["Kind"] = kind, ["Value"] = canonical, ["Action"] = action }; if (target != "") normalized["Target"] = target;if(kind=="RuleSet")normalized["RuleSet"]=ServerRuleSets.Normalize(rule["RuleSet"]); result.Add(normalized);
         }
+        _=ServerRuleSets.Expand(result).Count();
         return result;
     }
     private static string Domain(string raw)
@@ -57,7 +63,7 @@ public static class ServerDestinationRules
         if (network != "tcp") throw new OperationException("本轮只试算 TCP；UDP 保持固定落地。");
         var isIp = IPAddress.TryParse(destination, out var ip); var host = isIp ? "" : Domain(destination);
         if (ip?.IsIPv4MappedToIPv6 == true) ip = ip.MapToIPv4();
-        foreach (var rule in rules.OfType<JsonObject>())
+        foreach (var rule in ServerRuleSets.Expand(rules))
         {
             var value = rule.Text("Value");
             var matches = rule.Text("Kind") switch
@@ -84,7 +90,7 @@ public static class ServerDestinationRules
         var targets = rules.OfType<JsonObject>().Where(r => r.Text("Target") != "").Select(r => r.Text("Target")).ToHashSet(StringComparer.Ordinal);
         if (targets.Any(id => !additionalFamilies.ContainsKey(id))) throw new OperationException("规则引用的附加落地已不存在，请重新选择，不会改用默认落地。");
         if (additionalFamilies.Keys.Any(id => !targets.Contains(id))) throw new OperationException("附加落地没有规则引用，请先添加规则或移除不用的落地。");
-        foreach (var rule in rules.OfType<JsonObject>().Where(r => r.Text("Kind") == "Cidr" && r.Text("Action") != "Reject"))
+        foreach (var rule in ServerRuleSets.Expand(rules).Where(r => r.Text("Kind") == "Cidr" && r.Text("Action") != "Reject"))
         {
             var isV6 = IPAddress.Parse(rule.Text("Value").Split('/')[0]).AddressFamily == AddressFamily.InterNetworkV6;
             var targetFamily = rule.Text("Target") == "" ? family : additionalFamilies[rule.Text("Target")];
@@ -100,7 +106,7 @@ public static class ServerDestinationRules
     {
         if (!ServerOutboundRouting.Roles.Contains(role)) throw new OperationException("请选择受支持的入站组件。");
         var result = new JsonArray();
-        foreach (var item in rules.OfType<JsonObject>())
+        foreach (var item in ServerRuleSets.Expand(rules))
         {
             var kind = item.Text("Kind"); var value = item.Text("Value"); var action = item.Text("Action");
             var rule = new JsonObject { [role == "RealityEntry" ? "inboundTag" : "inbound"] = new JsonArray(inboundTags.Select(t => (JsonNode?)JsonValue.Create(t)).ToArray()), ["network"] = "tcp" };
@@ -124,6 +130,6 @@ public static class ServerDestinationRules
     public static string Summary(JsonNode? value, IReadOnlyDictionary<string, string>? names = null)
     {
         var rules = Normalize(value);
-        return rules.Count == 0 ? "未设置分流例外，全部按固定落地处理。" : "TCP 分流例外，按顺序首条命中：\n" + string.Join('\n', rules.OfType<JsonObject>().Select((r, i) => $"{i + 1}. {KindLabel(r.Text("Kind"))} {r.Text("Value")} → {DecisionLabel(new(r.Text("Action"), r.Text("Target")), names)}")) + "\n未命中：所选落地。UDP 不应用这些例外，始终按原固定落地处理。域名按原始目标匹配，IP 网段只匹配 IP 目标，不新增 DNS 解析或嗅探。直连规则明确使用入口机出口；落地故障不会触发直连。";
+        return rules.Count == 0 ? "未设置分流例外，全部按固定落地处理。" : "TCP 分流例外，按顺序首条命中：\n" + string.Join('\n', rules.OfType<JsonObject>().Select((r, i) => $"{i + 1}. {KindLabel(r.Text("Kind"))} {(r.Text("Kind")=="RuleSet"?r.Text("RuleSet.Name")+" v"+r.Text("RuleSet.Revision")+" · "+ServerRuleSets.Digest(r["RuleSet"]!.AsObject())[..8]+" · "+r["RuleSet"]!["Rules"]!.AsArray().Count+" 项":r.Text("Value"))} → {DecisionLabel(new(r.Text("Action"), r.Text("Target")), names)}")) + "\n未命中：所选落地。UDP 不应用这些例外，始终按原固定落地处理。域名按原始目标匹配，IP 网段只匹配 IP 目标，不新增 DNS 解析或嗅探。直连规则明确使用入口机出口；落地故障不会触发直连。规则集采用已审阅的固定版本，不在服务器后台拉取。";
     }
 }

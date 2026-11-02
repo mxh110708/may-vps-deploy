@@ -155,8 +155,11 @@ public sealed partial class MainWindow
             case "suite.monitor-access":
             case "suite.client-output":
             case "suite.client-groups":
+            case "suite.source-sync":
+            case "suite.server-rule-sets":
             case "suite.server-outbound":
             case "suite.client-share":
+            case "suite.client-roundtrip":
             case "suite.tcp-forward":
             case "suite.tcp-chain":
             case "suite.wireguard":
@@ -190,8 +193,11 @@ public sealed partial class MainWindow
                         if (command is "suite.run" or "suite.monitor-access") await Run("monitor_access", MonitorAccessRegression);
                         if (command is "suite.run" or "suite.client-output") await Run("client_output", ClientOutputRegression);
                         if (command is "suite.run" or "suite.client-groups") await Run("client_groups", ClientGroupRegression);
+                        if (command is "suite.run" or "suite.source-sync") await Run("source_sync", SourceSyncRegression);
+                        if (command is "suite.run" or "suite.server-rule-sets") await Run("server_rule_sets", ServerRuleSetRegression);
                         if (command is "suite.run" or "suite.server-outbound") await Run("server_outbound", ServerOutboundRegression);
                         if (command is "suite.run" or "suite.client-share") await Run("client_share", ClientShareRegression);
+                        if (command is "suite.run" or "suite.client-roundtrip") await Run("client_roundtrip", ClientRoundtripRegression);
                         if (command is "suite.run" or "suite.tcp-forward") await Run("tcp_forward", TcpForwardRegression);
                         if (command is "suite.run" or "suite.wireguard") await Run("wireguard", WireGuardRegression);
                         if (command is "suite.run" or "suite.tcp-chain") await Run("tcp_chain", TcpChainRegression);

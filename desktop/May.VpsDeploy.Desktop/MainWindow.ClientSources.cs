@@ -17,7 +17,7 @@ public sealed partial class MainWindow
         var dialog = OperationDialog("添加订阅来源", new ScrollViewer { MaxHeight = 480, Content = Column(Field("来源名称", source, "Name"), address, mode, proxy,
             Choice("入口归属 / 落地连接的入口组", source, "Region", scheme["Layout"]!.Strings("region_groups").Select(r => (r, r))),
             Choice("默认节点用途", source, "Role", [("Auto", "SS 作为落地，其余作为入口"), ("entry", "全部作为入口"), ("landing", "全部作为落地")]),
-            Text("支持纯文本及 Base64 分享链接列表。只在点击获取或刷新时联网，先预览新增、变化和删除；失败或取消保留原节点。", 14, true)) }, "获取并预览");
+            Text("支持纯文本及 Base64 分享链接列表。默认手动获取，先预览新增、变化和删除；保存方案后可在来源中心启用定时缓存与跨方案同步。失败或取消保留原节点。", 14, true)) }, "获取并预览");
         try { if (await ShowDialog(dialog) != ContentDialogResult.Primary) return; source["Url"] = address.Password.Trim(); }
         finally { address.Password = ""; }
         await FetchClientSubscription(source);
@@ -53,7 +53,7 @@ public sealed partial class MainWindow
                 foreach (var node in scheme["Nodes"]!.AsArray().OfType<JsonObject>().Where(n => n.Text("Source.Id") == source.Text("Id"))) ClientSubscriptions.Detach(node);
                 sources.Remove(source); DirtyScheme();
             })))).ToArray();
-        page.Children.Add(Details("订阅来源（手动刷新）", SettingsGroup(rows)));
+        page.Children.Add(Details("本方案来源（定时与批量同步见来源中心）", SettingsGroup(rows)));
     }
     private Task DetachClientSourceNode(JsonObject node)
     { ClientSubscriptions.Detach(node); DirtyScheme(); return Task.CompletedTask; }

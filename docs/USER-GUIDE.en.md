@@ -1,6 +1,6 @@
 # Desktop walkthrough
 
-Baseline: May VPS Deploy v0.9.39 on Windows amd64. The Chinese [full manual](USER-GUIDE.zh-CN.md) covers all current desktop workflows; this guide gives the installation, acceptance and recovery sequence in English.
+Baseline: May VPS Deploy v0.9.40 on Windows amd64. The Chinese [full manual](USER-GUIDE.zh-CN.md) covers all current desktop workflows; this guide gives the installation, acceptance and recovery sequence in English.
 
 ## Install
 
@@ -82,3 +82,29 @@ Open **Manage tunnel** from an instance and select a second trusted managed host
 ## Reusable node groups (v0.9.39)
 
 In the Nodes step, save selected members together with their upstream dependencies. Reuse the encrypted snapshot in another scheme, review changes before synchronizing, and regenerate/validate before export. Local conflicts are not overwritten. Detach to retain an independent snapshot. A changed or missing group invalidates old exports; native Hysteria2 and TUIC sources are retained without dropping fields. See the [detailed workflow](CLIENT-GROUPS-ROUND-23-2026-10-30.zh-CN.md).
+
+## Shared hosts (additional feature, v0.9.40)
+
+Chain management lists every chain using the selected host. Create another chain with distinct listener ports to reuse front or relay hosts; each chain retains its own source, bindings, rule fingerprints and checks. Review includes all affected surviving paths, whose hosts and sources are locked and whose real proxy traffic is revalidated after a shared change. Removing one chain preserves the others and any borrowed tunnel. Lost commit acknowledgements use identity reconciliation and the current component snapshot. An unresolved transaction blocks dependent changes. A shared component restart can briefly interrupt existing sessions; this is not a zero-downtime update. See the [additional feature guide](SHARED-CHAINS-ROUND-25-2026-11-01.zh-CN.md); this work was previously mislabeled round 25.
+
+## WireGuard-backed chains (round 24, v0.9.40)
+
+First accept a tunnel between the front and relay, or between the relay and exit. In chain management select that adjacent pair under the instance connection field. One hop uses the existing private IPv4 peer addresses; the other hop and public ingress keep the selected family. The exit must listen on the actual connection address. WireGuard outer IPv4/IPv6 is independent of the public ingress family.
+
+Review pins both peers and their remote resource digests. Execution checks fresh bidirectional TCP/UDP challenges, the original proxy protocol, HTTPS and required application UDP through the complete chain, then rechecks before commit. It never falls back to a public target. Removing or compensating a chain preserves its tunnel; remove the dependent chain before retiring the tunnel. Changed identities or a known failed tunnel check invalidate client source eligibility. This work is included in v0.9.40; see the [round 24 guide](CHAIN-WIREGUARD-ROUND-24-2026-11-01.zh-CN.md).
+
+## Source synchronization (round 25, v0.9.40)
+
+Save the current draft, then open the source center from the Nodes step. Fetch a staged encrypted cache, select schemes and node groups, review additions, removals, renames and conflicts, and explicitly confirm the batch. Any conflict blocks the entire batch. Incomplete local transactions have a recovery entry; independent later edits are not overwritten. Regenerate and validate outputs after synchronization.
+
+Scheduling is opt-in, with a 15–1440 minute interval while Deploy is running. It stages caches and notices only, never automatically rewrites schemes, exported configurations or servers. Closing the app cancels downloads; unused sources are disabled at the next due check. Downloads retain bounded redirects, size/time limits and the selected proxy. See [round 25](SOURCE-SYNC-ROUND-25-2026-11-01.zh-CN.md).
+
+## Versioned server classifications (round 26, v0.9.40)
+
+Maintain fixed domain/CIDR versions in the instance page's rule-set library. Import or manually fetch a revision, review its digest and changes, then explicitly select the snapshot and action in server outbound configuration. Library updates and selecting a historic library head do not alter installed server policies. Applying or restoring a snapshot still requires review and real-path acceptance; UDP retains the existing fixed next hop.
+
+Initial categories cover campus/domestic academic sites, research/datasets, development tools and Google AI services with academic exceptions excluded. Server Direct uses the VPS egress, not your local campus IP: use client-side campus Direct for institution-licensed databases. Existing Shadowsocks, Hysteria2 and core-dependent TUIC next-hop support remains unchanged. See [round 26](SERVER-RULESETS-ROUND-26-2026-11-01.zh-CN.md).
+
+## Share and native output round trips (round 27, v0.9.40)
+
+Import plain or Base64 lists directly, up to 200 nodes and 256 KiB decoded. TUIC v5 and plain TLS VLESS/Trojan connections support reviewed URI sharing and reimport; native Mihomo and sing-box configurations preserve their fields. Unsupported advanced options require full configuration output. See [round 27](CLIENT-OUTPUT-ROUND-27-2026-11-02.zh-CN.md).

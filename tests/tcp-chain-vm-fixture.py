@@ -26,8 +26,11 @@ def main():
     parser.add_argument('--project', required=True, type=Path)
     parser.add_argument('--round21', action='store_true')
     parser.add_argument('--wireguard', action='store_true')
+    parser.add_argument('--chain-underlay', action='store_true', help='Provision WireGuard tools in the three-guest chain fixture.')
+    parser.add_argument('--shared-chains', action='store_true', help='Allow two fixed disposable controller ingress ports for round 25.')
     parser.add_argument('--guest-apt-proxy', help='Optional test-only HTTP proxy through QEMU host gateway; no authentication.')
     parser.add_argument('--lifetime', type=int, default=3600, choices=range(180,3601))
+    parser.add_argument('--startup-timeout', type=int, default=600, choices=range(120,901))
     args = parser.parse_args()
     if os.geteuid() != 0 or not Path('/dev/kvm').exists():
         raise RuntimeError('Explicit disposable KVM fixture requires WSL root and KVM.')
@@ -46,8 +49,12 @@ def main():
         raise RuntimeError('Pinned official sing-box archive hash does not match.')
     qemu = args.runtime / 'qemu'
     env = dict(os.environ, LD_LIBRARY_PATH=str(qemu / 'usr/lib/x86_64-linux-gnu'), QEMU_MODULE_DIR=str(qemu / 'usr/lib/x86_64-linux-gnu/qemu'))
+    startup_deadline = time.monotonic() + args.startup_timeout
 
     def command(argv, **kwargs):
+        remaining = startup_deadline - time.monotonic()
+        if remaining <= 0: raise TimeoutError('Disposable fixture startup budget exceeded.')
+        kwargs['timeout'] = min(kwargs.get('timeout', remaining), remaining)
         result = subprocess.run([str(v) for v in argv], capture_output=True, text=True, **kwargs)
         if result.returncode:
             raise RuntimeError('Disposable fixture command failed: ' + result.stderr[-2200:] + result.stdout[-1200:])
@@ -76,9 +83,11 @@ def main():
             identity = str(uuid.uuid4())
             (work / 'meta-data').write_text('instance-id: may-tcp-chain-' + identity + '\nlocal-hostname: may-chain-' + name.lower() + '\n')
             (work / 'user-data').write_text('#cloud-config\ndisable_root: false\nssh_pwauth: false\nssh_authorized_keys:\n  - ' + key.with_suffix('.pub').read_text().strip() + '\npackage_update: true\npackages: [nftables, python3, iproute2]\nwrite_files:\n  - path: /etc/may-tcp-chain-fixture\n    permissions: "0600"\n    content: ' + identity + '\n  - path: /etc/ssh/sshd_config.d/30-may-test-ports.conf\n    content: |\n      Port 22\n      Port 2222\nruncmd:\n  - [systemctl, restart, ssh]\n')
-            if args.wireguard:
+            if args.wireguard or args.chain_underlay or args.shared_chains:
                 cloud = (work / 'user-data').read_text()
-                cloud = cloud.replace('packages: [nftables, python3, iproute2]', 'packages: [nftables, python3, iproute2, wireguard-tools]')
+                if args.wireguard or args.chain_underlay:
+                    cloud = cloud.replace('packages: [nftables, python3, iproute2]', 'packages: [nftables, python3, iproute2, wireguard-tools]')
+                cloud = cloud.replace('write_files:\n', 'write_files:\n  - path: /etc/apt/apt.conf.d/99-may-fixture\n    content: |\n      Acquire::Languages "none";\n      Acquire::IndexTargets::deb-src::Sources::DefaultEnabled "false";\n')
                 if args.guest_apt_proxy:
                     cloud = cloud.replace('package_update: true', 'apt:\n  proxy: "'+args.guest_apt_proxy+'"\npackage_update: true')
                 (work / 'user-data').write_text(cloud)
@@ -100,6 +109,7 @@ def main():
             nodes[name] = {'Name': name, 'Address': address, 'ManagementPort': ssh_port, 'RescuePort': rescue, 'ApplicationPort': app, 'FixtureId': identity, 'KeyFile': command(['wslpath', '-w', key]).stdout.strip(), 'Pid': process.pid, 'Debian': version}
             (work / 'session.json').write_text(json.dumps(dict(nodes[name], Ssh=ssh)))
             for attempt in range(100):
+                if time.monotonic() >= startup_deadline: raise TimeoutError('Disposable fixture startup budget exceeded.')
                 if process.poll() is not None:
                     raise RuntimeError('QEMU startup failed: ' + (work / 'qemu.log').read_text()[-1200:])
                 response = subprocess.run(ssh + ['true'], capture_output=True, timeout=6)
@@ -127,12 +137,15 @@ def main():
                     import importlib.util
                     spec=importlib.util.spec_from_file_location('ingress',args.project/'tests/chain-fixture-channel.py');channel=importlib.util.module_from_spec(spec);spec.loader.exec_module(channel)
                     for family,target in [('IPv4',address),('IPv6',nodes[name]['IPv6'])]:
-                        entry=port()
                         target='['+target+']' if ':' in target else target
-                        forward=subprocess.Popen(ssh[:-1]+['-N','-o','ExitOnForwardFailure=yes','-L','127.0.0.1:'+str(entry)+':'+target+':18443',ssh[-1]],stdout=subprocess.DEVNULL,stderr=(work/('ingress-'+family+'.log')).open('w'))
-                        processes.append(forward)
-                        token=secrets.token_urlsafe(32);datagrams=channel.start(ssh,nodes[name]['IPv6'] if family=='IPv6' else address,token);channels.append(datagrams)
-                        nodes[name]['Ingress'+family]={'ApplicationPort':entry,'DatagramTunnelPort':datagrams.server_address[1],'DatagramTunnelToken':token}
+                        ingress={}
+                        for guest_port in ([18443,18453] if args.shared_chains and name=='Front' else [18443]):
+                            entry=port()
+                            forward=subprocess.Popen(ssh[:-1]+['-N','-o','ExitOnForwardFailure=yes','-L','127.0.0.1:'+str(entry)+':'+target+':'+str(guest_port),ssh[-1]],stdout=subprocess.DEVNULL,stderr=(work/('ingress-'+family+'-'+str(guest_port)+'.log')).open('w'))
+                            processes.append(forward)
+                            token=secrets.token_urlsafe(32);datagrams=channel.start(ssh,nodes[name]['IPv6'] if family=='IPv6' else address,token,guest_port);channels.append(datagrams)
+                            ingress[str(guest_port)]={'ApplicationPort':entry,'DatagramTunnelPort':datagrams.server_address[1],'DatagramTunnelToken':token}
+                        nodes[name]['Ingress'+family]=dict(ingress['18443'],Ports=ingress)
             print(name, 'Debian', version, 'disposable guest ready', flush=True)
             if name == 'Landing':
                 import io

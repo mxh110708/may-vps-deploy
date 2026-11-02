@@ -8,6 +8,7 @@ public sealed class ClientShareExport(ArchiveStore store)
 {
     public string Generate(JsonObject scheme, ClientSharePreview preview, IReadOnlyList<string> selected, string format)
     {
+        ClientSourceBarrier.RequireAvailable(store,"Scheme",scheme.Text("Id"));
         new ClientNodeGroupStore(store).Verify(scheme);
         var text = ClientShareLinks.Generate(scheme, preview, selected, format);
         var chosen = selected.ToHashSet(StringComparer.Ordinal);

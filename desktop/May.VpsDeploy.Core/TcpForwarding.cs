@@ -95,7 +95,7 @@ public static class TcpForwarding
     }
     public static JsonObject ProxyNode(ArchiveStore store, JsonObject rule, string? changingInstance = null)
     {
-        var source = rule["Validation"]!.AsObject(); var scheme = store.ReadSecret(ServerOutboundRouting.SchemeFile(store.Paths, source.Text("SchemeId")));
+        var source = rule["Validation"]!.AsObject();ClientSourceBarrier.RequireAvailable(store,"Scheme",source.Text("SchemeId")); var scheme = store.ReadSecret(ServerOutboundRouting.SchemeFile(store.Paths, source.Text("SchemeId")));
         var node = (scheme["Nodes"] as JsonArray)?.OfType<JsonObject>().SingleOrDefault(n => n.Text("Id") == source.Text("NodeId")) ?? throw new OperationException("代理验收来源已移除，请重新选择。");
         if (ArchiveStore.Fingerprint(node) != source.Text("NodeFingerprint")) throw new OperationException("代理验收来源已变化，请重新选择并审阅。");
         if (node.Text("sing_box.type") is "hysteria2" or "tuic") throw new OperationException("Hysteria2 和 TUIC 使用 UDP/QUIC，不能作为仅 TCP 透明转发的协议目标。");

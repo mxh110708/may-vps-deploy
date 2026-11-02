@@ -15,6 +15,7 @@ public sealed record ClientImportPreview(string SchemeFingerprint, IReadOnlyList
 public static partial class ClientNodeImport
 {
     public const int MaximumCharacters = 262144;
+    public const int MaximumInputCharacters = 524288;
     public const int MaximumLines = 200;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
@@ -27,11 +28,17 @@ public static partial class ClientNodeImport
 
     public static ClientImportPreview Preview(string input, JsonObject scheme, string region, string role = "Auto")
     {
-        if (input.Length > MaximumCharacters) throw new OperationException("一次最多粘贴 256 KiB 的节点链接。");
+        if (input.Length > MaximumInputCharacters) throw new OperationException("编码前输入最多 512 KiB，解码后的节点链接最多 256 KiB。");
+        input=input.Trim().TrimStart('\uFEFF');
+        if(!input.Contains("://",StringComparison.Ordinal)&&input.Length>0)
+        {
+            try{input=ClientSubscriptions.Decode(input);}catch(OperationException){} // Keep malformed input as a rejected row; never echo it.
+        }
+        try{if(input.Length>MaximumCharacters||Utf8.GetByteCount(input)>MaximumCharacters)throw new OperationException("解码后的节点链接最多 256 KiB。");}catch(EncoderFallbackException){throw new OperationException("节点列表包含无效 Unicode 编码。");}
         if (!scheme["Layout"]!.Strings("region_groups").Contains(region)) throw new OperationException("请选择有效的入口组。");
         if (role is not ("Auto" or "entry" or "landing")) throw new OperationException("节点用途无效。");
         var lines = input.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        if (lines.Length > MaximumLines) throw new OperationException("一次最多导入 200 行；每行一个节点链接。");
+        if (lines.Count(l=>!string.IsNullOrWhiteSpace(l)) > MaximumLines) throw new OperationException("一次最多导入 200 个节点；每行一个节点链接。");
         var names = scheme["Nodes"]!.AsArray().Select(n => n!.Text("name")).ToHashSet(StringComparer.Ordinal);
         names.UnionWith(scheme["Layout"]!.Strings("region_groups"));
         names.UnionWith(scheme["Layout"]!["business_groups"]!.AsArray().Select(g => g!.Text("name")));
@@ -79,7 +86,7 @@ public static partial class ClientNodeImport
         if (separator < 1) throw new OperationException("每行需为一个完整的节点分享链接。");
         var protocol = text[..separator].ToLowerInvariant();
         if (protocol is "hysteria2" or "hy2") return ParseHysteria2(text);
-        if (protocol is not ("vless" or "trojan" or "anytls" or "ss")) throw new OperationException("支持 VLESS Reality + Vision、TLS WS／gRPC 的 VLESS／Trojan、AnyTLS、Shadowsocks 和 Hysteria2；此协议暂不支持。");
+        if (protocol is not ("vless" or "trojan" or "anytls" or "ss" or "tuic")) throw new OperationException("支持 VLESS、Trojan、AnyTLS、Shadowsocks、Hysteria2 和 TUIC v5 的受支持连接；此协议暂不支持。");
         var uri = new Uri(text, UriKind.Absolute);
         if (uri.AbsolutePath is not ("" or "/") || uri.Host.Length == 0 || uri.Port == 0 || uri.Port > 65535) throw new OperationException("服务器地址、端口或链接路径无效。");
         var host = uri.IdnHost.Trim('[', ']').ToLowerInvariant();
@@ -92,7 +99,9 @@ public static partial class ClientNodeImport
         var clash = new JsonObject { ["name"] = name, ["server"] = host, ["port"] = port };
         var sing = new JsonObject { ["tag"] = name, ["server"] = host, ["server_port"] = port };
         var auth = Decode(uri.UserInfo);
+        if(protocol=="tuic")return ParseTuic(name,host,port,auth,query);
         if(protocol=="vless"&&query.GetValueOrDefault("type")=="xhttp")return ParseXhttp(name,host,port,auth,query);
+        if((protocol=="trojan"||protocol=="vless"&&query.GetValueOrDefault("security")=="tls")&&query.GetValueOrDefault("type","tcp") is "tcp" or "raw")return ParseTlsTcp(protocol,name,host,port,auth,query);
         if (protocol == "trojan" || protocol == "vless" && query.GetValueOrDefault("type") is "ws" or "grpc") return ParseStream(protocol, name, host, port, auth, query);
         if (protocol == "ss")
         {
@@ -123,7 +132,7 @@ public static partial class ClientNodeImport
         {
             RequireKeys(query, ["security", "type", "encryption", "flow", "sni", "fp", "pbk", "sid", "alpn", "spx"]);
             if (!Guid.TryParseExact(auth, "D", out var uuid)) throw new OperationException("VLESS UUID 无效。");
-            if (query.GetValueOrDefault("security") != "reality" || query.GetValueOrDefault("flow") != "xtls-rprx-vision" || query.GetValueOrDefault("type", "tcp") != "tcp" || query.GetValueOrDefault("encryption", "none") != "none") throw new OperationException("当前仅导入 TCP 的 VLESS Reality + Vision 链接。");
+            if (query.GetValueOrDefault("security") != "reality" || query.GetValueOrDefault("flow") != "xtls-rprx-vision" || query.GetValueOrDefault("type", "tcp") is not ("tcp" or "raw") || query.GetValueOrDefault("encryption", "none") != "none") throw new OperationException("此分支仅导入 TCP 的 VLESS Reality + Vision 链接。");
             // spiderX has no sing-box equivalent. Refuse a nonempty value rather than drop it.
             if (query.GetValueOrDefault("spx", "") != "") throw new OperationException("当前双客户端导入不支持 spiderX 参数，请核对后移除此参数。");
             var key = query.GetValueOrDefault("pbk", "");

@@ -69,6 +69,7 @@ public static class WireGuardTunnels
         if (record != null && !JsonNode.DeepEquals(record["Configuration"], c)) throw new OperationException("隧道记录与审阅不符，请重新读取。");
         if (action == "Apply" && record != null || action != "Apply" && record == null) throw new OperationException("隧道操作与当前记录不符；修改参数须先移除旧隧道。");
         if (action == "Recover" ? record == null || !Pending(record) : record != null && (Pending(record) || record.Text("Phase") != "Active")) throw new OperationException("请先完成待恢复的隧道事务。");
+        if (action == "Remove") TcpChainUnderlay.GuardRemoval(store, c.Text("Id"));
         var plans = Instances(c).Select(i => TcpChains.Plan(store, i)).ToArray();
         foreach (var (instance, index) in Instances(c).Select((v, i) => (v, i)))
         {

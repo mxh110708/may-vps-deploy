@@ -11,7 +11,7 @@ using May.VpsDeploy.Infrastructure;
 
 internal sealed partial class BoundaryTests
 {
-    private async Task RealityOutboundLoopback(Fixture f, bool withRules = false, bool withHops = false)
+    private async Task RealityOutboundLoopback(Fixture f, bool withRules = false, bool withHops = false,bool withRuleSets=false)
     {
         var xray = Environment.GetEnvironmentVariable("MAY_TEST_XRAY");
         if (!OperatingSystem.IsWindows() || string.IsNullOrEmpty(xray)) { Console.WriteLine("SKIP: actual Reality fixture requires Windows and MAY_TEST_XRAY; portable routing/lifecycle boundaries still run."); return; }
@@ -70,8 +70,9 @@ internal sealed partial class BoundaryTests
             redactions.AddRange([secrets.Text("Xray.Uuid"), serverKey, userKey]);
             var node = new JsonObject { ["name"] = "Reality fixture landing", ["sing_box"] = new JsonObject { ["type"] = "shadowsocks", ["tag"] = "landing", ["server"] = "192.0.2.20", ["server_port"] = landingPort, ["method"] = "2022-blake3-aes-128-gcm", ["password"] = serverKey + ":" + userKey } };
             var extraNode = node.DeepClone().AsObject(); extraNode["name"] = "Extra Reality fixture landing"; extraNode["sing_box"]!["server"] = "192.0.2.21"; extraNode["sing_box"]!["server_port"] = extraPort;
-            JsonObject EntryConfiguration(JsonArray? policy)
+            var ruleGeneration=0;JsonObject EntryConfiguration(JsonArray? policy)
             {
+                if(withRuleSets&&policy!=null)policy=LoopbackRuleSets(policy,++ruleGeneration);
                 var result = ServerOutboundRouting.Build("RealityEntry", ServerConfigurations.Xray(plan, secrets), null, node, "198.51.100.20", plan, destinationRules: policy, additionalHops: withHops ? [new(HopA, extraNode, "198.51.100.21")] : null).Configuration;
                 result["log"] = new JsonObject { ["loglevel"] = "debug" };
                 foreach (var inbound in result["inbounds"]!.AsArray()) inbound!["listen"] = "127.0.0.1";
@@ -126,8 +127,15 @@ internal sealed partial class BoundaryTests
                 Check(await Request(mixedPrimary, "localhost") == "reality-ok" && await Request(mixedBackup, "localhost") == "reality-ok" && requests == 4, "Reality primary/backup explicit direct rule failed or order was ignored");
                 entryProcess.Kill(true); await entryProcess.WaitForExitAsync(stop.Token);
                 var suffixOnly = LoopbackDestinationRules(); suffixOnly.RemoveAt(0); suffixOnly[0]!["Action"] = "Direct";
-                await Start("entry-suffix", xray, EntryConfiguration(suffixOnly), primary);
+                if(withRuleSets)suffixOnly[1]!["Action"]="Direct";
+                var newer=await Start("entry-suffix", xray, EntryConfiguration(suffixOnly), primary);
                 Check(await Request(mixedPrimary, "localhost") == "reality-ok" && requests == 5, "Xray suffix did not include its root domain");
+                if(withRuleSets)
+                {
+                    using(var handler=new HttpClientHandler{UseProxy=true,Proxy=new WebProxy("http://127.0.0.1:"+mixedPrimary)})using(var via=new HttpClient(handler){Timeout=TimeSpan.FromSeconds(3)})Check(await via.GetStringAsync("http://127.0.0.2:"+deniedTarget!.Port,stop.Token)=="denied-ok","Xray new rule-set version did not apply direct action");
+                    newer.Kill(true);await newer.WaitForExitAsync(stop.Token);await Start("entry-category-restored",xray,rendered,primary);await CheckDeniedTarget(mixedPrimary,deniedTarget!,stop.Token);
+                    Check(await Request(mixedPrimary,"localhost")=="reality-ok"&&await Request(mixedBackup,"localhost")=="reality-ok","restored category version lost Reality primary/backup routing");
+                }
             }
         }
         catch { failed = true; throw; }

@@ -10,7 +10,7 @@ using May.VpsDeploy.Infrastructure;
 
 internal sealed partial class BoundaryTests
 {
-    private async Task ServerOutboundLoopback(Fixture f, bool withRules = false, bool withHops = false)
+    private async Task ServerOutboundLoopback(Fixture f, bool withRules = false, bool withHops = false,bool withRuleSets=false)
     {
         if (!OperatingSystem.IsWindows()) { Console.WriteLine("SKIP: server route runtime fixture requires the bundled Windows core; portable boundaries still run."); return; }
         var assets = new ValidationAssets(new AppPaths(repository), "windows-amd64"); var executable = assets.ResolveCore("sing-box"); var tools = new ExternalToolRunner();
@@ -64,8 +64,9 @@ internal sealed partial class BoundaryTests
             var serverKey = ServerConfigurations.RandomKey(); var userKey = ServerConfigurations.RandomKey();
             var node = new JsonObject { ["name"] = "Loopback landing", ["sing_box"] = new JsonObject { ["type"] = "shadowsocks", ["tag"] = "landing", ["server"] = "192.0.2.20", ["server_port"] = landingPort, ["method"] = "2022-blake3-aes-128-gcm", ["password"] = serverKey + ":" + userKey } };
             var extraNode = node.DeepClone().AsObject(); extraNode["name"] = "Extra loopback landing"; extraNode["sing_box"]!["server"] = "192.0.2.21"; extraNode["sing_box"]!["server_port"] = extraPort;
-            JsonObject EntryConfiguration(JsonArray? policy)
+            var ruleGeneration=0;JsonObject EntryConfiguration(JsonArray? policy)
             {
+                if(withRuleSets&&policy!=null)policy=LoopbackRuleSets(policy,++ruleGeneration);
                 var result = ServerOutboundRouting.Build("AnyTlsEntry", current, null, node, "198.51.100.20", plan, destinationRules: policy, additionalHops: withHops ? [new(HopA, extraNode, "198.51.100.21")] : null).Configuration;
                 // Only this fixture maps its planned remote address to an isolated loopback listener.
                 result["outbounds"]![1]!["server"] = "127.0.0.1"; if (withHops) result["outbounds"]![2]!["server"] = "127.0.0.1"; return result;
@@ -112,8 +113,15 @@ internal sealed partial class BoundaryTests
                 Check(await http.GetStringAsync("http://localhost:" + webPort, stop.Token) == "chain-ok!" && requests == 2, "ordered exact-domain direct rule stopped working with landing offline");
                 entryProcess.Kill(true); await entryProcess.WaitForExitAsync(stop.Token);
                 var suffixOnly = LoopbackDestinationRules(); suffixOnly.RemoveAt(0); suffixOnly[0]!["Action"] = "Direct";
-                await Start("entry-suffix", EntryConfiguration(suffixOnly), entryPort);
+                if(withRuleSets)suffixOnly[1]!["Action"]="Direct";
+                var newer=await Start("entry-suffix", EntryConfiguration(suffixOnly), entryPort);
                 Check(await http.GetStringAsync("http://localhost:" + webPort, stop.Token) == "chain-ok!" && requests == 3, "sing-box suffix did not include its root domain");
+                if(withRuleSets)
+                {
+                    Check(await http.GetStringAsync("http://127.0.0.2:"+deniedTarget!.Port,stop.Token)=="denied-ok","new category version did not apply its direct action");
+                    newer.Kill(true);await newer.WaitForExitAsync(stop.Token);await Start("entry-category-restored",rendered,entryPort);await CheckDeniedTarget(mixedPort,deniedTarget,stop.Token);
+                    Check(await http.GetStringAsync("http://localhost:"+webPort,stop.Token)=="chain-ok!","restored category version lost unaffected domain rule");
+                }
             }
         }
         finally

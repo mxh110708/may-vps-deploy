@@ -58,6 +58,7 @@ public static partial class ClientShareLinks
     private static JsonObject Canonical(JsonObject native, string name)
     {
         var protocol = String(native, "type"); if (protocol == "hysteria2") return CanonicalHysteria(native, name);
+        if(ClientSimpleLinks.IsNative(native))return ClientSimpleLinks.Canonical(native,name);
         if (ClientStreamTransports.IsNative(native)) return ClientStreamTransports.Canonical(native, name);
         var common = new[] { "type", "tag", "server", "server_port" };
         Fields(native, common.Concat(protocol switch { "shadowsocks" => new[] { "method", "password" }, "anytls" => new[] { "password", "tls" }, "vless" => new[] { "uuid", "flow", "tls" }, _ => throw new OperationException("分享暂支持 Shadowsocks、SS2022、VLESS Reality + Vision 和基础 AnyTLS。") }).ToArray());
@@ -89,6 +90,7 @@ public static partial class ClientShareLinks
     {
         var protocol = String(clash, "type");
         if (protocol == "hysteria2") return HysteriaFromClash(clash, name);
+        if(ClientSimpleLinks.IsClash(clash))return ClientSimpleLinks.FromClash(clash,name);
         if (ClientStreamTransports.IsClash(clash)) return ClientStreamTransports.FromClash(clash, name);
         Fields(clash, new[] { "type", "name", "server", "port", "udp" }.Concat(protocol switch { "ss" => new[] { "cipher", "password" }, "anytls" => new[] { "password", "sni", "skip-cert-verify" }, "vless" => new[] { "uuid", "flow", "tls", "network", "servername", "client-fingerprint", "reality-opts", "alpn" }, _ => throw new OperationException("此 Clash 协议暂不能生成分享链接。") }).ToArray());
         if (String(clash, "name") != name || !Boolean(clash, "udp", true)) throw new OperationException("节点名称或 UDP 限制无法等效表达为分享链接。");
@@ -115,7 +117,8 @@ public static partial class ClientShareLinks
             if (node["clash"] is JsonObject paired && ArchiveStore.Fingerprint(FromClash(paired, name)) != ArchiveStore.Fingerprint(native)) throw new OperationException("两类客户端的连接参数不一致，不能猜测应分享哪一份。");
             static string E(string value) => Uri.EscapeDataString(value);
             var host = native.Text("server"); var address = (host.Contains(':') ? "[" + host + "]" : host) + ":" + native.Number("server_port"); var tag = "#" + E(name); var protocol = native.Text("type"); string link;
-            if (ClientStreamTransports.IsNative(native)) link = ClientStreamTransports.ShareLink(native, name);
+            if(ClientSimpleLinks.IsNative(native))link=ClientSimpleLinks.Link(native,name);
+            else if (ClientStreamTransports.IsNative(native)) link = ClientStreamTransports.ShareLink(native, name);
             else if (protocol == "shadowsocks")
             {
                 var method = native.Text("method"); var password = native.Text("password"); var info = method.StartsWith("2022-", StringComparison.Ordinal) ? E(method) + ":" + E(password) : Convert.ToBase64String(Utf8.GetBytes(method + ":" + password)).TrimEnd('=').Replace('+', '-').Replace('/', '_'); link = "ss://" + info + "@" + address + tag;

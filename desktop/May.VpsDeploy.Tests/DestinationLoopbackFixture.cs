@@ -2,10 +2,15 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Nodes;
+using May.VpsDeploy.Core;
 
 internal sealed partial class BoundaryTests
 {
     private static JsonArray LoopbackDestinationRules() => new(DestinationRule("Domain", "localhost", "Direct"), DestinationRule("Suffix", "localhost", "Reject"), DestinationRule("Cidr", "127.0.0.2/32", "Reject"), DestinationRule("Cidr", "127.0.0.1/32", "NextHop"));
+    private static JsonArray LoopbackRuleSets(JsonArray rules,int generation)
+    {
+        return new JsonArray(rules.OfType<JsonObject>().Select((r,i)=>(JsonNode?)May.VpsDeploy.Core.ServerRuleSets.Rule(new JsonObject{["Schema"]=1,["Id"]="fixture-category-"+i,["Name"]="Fixture category "+i,["Revision"]=generation+".0.0",["Rules"]=new JsonArray(new JsonObject{["Kind"]=r.Text("Kind"),["Value"]=r.Text("Value")})},r.Text("Action"),r.Text("Target"))).ToArray());
+    }
     private sealed class DestinationHttpTarget : IAsyncDisposable
     {
         private readonly TcpListener listener = new(IPAddress.Parse("127.0.0.2"), 0);

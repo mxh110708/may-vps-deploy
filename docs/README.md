@@ -1,6 +1,6 @@
 # May VPS Deploy 文档
 
-当前教程基线：v0.9.39，Windows WinUI 3 → Debian 12／13 amd64。中文为主，[English overview](../README.en.md) 和 [English walkthrough](USER-GUIDE.en.md) 提供英文说明。
+当前教程基线：v0.9.40，Windows WinUI 3 → Debian 12／13 amd64。中文为主，[English overview](../README.en.md) 和 [English walkthrough](USER-GUIDE.en.md) 提供英文说明。
 
 ## 推荐阅读顺序
 
@@ -13,7 +13,9 @@
 
 | 主题 | 文档 |
 | --- | --- |
+| 分享与往返 | [第二十七轮：TUIC、TLS TCP、Base64和原生输出](CLIENT-OUTPUT-ROUND-27-2026-11-02.zh-CN.md) |
 | 节点组 | [保存、复用、同步与输出一致性](CLIENT-GROUPS-ROUND-23-2026-10-30.zh-CN.md) |
+| v0.9.40 新功能 | [第二十四轮：WireGuard 接入三实例线路](CHAIN-WIREGUARD-ROUND-24-2026-11-01.zh-CN.md)、[第二十五轮：来源与跨方案同步](SOURCE-SYNC-ROUND-25-2026-11-01.zh-CN.md)、[第二十六轮：服务器分类规则与版本恢复](SERVER-RULESETS-ROUND-26-2026-11-01.zh-CN.md)，以及[追加的共享实例多线路管理](SHARED-CHAINS-ROUND-25-2026-11-01.zh-CN.md)，纳入 v0.9.40；v0.9.39 安装包不包含这些功能。 |
 | 组件与版本 | [版本维护](COMPONENT-UPGRADES.zh-CN.md) |
 | 网络 | [测量和调优](NETWORK-TUNING.zh-CN.md)、[固定 BBR 内核构建与维护](GOOGLE-BBR-PREBUILT.zh-CN.md) |
 | TLS／DNS | [Cloudflare 与 Certbot](CLOUDFLARE-CERTBOT.zh-CN.md)，具体动作仍以当前受管范围审阅。 |

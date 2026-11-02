@@ -21,8 +21,10 @@ public sealed partial class WorkflowEngine
         void Begin(string id) { activeStep = id; progress.Report(new(taskId, id, completed, steps.Count, "正在执行。", id, TaskStepState.Running)); }
         void Done() { progress.Report(new(taskId, activeStep!, ++completed, steps.Count, "已完成。", activeStep, TaskStepState.Completed)); activeStep = null; }
         var childProgress = new InlineProgress<TaskProgress>(p => progress.Report(new(taskId, p.Stage, completed, steps.Count, p.Message, activeStep)));
+        var preserved = action is "Apply" or "Remove" ? TcpChains.Preserved(store, configuration) : [];
+        var preservedManifests = new Dictionary<string, JsonObject>(StringComparer.Ordinal);
         var contexts = new List<Context>();
-        foreach (var instance in TcpChains.Instances(configuration))
+        foreach (var instance in TcpChains.Instances(configuration).Concat(TcpChains.Participants(store, request)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var directory = store.Paths.Instance(instance); var plan = TcpChains.Plan(store, instance);
             var state = ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-state.json"));
@@ -30,6 +32,8 @@ public sealed partial class WorkflowEngine
             contexts.Add(new Context(this, new(OperationKind.TcpChain, instance, request.Options.DeepClone().AsObject()), ownerTask, directory, plan, state, secrets, childProgress, cancellation));
         }
         var front = contexts[0]; var relay = contexts[1]; var landing = contexts[2];
+        var primary = contexts.Take(3).ToArray();
+        Context Host(string instance) => contexts.Single(c => c.Request.InstanceRelativePath == instance);
         void SaveRecord() { record["UpdatedAt"] = DateTimeOffset.UtcNow; ArchiveStore.WriteJson(file, record); }
         void Report(string stage, string message) => progress.Report(new(taskId, stage, completed, steps.Count, message, activeStep));
         async Task<JsonObject> Read(Context c, JsonObject? candidate = null)
@@ -39,9 +43,10 @@ public sealed partial class WorkflowEngine
             var response = await c.Run(asset + "-read.sh", parameters, marker: marker + "_READ");
             return JsonNode.Parse(RemoteAssets.Marker(response.Output, marker + "_STATE"))!.AsObject();
         }
-        async Task LandingGate()
+        async Task LandingGate(JsonObject chain)
         {
-            var source = TcpChains.Source(store, configuration);
+            var landing = Host(chain.Text("LandingInstance"));
+            var source = TcpChains.Source(store, chain);
             try
             {
                 if (source["InboundOrigin"] is JsonObject origin)
@@ -63,6 +68,7 @@ public sealed partial class WorkflowEngine
         }
         async Task ExistingValidation(Context c)
         {
+            var retained = action == "Check" ? (c.State.At(component + ".Validation.Items") as JsonArray)?.OfType<JsonObject>().Where(i => i.Text("Scope") == "TcpChainEndToEnd" && i["Checks"] is JsonArray checks && checks.All(check => check.Text("ChainId") != configuration.Text("Id")) && TcpForwarding.Rules(c.Plan[component] as JsonObject).Any(r => r.Text("Id") == i.Text("Id"))).Select(i => i.DeepClone()).ToArray() ?? [] : [];
             var ordinary = (c.Plan[component]?.DeepClone() ?? TcpForwarding.Empty()).AsObject();
             foreach (var rule in ordinary["Rules"]!.AsArray().OfType<JsonObject>().Where(r => r.Text("Validation.Type") == "TcpChain").ToArray()) ordinary["Rules"]!.AsArray().Remove(rule);
             JsonObject result = new() { ["Status"] = "Passed", ["Items"] = new JsonArray() };
@@ -81,15 +87,18 @@ public sealed partial class WorkflowEngine
                     TcpForwarding.RequireValidation(ordinary, result);
                 }
             }
+            foreach (var item in retained) result["Items"]!.AsArray().Add(item);
             if (c.State[component] is JsonObject current) current["Validation"] = result;
         }
-        async Task<JsonObject> ValidateChain()
+        async Task<JsonObject> ValidateChain(JsonObject chain)
         {
             Report("分段验收", "TCP 分段连接与 UDP 分段路由分别标注；只有整链协议 HTTPS 与所需应用 UDP 回程通过才可提交。");
             var evidence = new JsonArray();
-            var source = TcpChains.Source(store, configuration);
+            var front = Host(chain.Text("FrontInstance")); var relay = Host(chain.Text("RelayInstance")); var udp = TcpChains.Transport(chain) == "UDP";
+            var source = TcpChains.Source(store, chain);
             var targetPort = source.Number("sing_box.server_port"); source.Clear();
-            foreach (var (c, host, port) in new[] { (relay, TcpChains.ServerAddress(landing.Plan, configuration), targetPort), (front, TcpChains.ServerAddress(relay.Plan, configuration), configuration.Number("RelayPort")) })
+            var underlayProof = await CheckChainUnderlay(chain, contexts, true);
+            foreach (var (c, host, port) in new[] { (relay, TcpChainUnderlay.Target(store, chain, false), targetPort), (front, TcpChainUnderlay.Target(store, chain, true), chain.Number("RelayPort")) })
             {
                 var response = await c.Run("tcp-chain-probe.sh", new() { ["TRANSPORT"] = udp ? "UDP" : "TCP", ["ADDRESS"] = host, ["PORT"] = port.ToString(System.Globalization.CultureInfo.InvariantCulture) }, timeout: 20, marker: "TCP_CHAIN_PROBED");
                 var probe = JsonNode.Parse(RemoteAssets.Marker(response.Output, "TCP_CHAIN_PROBE"))!.AsObject();
@@ -97,26 +106,56 @@ public sealed partial class WorkflowEngine
                 probe["FromInstance"] = c.Request.InstanceRelativePath; evidence.Add(probe);
             }
             if (tcpChains == null) throw new OperationException("整条 TCP 代理线路验收适配器不可用，未提交变更。");
-            var node = TcpChains.Project(store, configuration, "TCP chain validation");
+            var node = TcpChains.Project(store, chain, "TCP chain validation");
             JsonObject result;
             try
             {
-                result = await tcpChains.ValidateAsync(node, front.File("tcp-chain-validation/" + ownerTask), new InlineProgress<string>(m => Report("整链代理 HTTPS 验收", m)), front.Cancellation);
-                result["Segments"] = evidence; result["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(configuration);
-                ArchiveStore.WriteJson(front.File("tcp-chain-validation/" + ownerTask + "/whole-chain.json"), result);
-                TcpChains.RequireValidation(configuration, node, result);
+                result = await tcpChains.ValidateAsync(node, front.File("tcp-chain-validation/" + ownerTask + "/" + chain.Text("Id")), new InlineProgress<string>(m => Report("整链代理 HTTPS 验收 · " + chain.Text("Name"), m)), front.Cancellation);
+                result["Segments"] = evidence; result["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(chain);
+                if (underlayProof != null) result["WireGuard"] = underlayProof;
+                ArchiveStore.WriteJson(front.File("tcp-chain-validation/" + ownerTask + "/" + chain.Text("Id") + "/whole-chain.json"), result);
+                TcpChains.RequireValidation(chain, node, result);
             }
             finally { node.Clear(); }
-            result["Segments"] = evidence; result["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(configuration); return result;
+            result["Segments"] = evidence; result["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(chain); return result;
+        }
+        void AddEvidence(JsonObject chain, JsonObject result)
+        {
+            foreach (var c in new[] { front, relay }.Where(c => TcpChains.Component(chain) == component && TcpChains.Instances(chain)[..2].Contains(c.Request.InstanceRelativePath, StringComparer.OrdinalIgnoreCase)))
+            {
+                var rule = TcpForwarding.Rules(c.Plan[component]!.AsObject()).Single(r => r.Text("Validation.ChainId") == chain.Text("Id"));
+                c.State[component]!["Validation"]!["Items"]!.AsArray().Add(new JsonObject { ["Id"] = rule.Text("Id"), ["Status"] = "Passed", ["From"] = "Controller", ["Scope"] = "TcpChainEndToEnd", ["Checks"] = new JsonArray(new JsonObject { ["Address"] = TcpChains.ServerAddress(c.Plan, chain), ["Type"] = "TcpChain", ["Status"] = "Passed", ["ChainId"] = chain.Text("Id"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(chain), ["Result"] = result.DeepClone() }) });
+            }
+        }
+        async Task PreservedGate(JsonObject sibling, bool before)
+        {
+            var chain = sibling["Configuration"]!.AsObject();
+            foreach (var instance in TcpChains.Instances(chain))
+            {
+                var c = Host(instance);
+                await VerifyManagement(c);
+                if (instance == chain.Text("LandingInstance")) continue;
+                if (before) TcpChains.VerifyRule(sibling, instance, c.Plan, c.State);
+                else if (ArchiveStore.Fingerprint(TcpChains.OwnedRule(sibling, instance, c.Plan)) != preservedManifests[chain.Text("Id")].Text(instance == chain.Text("FrontInstance") ? "Front" : "Relay")) throw new OperationException("保留线路规则发生变化，未提交共享组件。", code: "SharedChainDrift");
+                var part = TcpChains.Component(chain); var prefix = part == "UdpForwarding" ? "UDP_FORWARD" : "TCP_FORWARD";
+                var response = await c.Run(part == "UdpForwarding" ? "udp-forward-read.sh" : "tcp-forward-read.sh", new() { ["ARCHIVED_HASH"] = c.State.Text(part + ".RemoteHash", "Absent") }, marker: prefix + "_READ");
+                var observed = JsonNode.Parse(RemoteAssets.Marker(response.Output, prefix + "_STATE"))!.AsObject();
+                if (observed.Text("Hash") != c.State.Text(part + ".RemoteHash", "Absent") || !JsonNode.DeepEquals(observed["Configuration"], c.Plan[part])) throw new OperationException("共享线路的远端转发与归档不同。", code: "SharedChainDrift");
+            }
+            await LandingGate(chain); await CheckChainUnderlay(chain, contexts, false);
+            if (before)
+            {
+                var pinned = sibling.DeepClone().AsObject(); TcpChains.SealRules(store, pinned); preservedManifests[chain.Text("Id")] = pinned["RuleFingerprints"]!.DeepClone().AsObject();
+            }
+            if (!JsonNode.DeepEquals(ArchiveStore.ReadJson(TcpChains.FileName(store.Paths, chain.Text("Id"))), sibling)) throw new OperationException("共享线路归档在执行期间变化，请重新审阅。");
         }
         void CloseLocal(bool rolledBack)
         {
             var before = record.At("Transaction.Before") as JsonObject;
             var active = rolledBack ? before?.Text("Phase") == "Active" : record.Text("Transaction.Action") != "Remove";
-            foreach (var c in contexts)
+            foreach (var c in primary)
             {
-                if (active) c.Plan["TcpChain"] = new JsonObject { ["Id"] = configuration.Text("Id"), ["FrontInstance"] = configuration.Text("FrontInstance"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(configuration) };
-                else if (c.Plan.Text("TcpChain.Id") == configuration.Text("Id")) c.Plan.Remove("TcpChain");
+                TcpChains.Bind(c.Plan, configuration, active);
                 if (c.State.Text("TcpChainTransaction.TaskId") == ownerTask) c.State.Remove("TcpChainTransaction");
                 c.Save();
             }
@@ -189,7 +228,7 @@ public sealed partial class WorkflowEngine
                 var before = preview.Record?.DeepClone();
                 record["Transaction"] = new JsonObject { ["TaskId"] = ownerTask, ["Action"] = action, ["Phase"] = "Preflight", ["Before"] = before, ["StartedAt"] = DateTimeOffset.UtcNow };
                 record["Phase"] = action == "Remove" ? "Removing" : "Applying"; SaveRecord();
-                foreach (var c in contexts)
+                foreach (var c in primary)
                 {
                     c.State["TcpChainTransaction"] = new JsonObject { ["Id"] = configuration.Text("Id"), ["TaskId"] = ownerTask, ["FrontInstance"] = configuration.Text("FrontInstance") }; c.Save();
                 }
@@ -215,7 +254,8 @@ public sealed partial class WorkflowEngine
                 if (observed.Text("Hash") != c.State.Text(component + ".RemoteHash", "Absent") || !JsonNode.DeepEquals(observed["Configuration"], c.Plan[component])) throw new OperationException("线路参与实例的实际转发与归档不同，未继续应用。", code: "TcpChainRemoteDrift");
                 if (action != "Check" && c.Plan.Text("Firewall.Mode") != "PreserveExisting") await c.Run("firewall-preflight.sh", FirewallParameters(c.Plan, true), marker: "FIREWALL_SCOPE_OK");
             }
-            if (action != "Remove") { await VerifyManagement(landing); await LandingGate(); }
+            if (action != "Remove") { await VerifyManagement(landing); await LandingGate(configuration); await CheckChainUnderlay(configuration, contexts, false); }
+            foreach (var sibling in preserved) await PreservedGate(sibling, true);
             Done();
             if (action != "Check")
             {
@@ -248,14 +288,20 @@ public sealed partial class WorkflowEngine
             foreach (var c in new[] { front, relay }) await ExistingValidation(c);
             if (action != "Remove")
             {
-                var result = await ValidateChain(); record["Validation"] = result;
-                foreach (var c in new[] { front, relay })
-                {
-                    var rule = TcpForwarding.Rules(c.Plan[component]!.AsObject()).Single(r => r.Text("Id") == TcpChains.RuleId(configuration, c == front));
-                    c.State[component]!["Validation"]!["Items"]!.AsArray().Add(new JsonObject { ["Id"] = rule.Text("Id"), ["Status"] = "Passed", ["From"] = "Controller", ["Scope"] = "TcpChainEndToEnd", ["Checks"] = new JsonArray(new JsonObject { ["Address"] = TcpChains.ServerAddress(c.Plan, configuration), ["Type"] = "TcpChain", ["Status"] = "Passed", ["ChainId"] = configuration.Text("Id"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(configuration), ["Result"] = result.DeepClone() }) });
-                }
-                await LandingGate();
+                var result = await ValidateChain(configuration); record["Validation"] = result; AddEvidence(configuration, result);
+                await LandingGate(configuration);
+                await CheckChainUnderlay(configuration, contexts, false);
+                TcpChains.SealRules(store, record);
             }
+            var sharedResults = new JsonArray();
+            foreach (var sibling in preserved)
+            {
+                await PreservedGate(sibling, false);
+                var chain = sibling["Configuration"]!.AsObject(); var result = await ValidateChain(chain); AddEvidence(chain, result);
+                await PreservedGate(sibling, false);
+                sharedResults.Add(new JsonObject { ["Id"] = chain.Text("Id"), ["RuleFingerprints"] = preservedManifests[chain.Text("Id")]!.DeepClone(), ["Validation"] = result });
+            }
+            if (preserved.Length > 0) record["PreservedChains"] = sharedResults;
             foreach (var c in new[] { front, relay })
             {
                 var observed = await Read(c);
@@ -268,6 +314,11 @@ public sealed partial class WorkflowEngine
             Begin("chain-commit");
             Report("提交两台参与实例", "整条线路验收通过，逐台核对提交。任何提交中断都进入协调恢复，不重放应用。");
             foreach (var c in new[] { relay, front }) await Commit(c);
+            foreach (var sibling in preserved.Where(r => !r.ContainsKey("RuleFingerprints")))
+            {
+                sibling["RuleFingerprints"] = preservedManifests[sibling.Text("Configuration.Id")].DeepClone();
+                ArchiveStore.WriteJson(TcpChains.FileName(store.Paths, sibling.Text("Configuration.Id")), sibling);
+            }
             record["FrontHash"] = front.State.Text(component + ".RemoteHash", "Absent"); record["RelayHash"] = relay.State.Text(component + ".RemoteHash", "Absent");
             CloseLocal(false); Done(); Report("跨实例线路完成", action == "Remove" ? "已移除本条线路，原有转发及落地代理保留。" : "已完成前置、中转与落地的整链验收，可在配置设计中添加线路节点。"); return TaskOutcome.Completed;
         }

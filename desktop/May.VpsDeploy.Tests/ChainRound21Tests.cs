@@ -21,7 +21,7 @@ internal sealed partial class BoundaryTests
             await Chain21Case("IPv6", "UDP", "hysteria2", failure);
     }
 
-    private async Task Chain21Case(string family, string transport, string protocol, string failure)
+    private async Task Chain21Case(string family, string transport, string protocol, string failure, string? underlaySegment = null)
     {
         using var f = new Fixture(repository); var remote = new ChainRemote(); var plans = new List<JsonObject>();
         for (var i = 0; i < 3; i++)
@@ -55,9 +55,17 @@ internal sealed partial class BoundaryTests
         var scheme = ClientSchemes.New(f.Paths); scheme["Nodes"]!.AsArray().Add(node.DeepClone()); f.Store.WriteSecret(ServerOutboundRouting.SchemeFile(f.Paths, scheme.Text("Id")), scheme);
         var config = TcpChains.New(f.Relative(plans[0])); config["Family"] = family; config["Transport"] = transport; config["RelayInstance"] = f.Relative(plans[1]); config["LandingInstance"] = f.Relative(plans[2]); config["FrontSources"] = new JsonArray(family == "IPv6" ? "2001:db8:1::/64" : "198.51.100.0/24"); config["FrontSourceAddress"] = plans[0].Text("Server." + family); config["Landing"] = new JsonObject { ["SchemeId"] = scheme.Text("Id"), ["NodeId"] = node.Text("Id"), ["NodeFingerprint"] = ArchiveStore.Fingerprint(node) };
         OperationRequest Request(string action) => new(OperationKind.TcpChain, f.Relative(plans[0]), new JsonObject { ["Action"] = action, ["Configuration"] = config.DeepClone() });
+        var tunnel = underlaySegment == null ? null : SeedChainUnderlay(f, plans, remote, config, underlaySegment);
         var validator = new ChainValidation { Failure = failure, Remote = remote }; var coordinator = new TaskCoordinator(f.Store, new WorkflowEngine(f.Store, remote, new FakeKeys(), new FakeUser(), new FakeValidation(), tcpChains: validator)); var progress = new InlineProgress<TaskProgress>(_ => { });
         var preview = TcpChains.Prepare(f.Store, Request("Apply"));
-        Check(preview.RelayConfiguration["Rules"]![0]!.Text("ListenFamily") == family && preview.RelayConfiguration["Rules"]![0]!.Strings("AllowedSources").Single() == plans[0].Text("Server." + family) + (family == "IPv6" ? "/128" : "/32"), "family or exact relay source scope changed");
+        Check(preview.RelayConfiguration["Rules"]![0]!.Text("ListenFamily") == (underlaySegment == "FrontRelay" ? "IPv4" : family) && preview.RelayConfiguration["Rules"]![0]!.Strings("AllowedSources").Single() == (underlaySegment == "FrontRelay" ? TcpChainUnderlay.Inner(tunnel!, f.Relative(plans[0])) + "/32" : plans[0].Text("Server." + family) + (family == "IPv6" ? "/128" : "/32")), "family or exact relay source scope changed");
+        if (tunnel != null) CheckChainUnderlayPreview(f, plans, config, tunnel, preview, coordinator, Request("Apply"));
+        if (tunnel != null && failure == "none" && family == "IPv4" && transport == "TCP")
+        {
+            var reviewed=coordinator.Review(Request("Apply"));var wgPath=WireGuardTunnels.FileName(f.Paths,tunnel.Text("Id"));var saved=ArchiveStore.ReadJson(wgPath);var changed=saved.DeepClone().AsObject();changed["LastCheckedAt"]=DateTimeOffset.UtcNow;ArchiveStore.WriteJson(wgPath,changed);
+            var refused=false;try{await coordinator.ExecuteAsync(reviewed,Request("Apply"),progress,default);}catch(OperationException){refused=true;}
+            Check(refused && front.ApplyCalls==0 && relay.ApplyCalls==0,"stale underlay review reached remote mutation");ArchiveStore.WriteJson(wgPath,saved);
+        }
         Check(preview.Summary.Contains(family) && preview.Summary.Contains(transport) && (node.Text("sing_box.password") == "" || !preview.Summary.Contains(node.Text("sing_box.password"), StringComparison.Ordinal)), "review omitted transport/family or exposed a credential");
         if (failure == "none")
         {
@@ -67,6 +75,7 @@ internal sealed partial class BoundaryTests
             if (transport == "UDP") { var hopped = node.DeepClone().AsObject(); hopped["sing_box"]!["server_ports"] = new JsonArray("10000:10002"); Check(!TcpChains.Supports(hopped, "UDP", family) && !TcpChains.Supports(node, "TCP", family), "UDP chain accepted hopping or advertised TCP"); }
         }
         relay.Failure = failure; relay.Drift = failure == "relay-drift"; if (failure == "commit-front") front.Failure = failure;
+        if (tunnel != null && failure.StartsWith("wg-", StringComparison.Ordinal)) remote.Hosts[TcpChains.Plan(f.Store, tunnel.Text("FirstInstance")).Text("Server.IPv4")].WireGuardFailure = failure;
         if (failure == "landing-drift") landing.InboundState!["Hash"] = new string('f', 64);
         var result = await coordinator.ExecuteAsync(coordinator.Review(Request("Apply")), Request("Apply"), progress, default); var path = TcpChains.FileName(f.Paths, config.Text("Id")); var record = ArchiveStore.ReadJson(path); var component = TcpChains.Component(config);
         Check(landing.ApplyCalls == 0 && landing.Inner.Mutations == 0, "chain mutated its landing or an unrelated component");
@@ -74,11 +83,21 @@ internal sealed partial class BoundaryTests
         {
             Check(result.Outcome == TaskOutcome.Completed && record.Text("Phase") == "Active", "round 21 chain did not complete: " + result.SafeError);
             var projected = TcpChains.Project(f.Store, config, "US-West-LA Entry"); TcpChains.VerifyNodes(f.Store, [projected]);
+            if (tunnel != null) CheckChainUnderlayActive(f, plans, config, tunnel, record, projected, coordinator);
             Check(projected.Text("sing_box.server") == plans[0].Text("Server." + family) && projected.Text("sing_box.type") == protocol && projected["InboundOrigin"] == null && projected.Text("sing_box.tls.server_name") == node.Text("sing_box.tls.server_name"), "projection lost transport identity or kept the original endpoint origin");
             Check(ForwardedNodeSources.Choices(f.Store, "US-West-LA Entry").Any(c => c.RuleId == config.Text("Id") && c.Family == family && c.Node != null), "selected family chain unavailable to client schemes");
             Refuses(() => coordinator.Review(new(OperationKind.Inbounds, f.Relative(plans[2]), new())), "independent inbound could bypass landing dependency");
             var checkedResult = await coordinator.ExecuteAsync(coordinator.Review(Request("Check")), Request("Check"), progress, default); Check(checkedResult.Outcome == TaskOutcome.Completed, "read-only whole chain check failed");
+            if(tunnel!=null){var wgPath=WireGuardTunnels.FileName(f.Paths,tunnel.Text("Id"));var saved=ArchiveStore.ReadJson(wgPath);saved["LastCheck"]=new JsonObject{["Status"]="Failed"};ArchiveStore.WriteJson(wgPath,saved);}
+            string? changedTunnelState = null;
+            if (tunnel != null && transport == "TCP")
+            {
+                changedTunnelState = SafePath.Resolve(f.Paths.Instance(tunnel.Text("FirstInstance")), "deployment-state.json");
+                var changed = ArchiveStore.ReadJson(changedTunnelState); changed.Put("WireGuardTunnel.RemoteHash", JsonValue.Create(new string('e', 64))); ArchiveStore.WriteJson(changedTunnelState, changed);
+                Refuses(() => coordinator.Review(Request("Check")), "drifted tunnel retained check eligibility");
+            }
             var removed = await coordinator.ExecuteAsync(coordinator.Review(Request("Remove")), Request("Remove"), progress, default); Check(removed.Outcome == TaskOutcome.Completed && front.Configuration == null && relay.Configuration == null, "round 21 removal retained owned rules"); Refuses(() => TcpChains.VerifyNodes(f.Store, [projected]), "removed round 21 source remained exportable");
+            if (changedTunnelState != null) Check(ArchiveStore.ReadJson(changedTunnelState).Text("WireGuardTunnel.RemoteHash") == new string('e',64), "chain removal restored a borrowed tunnel's changed state");
             foreach (var plan in plans) Check(TcpChains.Plan(f.Store, f.Relative(plan))["TcpChain"] == null, "completed removal retained dependency");
         }
         else
@@ -91,5 +110,14 @@ internal sealed partial class BoundaryTests
             foreach (var plan in plans) Check(ArchiveStore.ReadJson(SafePath.Resolve(f.Paths.Instance(f.Relative(plan)), "deployment-state.json"))["TcpChainTransaction"] == null, "finished UDP recovery left a reservation");
         }
         foreach (var p in plans.Take(2)) Check(TcpChains.Plan(f.Store, f.Relative(p))[component == "UdpForwarding" ? "TcpForwarding" : "UdpForwarding"] == null, "chain wrote another forwarding component");
+        if (tunnel != null)
+        {
+            Check(ArchiveStore.ReadJson(WireGuardTunnels.FileName(f.Paths,tunnel.Text("Id"))).Text("Phase") == "Active", "chain failure or removal retired the borrowed tunnel");
+            foreach (var instance in WireGuardTunnels.Instances(tunnel))
+            {
+                var p=TcpChains.Plan(f.Store,instance);var host=remote.Hosts[p.Text("Server.IPv4")];
+                Check(p.Text("WireGuardTunnel.Id")==tunnel.Text("Id") && JsonNode.DeepEquals(p["WireGuardTunnel"],host.WireGuard) && host.WireGuardProofStarts==host.WireGuardProofStops,"chain altered borrowed tunnel or leaked proof resources");
+            }
+        }
     }
 }

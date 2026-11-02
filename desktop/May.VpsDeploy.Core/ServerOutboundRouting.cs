@@ -124,7 +124,12 @@ public static partial class ServerOutboundRouting
             if (policy.Count > 0) { metadata["DestinationRules"] = policy; metadata["DestinationRulesNetwork"] = "tcp"; }
             if (named.Count > 0) metadata["AdditionalHops"] = named;
         }
+        RequireBoundedConfiguration(result);
         return new(result, metadata, Summary(role, "anytls-in", previous, metadata));
+    }
+    private static void RequireBoundedConfiguration(JsonObject configuration)
+    {
+        if(ArchiveStore.JsonBytes(configuration).Length>1048576)throw new OperationException("分类展开后的服务器配置超过 1 MiB，请缩小规则集；未写入远端。");
     }
     public static void VerifyManaged(string role, JsonObject configuration, JsonObject plan)
     {

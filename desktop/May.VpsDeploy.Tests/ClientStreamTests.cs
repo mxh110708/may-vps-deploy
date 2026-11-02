@@ -46,7 +46,7 @@ internal sealed partial class BoundaryTests
             links[0].Replace("path=%2Ftransport-18%2Fsegment", "path=%2Fpath%3Fed%3D1024"), links[0].Replace("path=%2Ftransport-18%2Fsegment", "path=%2Fpath%3Ftoken%3Da"), links[0].Replace("path=%2Ftransport-18%2Fsegment", "path=%2Ftransport%252Fsegment"), links[0].Replace("front.example.test", "bad%0D%0AX-Header%3Avalue"),
             links[0].Replace("#vless-ws", "&path=%2Fother#bad"), links[0].Replace("#vless-ws", "&alpn=h2#bad"), links[0].Replace("#vless-ws", "&ed=4096#bad"), links[0].Replace("#vless-ws", "&ed=1&eh=other#bad"),
             links[1].Replace("mode=gun", "mode=multi"), links[1].Replace("May.Test-Service_18", "invalid%2Fservice"), links[1].Replace("#vless-grpc", "&authority=front.example.test#bad"), links[1].Replace("#vless-grpc", "&path=%2Fpath#bad"),
-            links[1].Replace("#vless-grpc", "&alpn=http%2F1.1#bad"), links[0].Replace("#vless-ws", "&fp=unsupported#bad"), "trojan://password@example.test:443?type=tcp", "vmess://legacy"
+            links[1].Replace("#vless-grpc", "&alpn=http%2F1.1#bad"), links[0].Replace("#vless-ws", "&fp=unsupported#bad"), "trojan://password@example.test:443?type=tcp&security=none", "vmess://legacy"
         })
         {
             var rejected = ClientNodeImport.Preview(invalid, scheme, region); Check(rejected.Accepted == 0 && rejected.Rows.All(r => r.Status == "Rejected" && !r.Message.Contains("synthetic") && !r.Message.Contains(StreamUuid)), "unsupported stream option accepted/dropped or error leaked credentials");

@@ -8,13 +8,19 @@ A Windows desktop tool for deploying and maintaining Debian VPS instances, proxy
 
 The supported desktop target is Windows 10 2004 or later / Windows 11 amd64. Remote lifecycle acceptance targets Debian 12/13 amd64. The packaged application bundles .NET, WinUI and its configuration helper; PowerShell, Python and a development SDK are not required for normal desktop use.
 
-This documentation baseline is **v0.9.39**. A repository branch is not proof of the version installed on your computer.
+This documentation baseline is **v0.9.40**. A repository branch is not proof of the version installed on your computer.
+
+The [round 24 work](docs/CHAIN-WIREGUARD-ROUND-24-2026-11-01.zh-CN.md) lets a three-host chain reuse an accepted WireGuard pair on either adjacent hop. It pins both peers, verifies fresh bidirectional traffic and the complete proxy path, and preserves the independent tunnel during chain removal or compensation. It is included in v0.9.40.
+
+[Round 25](docs/SOURCE-SYNC-ROUND-25-2026-11-01.zh-CN.md) adds opt-in scheduled subscription caching, change notices and reviewed synchronization across schemes and node groups. Fetches do not automatically change schemes or servers. [Round 26](docs/SERVER-RULESETS-ROUND-26-2026-11-01.zh-CN.md) adds versioned server classification snapshots and restoration, using the existing multiple-next-hop and real-path acceptance workflow.
+
+[Shared-host chains](docs/SHARED-CHAINS-ROUND-25-2026-11-01.zh-CN.md) are included as an additional feature, previously mislabeled round 25. Chains retain separate bindings, rule identities and acceptance results. Shared changes revalidate surviving paths and compensate from the current snapshot on failure. Updating a shared forwarding component can briefly interrupt existing connections.
 
 This release includes [round 15 Hysteria2 sharing and port hopping](docs/HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md), [round 16 TUIC v5 inbounds](docs/TUIC-ROUND-16-2026-10-28.zh-CN.md), [round 17 server QUIC next hops](docs/SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md), [round 18 external WS/gRPC nodes](docs/CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md), [round 20 XHTTP client integration](docs/XHTTP-ROUND-20-2026-10-29.zh-CN.md), and [round 21 dual-family TCP / bounded UDP chains](docs/CHAIN-ROUND-21-2026-10-30.zh-CN.md). XHTTP covers four modes, valid HTTP/TLS/Reality combinations, separate download identities and advanced fields, using matching May Core or an equivalent Mihomo representation. UDP chains require fixed-port Hysteria2 or TUIC. Round 19 remains a historical record of the earlier limited subset. This does not imply that an installed release or every public CDN supports these features.
 
 This release also includes [round 22 WireGuard host-to-host channels](docs/WIREGUARD-ROUND-22-2026-10-30.zh-CN.md): kernel WireGuard, IPv4/IPv6 outer endpoints, private IPv4 peer routes, two-host review and compensation, bidirectional TCP/UDP acceptance and reboot verification. It does not replace existing chains or configure a default-route VPN.
 
-| Area | v0.9.39 release baseline |
+| Area | v0.9.40 capabilities |
 | --- | --- |
 | Instances | New deployment, adoption of recognized layouts, SSH identity checks, health inspection, maintenance and retirement. |
 | Inbounds | Reality, AnyTLS, SS2022, Hysteria2, TUIC v5 and supported XHTTP combinations, with separate listener, user, certificate, outbound and recovery identities. |
@@ -23,7 +29,9 @@ This release also includes [round 22 WireGuard host-to-host channels](docs/WIREG
 | Monitoring | Separate May Server/Agent maintenance, HTTPS origin checks, scoped read access and reviewed static theme updates. |
 | Recovery | Component-scoped snapshots and reconciliation of uncertain acknowledgements, without blindly replaying writes. |
 
-TUIC and bounded UDP chains belong to the v0.9.39 source listed above. Provider-specific ATT IPv6 leasing, arbitrary UDP multi-hop, billing and hosted subscriptions remain outside current capabilities. A working Hysteria2 inbound does not make a TCP forwarder support QUIC.
+TUIC and bounded UDP chains remain supported. Provider-specific ATT IPv6 leasing, arbitrary UDP multi-hop, billing and hosted subscriptions remain outside current capabilities. A working Hysteria2 inbound does not make a TCP forwarder support QUIC.
+
+[Round 27](docs/CLIENT-OUTPUT-ROUND-27-2026-11-02.zh-CN.md) completes bounded TUIC v5 and plain TLS VLESS/Trojan URI round trips, direct Base64 list import and native configuration reimport. Advanced fields that cannot be represented still require full configuration export.
 
 ## Start using the desktop app
 

@@ -12,6 +12,9 @@ else if (args.Contains("--ssh-only")) await new BoundaryTests(repository).RunSsh
 else if (args.Contains("--client-routes-only")) await new BoundaryTests(repository).RunClientRouteTests();
 else if (args.Contains("--client-output-only")) await new BoundaryTests(repository).RunClientOutputTests();
 else if (args.Contains("--client-groups-only")) await new BoundaryTests(repository).RunClientGroupTests();
+else if (args.Contains("--source-sync-only")) await new BoundaryTests(repository).RunSourceSyncTests();
+else if (args.Contains("--server-rule-sets-only")) await new BoundaryTests(repository).RunServerRuleSetTests();
+else if (args.Contains("--server-rule-sets-model-only")) await new BoundaryTests(repository).RunServerRuleSetTests(true);
 else if (args.Contains("--server-outbound-only")) await new BoundaryTests(repository).RunServerOutboundTests();
 else if (args.Contains("--server-quic-only")) await new BoundaryTests(repository).RunServerQuicTests();
 else if (args.Contains("--server-quic-model-only")) await new BoundaryTests(repository).RunServerQuicTests(modelOnly: true);
@@ -21,6 +24,8 @@ else if (args.Contains("--server-rules-only")) await new BoundaryTests(repositor
 else if (args.Contains("--server-hops-only")) await new BoundaryTests(repository).RunServerHopTests();
 else if (args.Contains("--hop-probe-only")) await new BoundaryTests(repository).RunHopProbeTests();
 else if (args.Contains("--client-share-only")) new BoundaryTests(repository).RunClientShareTests();
+else if (args.Contains("--client-roundtrip-only")) await new BoundaryTests(repository).RunClientRoundtrip27Tests();
+else if (args.Contains("--client-roundtrip-model-only")) await new BoundaryTests(repository).RunClientRoundtrip27Tests(true);
 else if (args.Contains("--client-stream-only")) await new BoundaryTests(repository).RunClientStreamTests();
 else if (args.Contains("--client-stream-model-only")) await new BoundaryTests(repository).RunClientStreamTests(modelOnly: true);
 else if (args.Contains("--xhttp-runtime-only")) await new BoundaryTests(repository).RunXhttpRuntimeTests();
@@ -29,6 +34,10 @@ else if (args.Contains("--xhttp-model-only")) await new BoundaryTests(repository
 else if (args.Contains("--xhttp-vm")) await new BoundaryTests(repository).RunXhttpVmTests(args[Array.IndexOf(args, "--xhttp-vm") + 1]);
 else if (args.Contains("--tcp-forward-only")) await new BoundaryTests(repository).RunTcpForwardTests();
 else if (args.Contains("--tcp-chain-only")) await new BoundaryTests(repository).RunTcpChainTests();
+else if (args.Contains("--shared-chains-only")) await new BoundaryTests(repository).RunSharedChainTests();
+else if (args.Contains("--shared-chains-vm")) { var i=Array.IndexOf(args,"--shared-chains-vm");var family=args[i+2];await new BoundaryTests(repository).RunChain21VmTests(args[i+1],family=="IPv6"?"FrontRelay":null,family); }
+else if (args.Contains("--chain24-only")) await new BoundaryTests(repository).RunChain24Tests();
+else if (args.Contains("--chain24-vm")) await new BoundaryTests(repository).RunChain21VmTests(args[Array.IndexOf(args,"--chain24-vm")+1],args[Array.IndexOf(args,"--chain24-vm")+2]);
 else if (args.Contains("--wireguard-only")) await new BoundaryTests(repository).RunWireGuardTests();
 else if (args.Contains("--wireguard-vm")) await new BoundaryTests(repository).RunWireGuardVmTests(args[Array.IndexOf(args,"--wireguard-vm")+1]);
 else if (args.Contains("--chain21-only")) await new BoundaryTests(repository).RunChain21Tests();
@@ -85,6 +94,10 @@ internal sealed partial class BoundaryTests(string repository)
         }
         if (Includes("clients"))
         {
+            await SourceSyncExperience();
+            await SourceSyncDownloadExperience();
+            await ServerRuleSetExperience();
+            using(var categories=new Fixture(repository))await ServerOutboundLoopback(categories,true,withRuleSets:true);
             using (var reusableGroups = new Fixture(repository)) await ClientGroupExperience(reusableGroups);
             await ClientRouteExperience(f);
             using (var outputs = new Fixture(repository)) { await ClientOutputExperience(outputs); ClientSubscriptionExperience(outputs); }
@@ -94,6 +107,8 @@ internal sealed partial class BoundaryTests(string repository)
             using (var destinationRules = new Fixture(repository)) { await ServerDestinationExperience(destinationRules); await ServerOutboundLoopback(destinationRules, true); await RealityOutboundLoopback(destinationRules, true); }
             using (var hops = new Fixture(repository)) { await ServerHopExperience(hops); await ServerOutboundLoopback(hops, withHops: true); await RealityOutboundLoopback(hops, withHops: true); await ServerHopProbeRuntime(hops); }
             using (var shares = new Fixture(repository)) ClientShareExperience(shares);
+            await ClientRoundtrip27Model();
+            await ClientRoundtrip27Runtime();
             await ClientStreamModel();
             await ClientStreamRuntime();
         }
@@ -109,6 +124,8 @@ internal sealed partial class BoundaryTests(string repository)
             using (var forwarding = new Fixture(repository)) { await TcpForwardExperience(forwarding); await TcpForwardValidationLoopback(forwarding); }
             await TcpChainExperience();
             await Chain21Coverage();
+            await Chain24Coverage();
+            await SharedChainCoverage();
             await WireGuardCoverage();
             await InboundExperience();
         }

@@ -11,6 +11,33 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ClientSourcesTests(unittest.TestCase):
+    def test_tls_tcp_and_unknown_transports(self):
+        from ruamel.yaml import YAML
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for protocol in ('vless', 'trojan'):
+                clash = {'name': protocol, 'type': protocol, 'server': 'entry.example.test', 'port': 443,
+                         'network': 'tcp', 'tls': True, 'sni' if protocol == 'trojan' else 'servername': 'entry.example.test'}
+                sing = {'tag': protocol, 'type': protocol, 'server': 'entry.example.test', 'server_port': 443,
+                        'tls': {'enabled': True, 'server_name': 'entry.example.test'}}
+                clash['uuid' if protocol == 'vless' else 'password'] = sing['uuid' if protocol == 'vless' else 'password'] = str(uuid.uuid4())
+                yaml, config = root / 'source.yaml', root / 'source.json'
+                for supported in (True, False):
+                    if not supported:
+                        clash['network'] = 'httpupgrade'
+                        sing['transport'] = {'type': 'httpupgrade'}
+                    with yaml.open('w', encoding='utf-8') as stream:
+                        YAML().dump({'proxies': [clash]}, stream)
+                    config.write_text(json.dumps({'outbounds': [sing]}), encoding='utf-8')
+                    for arguments in (['--clash', str(yaml)], ['--sing-box', str(config)], ['--clash', str(yaml), '--sing-box', str(config)]):
+                        result = subprocess.run([sys.executable, str(ROOT / 'scripts/inspect_client_sources.py'), *arguments], capture_output=True, text=True, timeout=10, check=True)
+                        nodes = json.loads(result.stdout)
+                        self.assertEqual(len(nodes), 1 if supported else 0)
+                        if supported and '--clash' in arguments:
+                            self.assertEqual(nodes[0]['clash'], clash)
+                        if supported and '--sing-box' in arguments:
+                            self.assertEqual(nodes[0]['sing_box'], sing)
+
     def test_quic_native_formats(self):
         from ruamel.yaml import YAML
         with tempfile.TemporaryDirectory() as temporary:

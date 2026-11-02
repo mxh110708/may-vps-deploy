@@ -9,6 +9,7 @@ public sealed partial class MainWindow
 {
     private async Task EditClientStreamNode(JsonObject original)
     {
+        var simple=ClientSimpleLinks.IsNode(original);
         var selected = scheme ?? throw new OperationException("请先打开方案。"); var fingerprint = ArchiveStore.Fingerprint(selected);
         var model = new JsonObject { ["Name"] = original.Text("name"), ["Kind"] = original.Text("kind"), ["Region"] = original.Text("region_group"), ["Transit"] = original.Text("transit_group"), ["Family"] = ClientTopology.EgressFamily(original), ["Expected"] = original.Text("Egress.ExpectedAddress") };
         var regions = selected["Layout"]!.Strings("region_groups");
@@ -18,8 +19,8 @@ public sealed partial class MainWindow
             Choice("节点用途", model, "Kind", [("entry", "入口"), ("landing", "经入口连接的落地")]),
             Choice("入口地区组", model, "Region", regions.Select(r => (r, r))), Choice("落地连接的入口组", model, "Transit", regions.Select(r => (r, r))),
             Choice("网站出口地址族", model, "Family", [("Unknown", "未知 · 诊断时观测"), ("IPv4", "IPv4"), ("IPv6", "IPv6")]), Field("预期网站出口 IP（可选）", model, "Expected"),
-            Text("名称与分组调整保留全部原生连接参数。需更换地址、鉴权或传输时，粘贴新的完整 WS／gRPC 分享链接；不会将原节点改成 Reality。链接中的显示名不覆盖上面的名称。", 14, true), replacement, error);
-        var dialog = OperationDialog("编辑外部 WS／gRPC 节点", new ScrollViewer { Content = body, MaxHeight = 520 }, "保存"); JsonObject? updated = null;
+            Text("名称与分组调整保留全部原生连接参数。需更换地址、鉴权或传输时，粘贴新的完整连接链接。链接中的显示名不覆盖上面的名称。", 14, true), replacement, error);
+        var dialog = OperationDialog(simple?"编辑外部 TLS／TUIC 节点":"编辑外部 WS／gRPC 节点", new ScrollViewer { Content = body, MaxHeight = 520 }, "保存"); JsonObject? updated = null;
         dialog.PrimaryButtonClick += (_, args) =>
         {
             try
@@ -33,7 +34,7 @@ public sealed partial class MainWindow
                 if (replacement.Password.Length > 0)
                 {
                     var empty = selected.DeepClone().AsObject(); empty["Nodes"] = new JsonArray(); var preview = ClientNodeImport.Preview(replacement.Password, empty, model.Text("Region"), "entry");
-                    if (preview.Rows.Count != 1 || preview.Accepted != 1 || preview.Rows[0].Node?["sing_box"] is not JsonObject native || !ClientStreamTransports.IsNative(native)) throw new OperationException("请提供一条本轮支持的完整 WS／gRPC 分享链接。");
+                    if (preview.Rows.Count != 1 || preview.Accepted != 1 || preview.Rows[0].Node?["sing_box"] is not JsonObject native || !(simple?ClientSimpleLinks.IsNative(native):ClientStreamTransports.IsNative(native))) throw new OperationException("请提供一条对应类型的完整连接分享链接。");
                     draft["sing_box"] = native.DeepClone(); draft["clash"] = preview.Rows[0].Node!["clash"]!.DeepClone();
                 }
                 if (original.Text("kind") == "landing" && model.Text("Kind") == "entry")
