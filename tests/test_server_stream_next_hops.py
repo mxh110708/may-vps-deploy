@@ -83,7 +83,7 @@ class StreamBoundaries(unittest.TestCase):
                 with self.assertRaises(ValueError):API['validate']([value],'AnyTlsEntry')
     def test_private_document_main_and_bounds(self):
         with tempfile.TemporaryDirectory(prefix='stream-probe-input-') as temp:
-            filename=Path(temp)/'probes.private.json';filename.write_text(json.dumps([item()]),encoding='utf-8');calls=[]
+            filename=Path(temp).resolve()/'probes.private.json';filename.write_text(json.dumps([item()]),encoding='utf-8');calls=[]
             def probe(binary,role,value): calls.append(value);return {'Id':value['Id'],'Status':'Passed'}
             with patch.dict(os.environ,VPS_PARAM_PROBES_JSON_FILE=str(filename)),patch.dict(API,run_probe=probe),patch('sys.argv',['probe.py','synthetic-unexecuted-core','AnyTlsEntry']),contextlib.redirect_stdout(io.StringIO()):
                 API['main']()

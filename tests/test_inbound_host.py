@@ -69,7 +69,7 @@ class FixtureHost(M.Host):
 
 class InboundOwnership(unittest.TestCase):
     def setUp(self):
-        (ROOT/'.test-output').mkdir(exist_ok=True);self.temp=tempfile.TemporaryDirectory(prefix='inbound-host-',dir=ROOT/'.test-output' if os.name=='nt' else None);self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name);(self.root/'etc/systemd/system').mkdir(parents=True);self.kernel=Kernel(self.root);self.host=FixtureHost(self.root,self.kernel);self.index=0
+        (ROOT/'.test-output').mkdir(exist_ok=True);self.temp=tempfile.TemporaryDirectory(prefix='inbound-host-',dir=ROOT/'.test-output' if os.name=='nt' else None);self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name).resolve();(self.root/'etc/systemd/system').mkdir(parents=True);self.kernel=Kernel(self.root);self.host=FixtureHost(self.root,self.kernel);self.index=0
     def snapshot(self,value,affected):
         self.index+=1;backup=PurePosixPath('/root/vps-deploy-backups/20261025-'+str(self.index).zfill(6)+'/protocol-lifecycle');self.host.path(str(backup)).mkdir(parents=True)
         before=self.host.read();self.host.snapshot(backup,before['Hash'],value,affected)
