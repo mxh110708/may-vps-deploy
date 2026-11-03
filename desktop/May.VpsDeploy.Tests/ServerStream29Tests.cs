@@ -93,7 +93,9 @@ internal sealed partial class BoundaryTests
     }
     private async Task ServerStream29PrivateInput()
     {
-        var bash = OperatingSystem.IsWindows() ? "D:/Program Files/Git/bin/bash.exe" : "/bin/bash";
+        // Ubuntu's merged /usr exposes /bin as a symlink. Use the trusted
+        // canonical shell location without weakening ExternalToolRunner checks.
+        var bash = OperatingSystem.IsWindows() ? "D:/Program Files/Git/bin/bash.exe" : OperatingSystem.IsLinux() ? "/usr/bin/bash" : "/bin/bash";
         if (!File.Exists(bash)) { Console.WriteLine("SKIP: private probe transport shell fixture requires Bash."); return; }
         using var f = new Fixture(repository); var script = f.Paths.Resolve("assets/remote/probe-input-check.sh"); Directory.CreateDirectory(Path.GetDirectoryName(script)!);
         // Git Bash on NTFS reports synthesized Unix modes; it cannot prove a
