@@ -27,7 +27,7 @@ public sealed partial class WorkflowEngine
         var first = contexts[0]; var second = contexts[1];
         async Task<JsonObject> Read(Context context, JsonObject? candidate = null)
         {
-            var parameters = new Dictionary<string, string> { ["WIREGUARD_EXPECTED_HASH"] = context.State.Text("WireGuardTunnel.RemoteHash", "Absent") }; if (candidate != null) parameters["CANDIDATE_JSON"] = candidate.ToJsonString();
+            var parameters = new Dictionary<string, string> { ["WIREGUARD_EXPECTED_HASH"] = context.State.Text(WireGuardTunnels.Component(c, context.Request.InstanceRelativePath) + ".RemoteHash", "Absent") }; if (candidate != null) parameters["CANDIDATE_JSON"] = candidate.ToJsonString();
             var response = await context.Run("wireguard-read.sh", parameters, timeout: 45, marker: "WIREGUARD_READ");
             return JsonNode.Parse(RemoteAssets.Marker(response.Output, "WIREGUARD_STATE"))!.AsObject();
         }
@@ -67,7 +67,7 @@ public sealed partial class WorkflowEngine
                     if (phase != "None" && RemoteAssets.Marker(response.Output, "CONTROL_TASK_ID", false) != ownerTask) throw new OperationException("远端隧道事务身份不同，未覆盖。", true);
                     if (phase == "Preparing" && context.Pending.Text("Phase") == "Arming")
                     {
-                        if ((await Read(context)).Text("Hash") != context.Pending.Text("OldState.WireGuardTunnel.RemoteHash", "Absent")) throw new OperationException("未完成快照的组件已经变化。", true);
+                        if ((await Read(context)).Text("Hash") != context.Pending.Text("OldState." + WireGuardTunnels.Component(c, context.Request.InstanceRelativePath) + ".RemoteHash", "Absent")) throw new OperationException("未完成快照的组件已经变化。", true);
                         await context.Run("maintenance-transaction-status.sh", new() { ["ACTION"] = "ReleaseUnarmed", ["EXPECTED_BACKUP"] = backup }, true);
                         ApplyLocalRollback(context); context.Pending["Phase"] = "RolledBack"; context.Save();
                     }
@@ -78,7 +78,7 @@ public sealed partial class WorkflowEngine
                     }
                     else if (phase == "WireGuardRolledBack") { ApplyLocalRollback(context); context.Pending["Phase"] = "RolledBack"; context.Save(); }
                     else await Rollback(context);
-                    if ((await Read(context)).Text("Hash") != context.State.Text("WireGuardTunnel.RemoteHash", "Absent")) throw new OperationException("隧道恢复后资源与原归档不同。", true);
+                    if ((await Read(context)).Text("Hash") != context.State.Text(WireGuardTunnels.Component(c, context.Request.InstanceRelativePath) + ".RemoteHash", "Absent")) throw new OperationException("隧道恢复后资源与原归档不同。", true);
                     await VerifyManagement(context);
                 }
                 catch (Exception error) { errors.Add(error); }
@@ -107,7 +107,7 @@ public sealed partial class WorkflowEngine
                 finally { CryptographicOperations.ZeroMemory(bytes); }
                 var candidate = action == "Apply" ? WireGuardTunnels.Peer(c, context.Plan, contexts[1 - index].Plan, index == 0) : null;
                 var observed = await Read(context, candidate);
-                if (observed.Text("Hash") != context.State.Text("WireGuardTunnel.RemoteHash", "Absent") || !JsonNode.DeepEquals(observed["Configuration"], context.Plan["WireGuardTunnel"])) throw new OperationException("实际隧道与本地归档不同，未覆盖。", code: "WireGuardRemoteDrift");
+                if (observed.Text("Hash") != context.State.Text(WireGuardTunnels.Component(c, context.Request.InstanceRelativePath) + ".RemoteHash", "Absent") || !JsonNode.DeepEquals(observed["Configuration"], context.Plan[WireGuardTunnels.Component(c, context.Request.InstanceRelativePath)])) throw new OperationException("实际隧道与本地归档不同，未覆盖。", code: "WireGuardRemoteDrift");
                 if (context.Plan.Text("Firewall.Mode") != "PreserveExisting") await context.Run("firewall-preflight.sh", FirewallParameters(context.Plan, true), marker: "FIREWALL_SCOPE_OK");
             }
             Done();
@@ -132,13 +132,13 @@ public sealed partial class WorkflowEngine
                 {
                     var peer = action == "Apply" ? WireGuardTunnels.Peer(c, context.Plan, contexts[1 - index].Plan, index == 0) : new JsonObject();
                     if (action == "Apply") { peer["PublicKey"] = publics[index]; peer["PeerPublicKey"] = publics[1 - index]; }
-                    if (action == "Apply") context.Plan["WireGuardTunnel"] = peer.DeepClone(); else context.Plan.Remove("WireGuardTunnel"); context.Save();
-                    await context.Run("wireguard-apply.sh", new() { ["ACTION"] = action, ["CONFIG_JSON"] = peer.ToJsonString(), ["WIREGUARD_EXPECTED_HASH"] = context.State.Text("WireGuardTunnel.RemoteHash", "Absent") }, true, 90, "WIREGUARD_APPLIED");
+                    if (action == "Apply") context.Plan[WireGuardTunnels.Component(c, context.Request.InstanceRelativePath)] = peer.DeepClone(); else context.Plan.Remove(WireGuardTunnels.Component(c, context.Request.InstanceRelativePath)); context.Save();
+                    await context.Run("wireguard-apply.sh", new() { ["ACTION"] = action, ["CONFIG_JSON"] = peer.ToJsonString(), ["WIREGUARD_EXPECTED_HASH"] = context.State.Text(WireGuardTunnels.Component(c, context.Request.InstanceRelativePath) + ".RemoteHash", "Absent") }, true, 90, "WIREGUARD_APPLIED");
                     await Firewall(context, true);
                     var observed = await Read(context);
                     if (action == "Remove" ? observed.Text("Hash") != "Absent" : !JsonNode.DeepEquals(observed["Configuration"], peer) || !observed.Flag("Healthy")) throw new OperationException("实际隧道未完整应用或移除。");
-                    if (action == "Remove") context.State.Remove("WireGuardTunnel");
-                    else context.State["WireGuardTunnel"] = new JsonObject { ["RemoteHash"] = observed.Text("Hash"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(peer) };
+                    if (action == "Remove") context.State.Remove(WireGuardTunnels.Component(c, context.Request.InstanceRelativePath));
+                    else context.State[WireGuardTunnels.Component(c, context.Request.InstanceRelativePath)] = new JsonObject { ["RemoteHash"] = observed.Text("Hash"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(peer) };
                     context.Save();
                 }
                 Done();
@@ -148,7 +148,7 @@ public sealed partial class WorkflowEngine
             foreach (var context in contexts)
             {
                 var observed = await Read(context);
-                if (observed.Text("Hash") != context.State.Text("WireGuardTunnel.RemoteHash", "Absent") || action != "Remove" && !observed.Flag("Healthy")) throw new OperationException("验收期间隧道资源或启用状态发生变化。");
+                if (observed.Text("Hash") != context.State.Text(WireGuardTunnels.Component(c, context.Request.InstanceRelativePath) + ".RemoteHash", "Absent") || action != "Remove" && !observed.Flag("Healthy")) throw new OperationException("验收期间隧道资源或启用状态发生变化。");
                 await VerifyManagement(context);
             }
             Done();

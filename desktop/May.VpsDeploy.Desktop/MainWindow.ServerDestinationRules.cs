@@ -11,7 +11,7 @@ public sealed partial class MainWindow
     {
         foreach (var (rule, input) in inputs) rule["Value"] = input.Text;
     }
-    private UIElement ServerDestinationEditor(JsonArray rules, List<(JsonObject Rule, TextBox Input)> inputs, IReadOnlyDictionary<string, string>? hopNames = null)
+    private UIElement ServerDestinationEditor(JsonArray rules, List<(JsonObject Rule, TextBox Input)> inputs, IReadOnlyDictionary<string, string>? hopNames = null, bool independent = false)
     {
         var available=AvailableServerRuleSets();
         var rows = new StackPanel { Spacing = 12 }; var message = Text("", 13, true);
@@ -36,8 +36,8 @@ public sealed partial class MainWindow
                     snapshotDetails=Details("已固定版本的匹配项 · "+pinned["Rules"]!.AsArray().Count+" 项",new TextBox{Text=string.Join("\n",pinned["Rules"]!.AsArray().Select(r=>ServerDestinationRules.KindLabel(r!.Text("Kind"))+" · "+r.Text("Value"))),IsReadOnly=true,AcceptsReturn=true,MaxHeight=180});
                 }
                 else{var field=Field("匹配值",rule,"Value");field.MaxLength=300;field.Tag="ServerRules.Value."+i;inputs.Add((rule,field));input=field;}
-                var choices = new List<(string, string)> { ("NextHop", "默认落地"), ("Direct", "入口机直连"), ("Reject", "阻断") };
-                if (hopNames != null) choices.AddRange(hopNames.Select(pair => ("Hop:" + pair.Key, "附加落地 · " + pair.Value)));
+                var choices = new List<(string, string)> { ("NextHop", independent ? "默认去向" : "默认落地"), ("Direct", independent ? "服务器直连" : "入口机直连"), ("Reject", "阻断") };
+                if (hopNames != null) choices.AddRange(hopNames.Select(pair => ("Hop:" + pair.Key, (independent ? "出站 · " : "附加落地 · ") + pair.Value)));
                 var selected = new JsonObject { ["Action"] = rule.Text("Target") == "" ? rule.Text("Action") : "Hop:" + rule.Text("Target") };
                 var action = Choice("去向", selected, "Action", choices, true); action.PlaceholderText = "落地已缺失，请重新选择"; action.Tag = "ServerRules.Action." + i;
                 action.SelectionChanged += (_, _) =>
@@ -56,11 +56,11 @@ public sealed partial class MainWindow
         add = Action("添加分流规则", () => { CaptureDestinationRules(inputs); rules.Add(new JsonObject { ["Kind"] = "Domain", ["Value"] = "", ["Action"] = "NextHop" }); inputs.Clear(); RefreshRules(); message.Text = ""; return Task.CompletedTask; }); add.Tag = "ServerRules.Add";
         var test = Action("试算匹配", () =>
         {
-            try { CaptureDestinationRules(inputs); var normalized = ServerDestinationRules.Normalize(rules); message.Text = "试算去向：" + ServerDestinationRules.DecisionLabel(ServerDestinationRules.Match(normalized, destination.Text.Trim()), hopNames) + "。仅检查规则匹配，不代表连接成功。"; }
+            try { CaptureDestinationRules(inputs); var normalized = ServerDestinationRules.Normalize(rules, independent ? InboundCatalog.Id : null); var decision = ServerDestinationRules.Match(normalized, destination.Text.Trim()); message.Text = "试算去向：" + (independent && decision.Target == "" ? decision.Action switch { "NextHop" => "默认去向", "Direct" => "服务器直连", _ => "阻断" } : ServerDestinationRules.DecisionLabel(decision, hopNames)) + "。仅检查规则匹配，不代表连接成功。"; }
             catch (OperationException error) { message.Text = error.Message; }
             return Task.CompletedTask;
         }); test.Tag = "ServerRules.Test";
-        expander.Content = Column(Text("只对 TCP 按顺序首条命中，未命中使用默认落地。UDP 保持默认落地。网段只匹配 IP 目标，不新增域名解析或嗅探。各落地独立验收，故障不回退到默认落地或直连。", 13, true), rows, add, destination, test, message);
+        expander.Content = Column(Text(independent ? "TCP 按顺序首条命中，未命中及 UDP 使用本入站默认去向。规则引用现有出站资源与固定分类版本；服务器直连使用 VPS 网络。每个去向分别验收连接，业务分类命中仍需实际业务核对。例外失败不改走默认去向或直连。" : "只对 TCP 按顺序首条命中，未命中使用默认落地。UDP 保持默认落地。网段只匹配 IP 目标，不新增域名解析或嗅探。各落地独立验收，故障不回退到默认落地或直连。", 13, true), rows, add, destination, test, message);
         RefreshRules(); return expander;
     }
 }

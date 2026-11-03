@@ -54,4 +54,17 @@ public sealed partial class MainWindow
         try { input.SelectedIndex = index; await changed.Task.WaitAsync(TimeSpan.FromSeconds(3)); }
         finally { input.SelectionChanged -= OnChange; }
     }
+    private static async Task RegressionToggle(CheckBox input, bool value)
+    {
+        if (input.IsChecked == value) return;
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnChange(object sender, RoutedEventArgs args) => changed.TrySetResult();
+        input.Checked += OnChange; input.Unchecked += OnChange;
+        try
+        {
+            ((IToggleProvider)(FrameworkElementAutomationPeer.CreatePeerForElement(input) ?? new CheckBoxAutomationPeer(input)).GetPattern(PatternInterface.Toggle)).Toggle();
+            await changed.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        finally { input.Checked -= OnChange; input.Unchecked -= OnChange; }
+    }
 }

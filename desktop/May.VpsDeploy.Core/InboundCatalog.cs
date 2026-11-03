@@ -106,7 +106,13 @@ public static class InboundCatalog
         var ports = new HashSet<int>();
         foreach (var inbound in Items(m, "Inbounds"))
         {
-            Fields(inbound, "Id", "Name", "Protocol", "Enabled", "Listener", "UserIds", "CertificateId", "OutboundId", "Options");
+            if (inbound.ContainsKey("Routing"))
+            {
+                var plain = inbound.DeepClone().AsObject(); plain.Remove("Routing");
+                Fields(plain, "Id", "Name", "Protocol", "Enabled", "Listener", "UserIds", "CertificateId", "OutboundId", "Options");
+                InboundRoutingPolicy.Set(inbound, InboundRoutingPolicy.Rules(inbound));
+            }
+            else Fields(inbound, "Id", "Name", "Protocol", "Enabled", "Listener", "UserIds", "CertificateId", "OutboundId", "Options");
             _ = Flag(inbound, "Enabled"); if (!Protocols.Contains(inbound.Text("Protocol"))) throw new OperationException("入站协议不受支持。");
             var listener = inbound["Listener"] as JsonObject ?? throw new OperationException("入站监听缺失。"); Fields(listener, "Address", "Port"); var port = Port(listener, "Port");
             if (!ports.Add(port)) throw new OperationException("不同入站的监听端口不能重复；停用的入站仍保留端口。");
@@ -118,13 +124,13 @@ public static class InboundCatalog
             foreach (var userId in inbound.Strings("UserIds"))
                 if (Items(m, "Users").SingleOrDefault(u => u.Text("Id") == userId)?.Text("Kind") != kind) throw new OperationException("引用的用户不存在或认证类型与协议不匹配。");
             if (!Items(m, "Outbounds").Any(o => o.Text("Id") == inbound.Text("OutboundId"))) throw new OperationException("入站引用的出站不存在。");
+            InboundRoutingPolicy.Validate(m, inbound);
             if (inbound.Text("Protocol") is "AnyTLS" or "Hysteria2" or "TuicV5" or "VLESS")
             {
                 if (inbound.Text("Protocol") == "AnyTLS") { Fields(options, "ServerName", "EchEnabled"); _ = Flag(options, "EchEnabled"); }
                 else if (inbound.Text("Protocol") == "VLESS")
                 {
                     VlessXhttp.Validate(options, credentials["Inbounds"]![inbound.Text("Id")]!);
-                    if (Items(m, "Outbounds").Single(o => o.Text("Id") == inbound.Text("OutboundId")).Text("Kind") != "Direct") throw new OperationException("本轮 XHTTP 仅验收直连出站，不叠加服务器下一跳。");
                 }
                 else if (inbound.Text("Protocol") == "TuicV5")
                 {
@@ -207,7 +213,7 @@ public static class InboundCatalog
     public static void RemoveEntity(JsonObject model, JsonObject credentials, string group, string id)
     {
         _ = Id(id); if (group is not ("Inbounds" or "Users" or "Certificates" or "Outbounds")) throw new OperationException("资源类别不受支持。");
-        if (group != "Inbounds" && Items(model, "Inbounds").Any(i => group == "Users" ? i.Strings("UserIds").Contains(id) : i.Text(group == "Certificates" ? "CertificateId" : "OutboundId") == id)) throw new OperationException("该资源仍被入站引用，请先解绑或替换，不能级联删除。");
+        if (group != "Inbounds" && Items(model, "Inbounds").Any(i => group == "Users" ? i.Strings("UserIds").Contains(id) : group == "Outbounds" ? InboundRoutingPolicy.References(i).Contains(id) : i.Text("CertificateId") == id)) throw new OperationException("该资源仍被入站引用，请先解绑或替换，不能级联删除。");
         var item = Items(model, group).SingleOrDefault(e => e.Text("Id") == id) ?? throw new OperationException("资源已不存在。"); model[group]!.AsArray().Remove(item); if (group != "Outbounds") credentials[group]!.AsObject().Remove(id);
     }
     public static void ValidateOptions(JsonObject options)
@@ -263,6 +269,13 @@ public static class InboundCatalog
             if (plan.Text("Firewall.Mode") == "PreserveExisting" && Items(model, "Inbounds").Any(i => i.Text("Options.HopPorts") != "")) throw new OperationException("端口跳跃需要本应用受管的 nftables 防火墙；保留现有防火墙模式不会自动写入重定向规则。");
             var summary = "通用入站 · " + (request.Options.Text("Action") == "Check" ? "只读检查" : "保存资源模型") + "\n" + string.Join("\n", Items(model, "Inbounds").Select(i => i.Text("Name") + " · " + Label(i.Text("Protocol")) + HysteriaSummary(i) + TuicV5.Summary(i) + VlessXhttp.Summary(i) + " · " + i.Text("Listener.Address") + ":" + i.Number("Listener.Port") + " · " + (i.Flag("Enabled") ? "启用" : "停用") + "\n用户：" + string.Join("，", i.Strings("UserIds").Select(id => Items(model, "Users").Single(u => u.Text("Id") == id).Text("Name"))) + "；证书：" + (Items(model, "Certificates").SingleOrDefault(c => c.Text("Id") == i.Text("CertificateId"))?.Text("Name") ?? "无") + "；出站：" + Items(model, "Outbounds").Single(o => o.Text("Id") == i.Text("OutboundId")).Text("Name")));
             summary += "\n\n本次影响：" + (affected.Length == 0 ? "仅目录信息，运行配置不变" : string.Join("，", affected.Select(id => Items(model, "Inbounds").Concat(Items(old, "Inbounds")).First(i => i.Text("Id") == id).Text("Name")))) + "。共享用户、证书或出站变化时，引用它们的入站会一并纳入范围。\n每个入站独立服务与配置；仅重启受影响入站，失败按同一范围恢复。原有固定角色服务保留。新入站监听对可达来源开放，访问由原协议用户鉴权控制；须确认服务商防火墙与监听范围。";
+            foreach (var inbound in Items(model, "Inbounds").Where(i => InboundRoutingPolicy.Rules(i).Count > 0)) summary += "\n\n" + inbound.Text("Name") + " · " + InboundRoutingPolicy.Summary(model, inbound);
+            var usedOutbounds = Items(model, "Inbounds").SelectMany(InboundRoutingPolicy.References).ToHashSet(StringComparer.Ordinal);
+            foreach (var outbound in Items(model, "Outbounds").Where(o => o.Text("Kind") == "Proxy" && usedOutbounds.Contains(o.Text("Id"))))
+            {
+                var native = InboundRendering.ResolveOutbound(store, request.InstanceRelativePath, outbound);
+                if (ServerOutboundRouting.IsStream(native)) summary += "\n\n出站 " + outbound.Text("Name") + "：" + ServerOutboundRouting.ConnectionSummary(native);
+            }
             if(request.Options.Text("Action")=="UpgradeSingBox")summary="更新独立入站固定 sing-box 核心："+state.Text("Inbounds.Core.Version")+" → "+core!.Text("Version")+"\n涉及共享核心的 Hysteria2、TUIC v5、AnyTLS、SS2022；Xray 固定版本保留。\n"+summary;
             if (request.Options.Text("Action") == "UpgradeXray") summary = "更新独立入站固定 Xray 核心：" + state.Text("Inbounds.Core.Reality.Version") + " → " + core!.Text("Reality.Version") + "\n重新验收所有受影响 Reality / XHTTP 入站，sing-box 核心保持原版本。\n" + summary;
             return new(model, credentials, payload, affected, expected, summary);

@@ -8,16 +8,18 @@ using May.VpsDeploy.Infrastructure;
 
 internal sealed partial class BoundaryTests
 {
-    public async Task RunChain21VmTests(string manifestFile, string? underlaySegment = null, string? sharedFamily = null)
+    public async Task RunChain21VmTests(string manifestFile, string? underlaySegment = null, string? sharedFamily = null, string? caseFamily = null)
     {
         if (!Path.GetFullPath(manifestFile).Contains(Path.DirectorySeparatorChar + ".codex-tmp" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new Exception("Disposable fixture path required.");
         var manifest = ArchiveStore.ReadJson(manifestFile); if (!manifest.Flag("SyntheticOnly") || manifest["Nodes"] is not JsonObject nodes || nodes.Count != 3) throw new Exception("Three disposable guests required.");
-        if (underlaySegment != null && underlaySegment is not ("FrontRelay" or "RelayLanding")) throw new Exception("Unknown test segment.");
+        if (underlaySegment != null && underlaySegment is not ("FrontRelay" or "RelayLanding" or "Both")) throw new Exception("Unknown test segment.");
         if (sharedFamily != null && sharedFamily is not ("IPv4" or "IPv6")) throw new Exception("Unknown disposable shared-chain family.");
+        if (caseFamily != null && (underlaySegment != "Both" || caseFamily is not ("IPv4" or "IPv6"))) throw new Exception("Unknown disposable adjacent-chain matrix family.");
+        var underlayResultName = caseFamily == null ? "round30-Both-result.json" : "round30-Both-" + caseFamily + "-result.json";
         if (underlaySegment == "RelayLanding") { nodes["Relay"]!["Address"]="198.51.100.20"; nodes["Relay"]!["IPv6"]="2001:db8:21:2::20"; }
         // A dual-stack exit validates both source families for every case.
         // Keep an explicit whole-matrix budget; individual remote limits stay unchanged.
-        using var f = new Fixture(repository); using var budget = new CancellationTokenSource(TimeSpan.FromMinutes(underlaySegment == "RelayLanding" || sharedFamily != null ? 12 : 9)); var ct = budget.Token; var user = new FakeUser(); var factory = new TcpChainVmFactory(f.Store, nodes); var plans = new List<JsonObject>();
+        using var f = new Fixture(repository); using var budget = new CancellationTokenSource(TimeSpan.FromMinutes(caseFamily != null ? 8 : underlaySegment is "RelayLanding" or "Both" || sharedFamily != null ? 12 : 9)); var ct = budget.Token; var user = new FakeUser(); var factory = new TcpChainVmFactory(f.Store, nodes); var plans = new List<JsonObject>();
         async Task<IRemoteSession> Connect(int index) => await factory.OpenAsync(new(nodes[index==0?"Front":index==1?"Relay":"Landing"]!.Text("Address"),22,"root",nodes[index==0?"Front":index==1?"Relay":"Landing"]!.Text("KeyFile")),user,ct);
         async Task<string> Read(int index,string command) { await using var session=await Connect(index);var r=await session.RunAsync(command,TimeSpan.FromSeconds(20),ct);r.RequireSuccess("Disposable chain observation failed.");return r.Output.Trim(); }
         foreach (var name in new[] { "Front", "Relay", "Landing" })
@@ -46,30 +48,46 @@ internal sealed partial class BoundaryTests
             setup+="chmod 0644 "+Path.GetDirectoryName(path)!.Replace('\\','/')+"/core.json\ncat > /etc/systemd/system/may-chain21-web.service <<'EOF'\n[Service]\nExecStart=/usr/bin/python3 "+directory+"/web.py\n[Install]\nWantedBy=multi-user.target\nEOF\nsystemctl daemon-reload\nsystemctl enable --now may-chain21-web.service\nsystemctl restart may-chain21-web.service\n";
             (await session.RunScriptAsync(setup,TimeSpan.FromSeconds(25),true,ct)).RequireSuccess("Disposable pinned core/application setup failed.");
         }
+        if (underlaySegment == "Both")
+        {
+            // Disposable multihomed relay: deterministic outer source routes.
+            // Only these DMI-verified guests change; host routes remain untouched.
+            await Read(1, "ip route replace 198.51.100.30/32 via 198.51.100.30 src 192.0.2.20; ip -6 route replace 2001:db8:21:2::30/128 via 2001:db8:21:2::30 src 2001:db8:21:1::20");
+            await Read(2, "ip route replace 192.0.2.20/32 via 198.51.100.20; ip -6 route replace 2001:db8:21:1::20/128 via 2001:db8:21:2::20");
+        }
         var assets=new ValidationAssets(new AppPaths(repository),"windows-amd64");var tools=new ExternalToolRunner();var target=new Uri("https://127.0.0.1:9443");var endpoints=new ClientDiagnosticEndpoints(target,target,target){Udp4=new(IPAddress.Loopback,5353)};var diagnostics=new ClientRouteDiagnostics(assets,tools,endpoints,ca);var results=new JsonArray();
         var cases = underlaySegment == null ? new[]{("IPv6","Shadowsocks2022"),("IPv4","Hysteria2"),("IPv6","Hysteria2"),("IPv4","TuicV5"),("IPv6","TuicV5")} : new[]{("IPv4","Shadowsocks2022"),("IPv6","Shadowsocks2022"),("IPv4","Hysteria2"),("IPv6","Hysteria2"),("IPv4","TuicV5"),("IPv6","TuicV5")};
         if(sharedFamily!=null)cases=new[]{(sharedFamily,"Shadowsocks2022"),(sharedFamily,"Hysteria2"),(sharedFamily,"TuicV5")};
+        if(caseFamily!=null)cases=cases.Where(c=>c.Item1==caseFamily).ToArray();
         foreach(var (family,protocol) in cases)
         {
             var transport=protocol=="Shadowsocks2022"?"TCP":"UDP";Console.WriteLine("Chain21 actual case: "+family+" / "+protocol);
             JsonObject Host(string name){var h=nodes[name]!.DeepClone().AsObject();var ingress=h["Ingress"+family]!.AsObject();foreach(var (k,v) in ingress)h[k]=v!.DeepClone();h["Applications"]=new JsonObject{["18443"]=ingress["ApplicationPort"]!.DeepClone()};return h;}
-            var sourceModel=InboundCatalog.Empty();var credentials=InboundCatalog.EmptyCredentials();var input=InboundCatalog.AddInbound(sourceModel,credentials,protocol);input["Listener"]!["Address"]=underlaySegment=="RelayLanding"?"::":plans[2].Text("Server."+family);input["Listener"]!["Port"]=18443;
+            var sourceModel=InboundCatalog.Empty();var credentials=InboundCatalog.EmptyCredentials();var input=InboundCatalog.AddInbound(sourceModel,credentials,protocol);input["Listener"]!["Address"]=underlaySegment is "RelayLanding" or "Both"?"::":plans[2].Text("Server."+family);input["Listener"]!["Port"]=18443;
             if(transport=="UDP"){input["CertificateId"]=InboundCatalog.ImportCertificate(sourceModel,credentials,"Fixture TLS",ca.ExportCertificatePem(),key.ExportPkcs8PrivateKeyPem()).Text("Id");input["Options"]!["ServerName"]="chain.example.test";}
             var sourceValidator=new HysteriaVmValidation(f.Store,diagnostics,Host("Landing"));var chainValidator=new Chain21VmValidation(diagnostics,Host("Front"),ca.ExportCertificatePem(),transport=="UDP");
             var coordinator=new TaskCoordinator(f.Store,new WorkflowEngine(f.Store,factory,new FakeKeys(),user,new FakeValidation(),tcpChains:chainValidator,inboundValidation:sourceValidator));var last="";var progress=new InlineProgress<TaskProgress>(p=>{if(last!=p.Stage){last=p.Stage;Console.WriteLine("Chain21 stage: "+p.Stage);}});
             JsonObject? tunnel=null;
             OperationRequest Tunnel(string action)=>new(OperationKind.WireGuardTunnel,tunnel!.Text("FirstInstance"),new(){["Action"]=action,["Configuration"]=tunnel.DeepClone()});
             async Task<TaskRecord> ExecuteTunnel(string action){var r=Tunnel(action);return await coordinator.ExecuteAsync(coordinator.Review(r),r,progress,ct);}
+            JsonObject? secondTunnel = null;
             if (underlaySegment != null)
             {
-                var a=underlaySegment=="FrontRelay"?0:1;var b=a+1;tunnel=WireGuardTunnels.New(f.Relative(plans[a]));tunnel["SecondInstance"]=f.Relative(plans[b]);tunnel["Family"]=family=="IPv4"?"IPv6":"IPv4";
+                var a=underlaySegment is "FrontRelay" or "Both"?0:1;var b=a+1;tunnel=WireGuardTunnels.New(f.Relative(plans[a]));tunnel["SecondInstance"]=f.Relative(plans[b]);tunnel["Family"]=family=="IPv4"?"IPv6":"IPv4";
                 Check((await ExecuteTunnel("Apply")).Outcome==TaskOutcome.Completed,"actual borrowed tunnel creation failed");
+                if (underlaySegment == "Both")
+                {
+                    var saved = tunnel; secondTunnel = WireGuardTunnels.New(f.Relative(plans[1])); secondTunnel["SecondInstance"] = f.Relative(plans[2]); secondTunnel["Family"] = tunnel.Text("Family"); secondTunnel["FirstSlot"] = 1; secondTunnel["FirstPort"] = 51821; secondTunnel["FirstAddress"] = "10.203.1.1"; secondTunnel["SecondAddress"] = "10.203.1.2";
+                    tunnel = secondTunnel; Check((await ExecuteTunnel("Apply")).Outcome == TaskOutcome.Completed, "actual second slot/tunnel creation failed"); tunnel = saved;
+                    Check(await Read(1,"test $(wg show interfaces | wc -w) -eq 2 && printf TWO") == "TWO", "relay does not have two independent kernel interfaces");
+                }
             }
             var stateFile=SafePath.Resolve(f.Paths.Instance(f.Relative(plans[2])),"deployment-state.json");var request=new OperationRequest(OperationKind.Inbounds,f.Relative(plans[2]),InboundCatalog.Options(ArchiveStore.ReadJson(stateFile),"Apply",sourceModel,credentials));
             Check((await coordinator.ExecuteAsync(coordinator.Review(request),request,progress,ct)).Outcome==TaskOutcome.Completed,"actual source inbound apply failed");plans[2]=TcpChains.Plan(f.Store,f.Relative(plans[2]));
             var node=InboundSources.Create(f.Store,f.Relative(plans[2]),input.Text("Id"),input.Strings("UserIds")[0],family);var scheme=ClientSchemes.New(f.Paths);scheme["Nodes"]!.AsArray().Add(node.DeepClone());f.Store.WriteSecret(ServerOutboundRouting.SchemeFile(f.Paths,scheme.Text("Id")),scheme);
             var config=TcpChains.New(f.Relative(plans[0]));config["Family"]=family;config["Transport"]=transport;config["RelayInstance"]=f.Relative(plans[1]);config["LandingInstance"]=f.Relative(plans[2]);config["FrontSourceAddress"]=plans[0].Text("Server."+family);config["FrontSources"]=new JsonArray(plans[0].Text("Server."+family)+(family=="IPv6"?"/128":"/32"));config["Landing"]=new JsonObject{["SchemeId"]=scheme.Text("Id"),["NodeId"]=node.Text("Id"),["NodeFingerprint"]=ArchiveStore.Fingerprint(node)};
-            if(tunnel!=null)config["WireGuard"]=TcpChainUnderlay.Reference(f.Store,ArchiveStore.ReadJson(WireGuardTunnels.FileName(f.Paths,tunnel.Text("Id"))),underlaySegment!);
+            if(tunnel!=null && underlaySegment != "Both")config["WireGuard"]=TcpChainUnderlay.Reference(f.Store,ArchiveStore.ReadJson(WireGuardTunnels.FileName(f.Paths,tunnel.Text("Id"))),underlaySegment!);
+            if (secondTunnel != null) config["WireGuards"] = new JsonArray(TcpChainUnderlay.Reference(f.Store,ArchiveStore.ReadJson(WireGuardTunnels.FileName(f.Paths,tunnel!.Text("Id"))),"FrontRelay"), TcpChainUnderlay.Reference(f.Store,ArchiveStore.ReadJson(WireGuardTunnels.FileName(f.Paths,secondTunnel.Text("Id"))),"RelayLanding"));
             OperationRequest Chain(string action)=>new(OperationKind.TcpChain,f.Relative(plans[0]),new JsonObject{["Action"]=action,["Configuration"]=config.DeepClone()});
             async Task<TaskRecord> Execute(string action){var r=Chain(action);return await coordinator.ExecuteAsync(coordinator.Review(r),r,progress,ct);}
             var applied=await Execute("Apply");Check(applied.Outcome==TaskOutcome.Completed,"actual "+family+" "+protocol+" chain apply failed: "+applied.SafeError);var chainFile=TcpChains.FileName(f.Paths,config.Text("Id"));var record=ArchiveStore.ReadJson(chainFile);var projected=TcpChains.Project(f.Store,config,"US-West-LA Entry");TcpChains.VerifyNodes(f.Store,[projected]);
@@ -99,9 +117,14 @@ internal sealed partial class BoundaryTests
             if(tunnel!=null)
             {
                 Refuses(()=>coordinator.Review(Tunnel("Remove")),"active actual chain allowed tunnel removal");
-                Check(record.Text("Validation.WireGuard.DependencyFingerprint")==config.Text("WireGuard.Fingerprint"),"actual encryption proof missing");
+                if (secondTunnel == null) Check(record.Text("Validation.WireGuard.DependencyFingerprint")==config.Text("WireGuard.Fingerprint"),"actual encryption proof missing");
+                else
+                {
+                    Check(record.At("Validation.WireGuard.Segments")!.AsArray().Count == 2, "two actual adjacent proofs missing");
+                    foreach (var segment in record.At("Validation.WireGuard.Segments")!.AsArray()) Check(segment!.At("Directions")!.AsArray().Count == 2 && segment.At("Directions")!.AsArray().All(d => d.Flag("TCP") && d.Flag("UDP") && d.Flag("ResponseMatched")), "actual segment challenge or UDP return missing");
+                }
             }
-            Check((await Execute("Remove")).Outcome==TaskOutcome.Completed,"actual chain remove failed");Refuses(()=>TcpChains.VerifyNodes(f.Store,[projected]),"removed actual chain retained export eligibility");
+            var removed = await Execute("Remove"); Check(removed.Outcome==TaskOutcome.Completed,"actual chain remove failed: "+removed.Outcome+"; matrix cancelled="+ct.IsCancellationRequested+"; "+removed.SafeError);Refuses(()=>TcpChains.VerifyNodes(f.Store,[projected]),"removed actual chain retained export eligibility");
             if(sharedFamily==null&&protocol=="TuicV5"&&family=="IPv6")
             {
                 factory.Fault="relay-commit-ack";config["Id"]=Guid.NewGuid().ToString("N");Check((await Execute("Apply")).Outcome==TaskOutcome.Failed&&factory.LostAcknowledgements==1,"real UDP commit loss was replayed or not compensated");
@@ -109,6 +132,13 @@ internal sealed partial class BoundaryTests
             foreach(var index in new[]{0,1})Check(await Read(index,"test ! -e /etc/may-"+(transport=="UDP"?"udp":"tcp")+"-forward/config.json && test ! -e /var/lib/may-vps-deploy/transaction.owner && ! systemctl is-active --quiet mxh-protocol-migration-rollback.timer && printf CLEAN")=="CLEAN","actual cleanup retained forwarding, owner or timer");
             if(tunnel!=null)
             {
+                if (secondTunnel != null)
+                {
+                    var saved = tunnel; tunnel = secondTunnel;
+                    Check((await ExecuteTunnel("Check")).Outcome == TaskOutcome.Completed, "second actual segment damaged during line cleanup");
+                    Check((await ExecuteTunnel("Remove")).Outcome == TaskOutcome.Completed, "second actual slot removal failed"); tunnel = saved;
+                    Check(await Read(1,"test $(wg show interfaces | wc -w) -eq 1 && printf SURVIVED") == "SURVIVED", "second-slot removal deleted first kernel interface");
+                }
                 Check((await ExecuteTunnel("Check")).Outcome==TaskOutcome.Completed,"chain removal or compensation damaged borrowed tunnel");
                 Check((await ExecuteTunnel("Remove")).Outcome==TaskOutcome.Completed,"unused tunnel could not be removed after chain cleanup");
             }
@@ -122,10 +152,12 @@ internal sealed partial class BoundaryTests
             }
             results.Add(new JsonObject{["Family"]=family,["Protocol"]=protocol,["Transport"]=transport,["Evidence"]=record["Validation"]!.DeepClone(),["DualCoreCandidate"]=true,["SharedLine"]=sharedFamily!=null,["RemovedAndClean"]=true});
             if(sharedFamily!=null)ArchiveStore.WriteJson(Path.Combine(Path.GetDirectoryName(manifestFile)!,"round25-"+sharedFamily+"-result.json"),new JsonObject{["Status"]="InProgress",["Assertions"]=assertions,["Cases"]=results.DeepClone(),["LostCommitAcknowledgements"]=factory.LostAcknowledgements,["HostRoutesChanged"]=false,["ProductionTargets"]=false});
-            if (underlaySegment != null) ArchiveStore.WriteJson(Path.Combine(Path.GetDirectoryName(manifestFile)!,"round24-"+underlaySegment+"-result.json"),new JsonObject{["Status"]="InProgress",["Assertions"]=assertions,["Cases"]=results.DeepClone(),["UnderlaySegment"]=underlaySegment,["LostCommitAcknowledgements"]=factory.LostAcknowledgements,["HostRoutesChanged"]=false,["ProductionTargets"]=false});
+            if (underlaySegment != null) ArchiveStore.WriteJson(Path.Combine(Path.GetDirectoryName(manifestFile)!,(underlaySegment=="Both"?underlayResultName:"round24-"+underlaySegment+"-result.json")),new JsonObject{["Status"]="InProgress",["Assertions"]=assertions,["Cases"]=results.DeepClone(),["UnderlaySegment"]=underlaySegment,["LostCommitAcknowledgements"]=factory.LostAcknowledgements,["HostRoutesChanged"]=false,["ProductionTargets"]=false});
         }
+        var proxy30 = underlaySegment == "Both" && caseFamily != "IPv4" ? await Proxy30VmAcceptance(f,nodes,factory,user,diagnostics,ca,key,ct) : null;
         await Read(2,"systemctl disable --now may-chain21-web.service");
-        ArchiveStore.WriteJson(Path.Combine(Path.GetDirectoryName(manifestFile)!,sharedFamily!=null?"round25-"+sharedFamily+"-result.json":underlaySegment==null?"round21-result.json":"round24-"+underlaySegment+"-result.json"),new JsonObject{["Status"]="Passed",["Assertions"]=assertions,["Cases"]=results,["UnderlaySegment"]=underlaySegment,["LostCommitAcknowledgements"]=factory.LostAcknowledgements,["HostRoutesChanged"]=false,["ProductionTargets"]=false});
+        ArchiveStore.WriteJson(Path.Combine(Path.GetDirectoryName(manifestFile)!,sharedFamily!=null?"round25-"+sharedFamily+"-result.json":underlaySegment==null?"round21-result.json":(underlaySegment=="Both"?underlayResultName:"round24-"+underlaySegment+"-result.json")),new JsonObject{["Status"]="Passed",["Assertions"]=assertions,["Cases"]=results,["UnderlaySegment"]=underlaySegment,["LostCommitAcknowledgements"]=factory.LostAcknowledgements,["HostRoutesChanged"]=false,["ProductionTargets"]=false});
+        if (proxy30 != null) ArchiveStore.WriteJson(Path.Combine(Path.GetDirectoryName(manifestFile)!,"round30-proxy-result.json"),proxy30);
         Console.WriteLine($"PASS: {assertions} actual three-guest TCP and dual-family Hysteria2/TUIC orchestration assertions; underlay={underlaySegment ?? "Direct"}.");
     }
     private sealed class Chain21VmValidation(ClientRouteDiagnostics diagnostics,JsonObject host,string ca,bool udp):ITcpChainValidation

@@ -58,6 +58,7 @@ public static partial class ServerOutboundRouting
     {
         if (role == "AnyTlsEntry") { var result = native.DeepClone().AsObject(); result["tag"] = tag; return result; }
         if (IsQuic(native)) return XrayHysteria(native, tag);
+        if (IsStream(native)) return XrayStream(native, tag);
         return new JsonObject { ["tag"] = tag, ["protocol"] = "shadowsocks", ["settings"] = new JsonObject { ["servers"] = new JsonArray(new JsonObject { ["address"] = native.Text("server"), ["port"] = native.Number("server_port"), ["method"] = native.Text("method"), ["password"] = native.Text("password") }) } };
     }
     public static JsonObject XrayNextHop(JsonObject native)
@@ -88,6 +89,7 @@ public static partial class ServerOutboundRouting
             if (new[] { plan.Text("Server.IPv4"), plan.Text("Server.IPv6") }.Any(s => IPAddress.TryParse(s, out var address) && address.Equals(endpoint))) throw new OperationException("附加落地不能指回当前实例。");
             var outbound = ToOutbound(role, native, HopTag(hop.Id)); outputs.Add(outbound);
             metadata.Add(new JsonObject { ["Version"] = 1, ["Id"] = hop.Id, ["Name"] = hop.Node.Text("name"), ["Endpoint"] = new IPEndPoint(endpoint, native.Number("server_port")).ToString(), ["ExpectedAddress"] = expected.ToString(), ["EgressFamily"] = Family(hop.ExpectedAddress), ["OutboundFingerprint"] = ArchiveStore.Fingerprint(outbound), ["SchemeId"] = hop.Source?.Text("SchemeId"), ["NodeId"] = hop.Source?.Text("NodeId"), ["NodeFingerprint"] = ArchiveStore.Fingerprint(hop.Node) });
+            if (IsStream(native)) metadata[^1]!["Connection"] = ConnectionSummary(native);
         }
         return metadata;
         static string Connection(JsonObject node) { var native = NextHop(node); native.Remove("tag"); return ArchiveStore.Fingerprint(native); }
@@ -99,7 +101,7 @@ public static partial class ServerOutboundRouting
         foreach (var outbound in actual) outputs.Remove(outbound);
     }
     private static string RulesSummary(JsonObject metadata) => ServerDestinationRules.Summary(metadata["DestinationRules"], MetadataHops(metadata).OfType<JsonObject>().ToDictionary(h => h.Text("Id"), h => h.Text("Name"), StringComparer.Ordinal));
-    private static string NamedHopsSummary(JsonObject metadata) => string.Join('\n', MetadataHops(metadata).OfType<JsonObject>().Select(h => "附加 TCP 落地：" + h.Text("Name") + " · " + h.Text("Endpoint") + " · 预期出口 " + h.Text("ExpectedAddress") + "（" + h.Text("EgressFamily") + "）"));
+    private static string NamedHopsSummary(JsonObject metadata) => string.Join('\n', MetadataHops(metadata).OfType<JsonObject>().Select(h => "附加 TCP 落地：" + h.Text("Name") + " · " + h.Text("Endpoint") + " · 预期出口 " + h.Text("ExpectedAddress") + "（" + h.Text("EgressFamily") + "）" + (h.Text("Connection") == "" ? "" : " · " + h.Text("Connection"))));
     public static JsonArray ProbeRequests(string role, JsonObject configuration, JsonObject plan)
     {
         VerifyManaged(role, configuration, plan); var result = new JsonArray(); var metadata = plan.At("ServerOutbound." + role) as JsonObject;
@@ -117,7 +119,8 @@ public static partial class ServerOutboundRouting
     }
     private static bool ProbeProtocolMatches(JsonNode outbound, JsonObject item)
     {
-        var protocol = outbound.Text("protocol") == "hysteria" ? "hysteria2" : outbound.Text("type");
+        var protocol = OutboundProtocol(outbound);
+        if (protocol is "vless" or "trojan" or "anytls") return item.Text("Transport") == "TCP" && item.Text("ValidatedProtocol") == protocol;
         return protocol is not ("hysteria2" or "tuic") || item.Text("Transport") == "QUIC" && item.Text("ValidatedProtocol") == protocol;
     }
 }

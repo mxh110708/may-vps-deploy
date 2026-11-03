@@ -7,8 +7,8 @@ from pathlib import Path
 action = sys.argv[1]
 config = Path('/etc/nftables.conf')
 
-def wireguard_rules():
-    value = json.loads(os.environ.get('VPS_PARAM_WIREGUARD_RULE', 'null'))
+def wireguard_peer_rules(slot):
+    value = json.loads(os.environ.get('VPS_PARAM_WIREGUARD_RULE' + ('_2' if slot else ''), 'null'))
     if value is None: return []
     # Only generated peer fields are consumed; no user-provided nft expressions.
     if not isinstance(value, dict): raise SystemExit('Invalid WireGuard firewall record.')
@@ -19,7 +19,9 @@ def wireguard_rules():
     except (KeyError, ValueError, TypeError): raise SystemExit('Invalid WireGuard firewall addresses.')
     if type(port) is not int or not 1024 <= port <= 65535 or local.version != 4 or peer.version != 4 or local == peer or not local.is_private or not peer.is_private or endpoint.is_loopback or endpoint.is_unspecified or endpoint.is_multicast: raise SystemExit('Invalid WireGuard firewall scope.')
     prefix = 'ip6' if endpoint.version == 6 else 'ip'
-    return [prefix+' saddr '+str(endpoint)+' udp dport '+str(port)+' accept', 'iifname "maywg0" ip saddr '+str(peer)+' ip daddr '+str(local)+' accept']
+    return [prefix+' saddr '+str(endpoint)+' udp dport '+str(port)+' accept', 'iifname "maywg'+str(slot)+'" ip saddr '+str(peer)+' ip daddr '+str(local)+' accept']
+
+def wireguard_rules(): return wireguard_peer_rules(0) + wireguard_peer_rules(1)
 
 if action == 'render-wireguard':
     print('\n'.join('    '+rule for rule in wireguard_rules()), end=''); raise SystemExit(0)
@@ -72,7 +74,7 @@ def canonical(text):
         return 'ct state '+expression+' '+match[2]
     text = re.sub(r'ct state (0x[0-9a-f]+(?:,0x[0-9a-f]+)*) (accept|drop)', states, text)
     text = re.sub(r'ct state (established,related|related,established)', 'ct state { established, related }', text)
-    if any(value not in ('lo', 'maywg0') for value in re.findall(r'"([^"\n]*)"', text)): raise SystemExit('Unsupported firewall string expression.')
+    if any(value not in ('lo', 'maywg0', 'maywg1') for value in re.findall(r'"([^"\n]*)"', text)): raise SystemExit('Unsupported firewall string expression.')
     def address(match):
         try: return str(ipaddress.ip_address(match.group()))
         except ValueError: return match.group()

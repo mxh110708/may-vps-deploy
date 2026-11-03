@@ -22,7 +22,7 @@ public sealed partial class MainWindow
         TextBox? expectedInput = null; JsonObject? reviewedOptions = null;
         var errorText = Text("", 13, true);
         var panel = Column(Text("入站 → 服务器连接所选下一跳 → 网站", 17), roleChoice, scopeText, currentText, statusText, modeHost, fields,
-            Text("从已保存方案选择完整原生节点：sing-box 支持 Shadowsocks、Hysteria2、TUIC v5；固定 Xray 支持 Shadowsocks、Hysteria2。当前支持 IP 端点，不接受插件或客户端 detour。下一跳失败不会回退直连。", 13, true),
+            Text("从已保存方案选择完整原生节点。" + ServerOutboundRouting.CapabilitySummary + "不接受插件或客户端 detour。下一跳失败不会回退直连。", 13, true),
             Text("落地需允许当前 VPS 的来源地址；本操作不修改落地白名单。执行只重启所选组件，现有连接短暂断开。预期出口用于实际验收，不应填入口机地址。", 13, true), errorText);
         var dialog = OperationDialog("服务器固定下一跳", DialogScroll(panel), "审阅");
         void Refresh()

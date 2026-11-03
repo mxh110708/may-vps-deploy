@@ -91,6 +91,11 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
         static string Marker(string name, string value) => "VPSDEPLOY_" + name + "_B64=" + Convert.ToBase64String(Encoding.UTF8.GetBytes(value)) + "\n";
         string Parameter(string name)
         {
+            if (name == "PROBES_JSON")
+            {
+                var document = System.Text.RegularExpressions.Regex.Match(payload, "<<'MAY_SERVER_PROBES_B64'\\n([A-Za-z0-9+/=]+)\\nMAY_SERVER_PROBES_B64");
+                return document.Success ? Encoding.UTF8.GetString(Convert.FromBase64String(document.Groups[1].Value)) : "";
+            }
             var match = System.Text.RegularExpressions.Regex.Match(payload, "export VPS_PARAM_" + name + "=.+?'([A-Za-z0-9+/=]*)' ");
             return match.Success ? Encoding.UTF8.GetString(Convert.FromBase64String(match.Groups[1].Value)) : "";
         }
@@ -106,7 +111,7 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
             {
                 if (HopProbeFailure) return Task.FromResult(new CommandResult(1, "", "synthetic hop probe failed"));
                 var requests = JsonNode.Parse(Parameter("PROBES_JSON"))!.AsArray();
-                var items = new JsonArray(requests.OfType<JsonObject>().Select(r => (JsonNode?)new JsonObject { ["Id"] = r.Text("Id"), ["Status"] = "Passed", ["Egress"] = r.Text("ExpectedAddress"), ["From"] = "EntryServer", ["Network"] = "TCP" }).ToArray());
+                var items = new JsonArray(requests.OfType<JsonObject>().Select(r => (JsonNode?)new JsonObject { ["Id"] = r.Text("Id"), ["Status"] = "Passed", ["Egress"] = r.Text("ExpectedAddress"), ["From"] = "EntryServer", ["Network"] = "TCP", ["Transport"] = ServerOutboundRouting.OutboundProtocol(r["Outbound"]!) is "hysteria2" or "tuic" ? "QUIC" : "TCP", ["ValidatedProtocol"] = ServerOutboundRouting.OutboundProtocol(r["Outbound"]!) }).ToArray());
                 if (HopProbeIncomplete && items.Count > 0) items.RemoveAt(0);
                 return Task.FromResult(new CommandResult(0, Marker("HOP_VALIDATION", new JsonObject { ["Status"] = "Passed", ["Items"] = items }.ToJsonString()) + "VPSDEPLOY_SERVER_HOPS_PASSED\n", ""));
             }
@@ -139,6 +144,12 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
         {
             foreach (var item in protocolInventory) if (item.Value != null) HealthAudit.Put("Services." + item.Key, HealthService(item.Value.Flag("Installed"), item.Value.Flag("Enabled"), item.Value.Flag("Active")));
             return Task.FromResult(new CommandResult(0, Marker("HEALTH_AUDIT", HealthAudit.ToJsonString()), ""));
+        }
+        if (asset == "resource-certificates-read.sh")
+        {
+            var request = JsonNode.Parse(Parameter("CERTIFICATE_REQUEST"))!.AsObject(); var now = DateTimeOffset.UtcNow;
+            var items = new JsonArray(request["Items"]!.AsArray().Select(i => (JsonNode?)new JsonObject { ["Key"] = i!.Text("Key"), ["Status"] = "Observed", ["NotBefore"] = now.AddDays(-1), ["NotAfter"] = now.AddDays(90), ["Sha256"] = new string('a', 64), ["HostnameMatches"] = true }).ToArray());
+            return Task.FromResult(new CommandResult(0, Marker("RESOURCE_CERTIFICATES", new JsonObject { ["Version"] = 1, ["CollectedAt"] = now, ["Items"] = items }.ToJsonString()) + "VPSDEPLOY_RESOURCE_READ_OK\n", ""));
         }
         if (asset == "tunnel-public-audit.sh") return Task.FromResult(new CommandResult(0, Marker("TUNNEL_ACCESS", TunnelAccessAudit.ToJsonString()) + "VPSDEPLOY_TUNNEL_ACCESS_OK\n", ""));
         if (asset == "network-audit.sh") return Task.FromResult(new CommandResult(0, Marker("NETWORK_AUDIT", NetworkAudit.ToJsonString()), ""));

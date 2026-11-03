@@ -102,7 +102,7 @@ internal sealed partial class BoundaryTests
             var port = MixedPort(); JsonObject config; var controller = TcpPort(); var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
             if (name == "sing-box")
             {
-                var outbound = node["sing_box"]!.DeepClone().AsObject(); outbound["tag"] = "review"; outbound["tls"]!["certificate"] = new JsonArray(certificate.ExportCertificatePem());
+                var outbound = node["sing_box"]!.DeepClone().AsObject(); outbound["tag"] = "review"; if (outbound["tls"] is JsonObject tls && !tls.Flag("reality.enabled")) tls["certificate"] = new JsonArray(certificate.ExportCertificatePem());
                 config = new JsonObject { ["log"] = new JsonObject { ["disabled"] = Environment.GetEnvironmentVariable("MAY_HYSTERIA_TRACE") != "1", ["level"] = "debug" }, ["inbounds"] = new JsonArray(new JsonObject { ["type"] = "mixed", ["listen"] = "127.0.0.1", ["listen_port"] = port }), ["outbounds"] = new JsonArray(outbound), ["route"] = new JsonObject { ["final"] = "review" } };
             }
             else

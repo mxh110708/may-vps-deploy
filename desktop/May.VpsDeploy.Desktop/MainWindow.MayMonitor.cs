@@ -9,12 +9,14 @@ namespace May.VpsDeploy.Desktop;
 
 public sealed partial class MainWindow
 {
-    private async Task ManageMayMonitorDialog()
+    private Task ManageMayMonitorDialog() => ManageMayMonitorDialog("", "Server");
+    private async Task ManageMayMonitorDialog(string initialInstance, string initialRole)
     {
         JsonObject? PendingAgent(string relative){var file=SafePath.Resolve(paths.Instance(relative),"operation-pending.dotnet.json");if(!File.Exists(file))return null;var pending=ArchiveStore.ReadJson(file);return pending.Text("Kind")=="MayMonitor"&&pending.Text("Role")=="Agent"&&pending["MayAgentConfiguration"] is JsonObject&&pending.Text("Phase") is not("Committed" or "RolledBack")?pending:null;}
         var instances = store.ListInstances().Where(i => { var state = InstanceLifecycle.Read(store, i.RelativePath, i.Plan); return state.Managed && (!state.NeedsRecovery||PendingAgent(i.RelativePath)!=null); }).ToArray();
         if (instances.Length == 0) throw new OperationException("先接入一个已完成纳管的实例，再显式部署 May Monitor。");
-        var model = new JsonObject { ["Instance"] = instances[0].RelativePath, ["Role"] = "Server", ["Action"] = "Check" };
+        if (initialInstance != "" && !instances.Any(i => i.RelativePath == initialInstance) || !MayMonitorLifecycle.Roles.Contains(initialRole)) throw new OperationException("监控维护目标已变化，请重新选择。");
+        var model = new JsonObject { ["Instance"] = initialInstance == "" ? instances[0].RelativePath : initialInstance, ["Role"] = initialRole, ["Action"] = "Check" };
         var instance = Choice("目标实例", model, "Instance", instances.Select(i => (i.RelativePath, i.Plan.Text("Provider") + " / " + i.Plan.Text("Instance"))));
         var role = Choice("May 组件", model, "Role", [("Server", "May Monitor 服务端"), ("Agent", "May Monitor Agent")]);
         var action = Choice("操作", model, "Action", new[] { ("Check", "只读核对"), ("Install", "安装独立 May 组件"), ("Upgrade", "升级到配套固定版本"), ("ConfigureAgent", "修改 Agent 地址与凭据"), ("RepairAgent", "恢复 Agent 连接（待恢复事务）"), ("ConfigureRead", "应用／续期本机只读授权（服务端）"), ("RevokeRead", "撤销服务端只读授权"), ("ConfigureTheme", "应用已审查的静态主题（服务端）"), ("DisableTheme", "恢复内置界面（服务端）"), ("Backup", "一致性备份"), ("Restore", "恢复 May 备份"), ("Enable", "启用 May 服务"), ("Disable", "停用 May 服务"), ("Remove", "移除 May 程序（保留数据）") });

@@ -146,19 +146,28 @@ internal sealed partial class BoundaryTests
             if (Failure is "validation" or "rollback") throw new OperationException("synthetic HTTPS validation failure"); if (Failure == "cancel") throw new OperationCanceledException();
             var items = new JsonArray();
             foreach (var node in InboundRendering.Nodes(store, plan.Text("Provider") + "/" + plan.Text("Instance") + "/May-VPS-Deploy", plan, model, credentials).Where(n => ids.Contains(n.Text("InboundOrigin.InboundId")))) items.Add(new JsonObject { ["InboundId"] = node.Text("InboundOrigin.InboundId"), ["UserId"] = node.Text("InboundOrigin.UserId"), ["Family"] = node.Text("InboundOrigin.Family"), ["ConnectionFingerprint"] = ClientNodeImport.ConnectionFingerprint(node), ["Status"] = "Passed", ["From"] = "Controller", ["Scope"] = "ProxyHttps", ["Result"] = new JsonObject { ["Status"] = "Reachable" } });
+            foreach (var item in items.OfType<JsonObject>())
+                if (InboundRoutingPolicy.Rules(InboundCatalog.Items(model,"Inbounds").Single(i=>i.Text("Id")==item.Text("InboundId"))).Count>0) item["Result"]!["UdpValidation"] = new JsonObject { ["ResponseMatched"] = true, ["Transport"] = "UDP" };
             if (Failure == "incomplete") items.RemoveAt(0); return Task.FromResult(new JsonObject { ["Status"] = "Passed", ["Items"] = items });
         }
     }
     private sealed class InboundTestRemote : IRemoteSessionFactory, IRemoteSession
     {
         public FakeRemote Inner { get; } = new(); public string Failure { get; set; } = ""; public JsonObject? Current { get; private set; } private JsonObject? original;
-        public int ApplyCalls { get; private set; } public string[] LastAffected { get; private set; } = [];
+        public int ApplyCalls { get; private set; } public int PolicyProbeCalls { get; private set; } public string[] LastAffected { get; private set; } = [];
         public Task<IRemoteSession> OpenAsync(SshEndpoint endpoint, IUserInteraction user, CancellationToken cancellationToken) => Task.FromResult<IRemoteSession>(this);
         public Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken ct) => Inner.RunAsync(command, timeout, ct);
         private static string Parameter(string payload, string name) { var match = Regex.Match(payload, "export VPS_PARAM_" + name + "=.+?'([A-Za-z0-9+/=]*)' "); return match.Success ? Encoding.UTF8.GetString(Convert.FromBase64String(match.Groups[1].Value)) : ""; }
         public async Task<CommandResult> RunScriptAsync(string payload, TimeSpan timeout, bool mutating, CancellationToken ct)
         {
             var asset = payload.Split('\n')[0].Replace("# MXH asset: ", "");
+            if (asset == "inbound-policy-probe.sh")
+            {
+                PolicyProbeCalls++; if (Failure == "policy-validation") throw new OperationException("Synthetic policy outbound failure.");
+                var document = Regex.Match(payload, @"(?m)^([A-Za-z0-9+/=]+)\nMAY_INBOUND_DOCUMENT_B64$").Groups[1].Value;
+                var request = JsonNode.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(document)))!.AsObject(); var evidence = Policy28Proof(request);
+                return new(0, "VPSDEPLOY_INBOUND_POLICY_RESULT_B64=" + Convert.ToBase64String(Encoding.UTF8.GetBytes(evidence.ToJsonString())) + "\nVPSDEPLOY_INBOUND_POLICY_PASSED\n", "");
+            }
             if (asset == "inbound-read.sh")
             {
                 var state = new JsonObject { ["Hash"] = Failure == "drift" ? new string('f', 64) : Current == null ? "Absent" : ArchiveStore.Fingerprint(Current), ["Registry"] = Current == null ? null : new JsonObject { ["Model"] = Current["Model"]!.DeepClone(), ["Bindings"] = Current["Bindings"]!.DeepClone() }, ["Runtime"] = new JsonObject() };

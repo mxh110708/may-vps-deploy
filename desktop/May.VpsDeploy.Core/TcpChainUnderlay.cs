@@ -9,33 +9,47 @@ public sealed record WireGuardChainChoice(string Key, string Label, JsonObject R
 // tunnel, its keys, its routes or its lifecycle.
 public static class TcpChainUnderlay
 {
-    public static bool Selected(JsonObject chain) => chain.ContainsKey("WireGuard");
+    public static bool Selected(JsonObject chain) => chain.ContainsKey("WireGuard") || chain.ContainsKey("WireGuards");
+    public static JsonObject[] References(JsonObject chain)
+    {
+        if (chain.ContainsKey("WireGuard") && chain.ContainsKey("WireGuards")) throw new OperationException("不能混用单段和多段隧道引用。");
+        if (chain.ContainsKey("WireGuards")) return chain["WireGuards"] is JsonArray a && a.Count is >= 1 and <= 2 && a.All(n => n is JsonObject) ? a.OfType<JsonObject>().ToArray() : throw new OperationException("请选择一到两个相邻加密段。");
+        return chain.ContainsKey("WireGuard") ? chain["WireGuard"] is JsonObject reference ? [reference] : throw new OperationException("隧道引用无效。") : [];
+    }
+    public static bool HasSegment(JsonObject chain, string segment) => References(chain).Any(r => r.Text("Segment") == segment);
+    public static string SelectionKey(JsonObject chain) => string.Join("+", References(chain).OrderBy(r => r.Text("Segment"), StringComparer.Ordinal).Select(r => r.Text("Id") + ":" + r.Text("Segment")));
+    public static JsonObject WithReference(JsonObject chain, JsonObject reference) { var single = chain.DeepClone().AsObject(); single.Remove("WireGuards"); single["WireGuard"] = reference.DeepClone(); return single; }
     public static void Validate(JsonObject chain)
     {
         if (!Selected(chain)) return;
-        if (chain["WireGuard"] is not JsonObject r || r.Count != 3 || r.Any(p => p.Key is not ("Id" or "Segment" or "Fingerprint")) ||
-            r.Any(p => p.Value is not JsonValue value || !value.TryGetValue<string>(out _)) ||
-            r.Text("Segment") is not ("FrontRelay" or "RelayLanding") || !Regex.IsMatch(r.Text("Fingerprint"), "^[a-f0-9]{64}$"))
-            throw new OperationException("请选择一段连接和已验收的 WireGuard 隧道。");
-        _ = TcpChains.Id(r.Text("Id"));
+        var references = References(chain);
+        if (references.Select(r => r.Text("Segment")).Distinct().Count() != references.Length || references.Select(r => r.Text("Id")).Distinct().Count() != references.Length) throw new OperationException("两个加密段不能重复通道或方向。");
+        foreach (var r in references)
+        {
+            if (r.Count != 3 || r.Any(p => p.Key is not ("Id" or "Segment" or "Fingerprint")) ||
+                r.Any(p => p.Value is not JsonValue value || !value.TryGetValue<string>(out _)) ||
+                r.Text("Segment") is not ("FrontRelay" or "RelayLanding") || !Regex.IsMatch(r.Text("Fingerprint"), "^[a-f0-9]{64}$"))
+                throw new OperationException("请选择相邻连接和已验收的 WireGuard 隧道。");
+            _ = TcpChains.Id(r.Text("Id"));
+        }
     }
-    public static string[] Participants(JsonObject chain) => chain.Text("WireGuard.Segment") == "FrontRelay"
+    public static string[] Participants(JsonObject chain) => HasSegment(chain, "FrontRelay")
         ? [chain.Text("FrontInstance"), chain.Text("RelayInstance")] : [chain.Text("RelayInstance"), chain.Text("LandingInstance")];
     private static JsonObject Material(ArchiveStore store, JsonObject configuration)
     {
         var peers = new JsonArray();
         foreach (var instance in WireGuardTunnels.Instances(configuration))
         {
-            var plan = TcpChains.Plan(store, instance);
+            var plan = TcpChains.Plan(store, instance); var component = WireGuardTunnels.Component(configuration, instance);
             var state = ArchiveStore.ReadJson(SafePath.Resolve(store.Paths.Instance(instance), "deployment-state.json"));
-            if (plan["WireGuardTunnel"] is not JsonObject peer || peer.Text("Id") != configuration.Text("Id") ||
-                !Regex.IsMatch(state.Text("WireGuardTunnel.RemoteHash"), "^[a-f0-9]{64}$") ||
-                state.Text("WireGuardTunnel.ConfigurationFingerprint") != ArchiveStore.Fingerprint(peer) || state["WireGuardTunnelTransaction"] != null)
+            if (plan[component] is not JsonObject peer || peer.Text("Id") != configuration.Text("Id") ||
+                !Regex.IsMatch(state.Text(component + ".RemoteHash"), "^[a-f0-9]{64}$") ||
+                state.Text(component + ".ConfigurationFingerprint") != ArchiveStore.Fingerprint(peer) || state["WireGuardTunnelTransaction"] != null)
                 throw new OperationException("隧道参与实例的配置、身份或事务已变化，请先核对隧道。");
             var first = instance == configuration.Text("FirstInstance");
             if (peer.Text("LocalAddress") != configuration.Text(first ? "FirstAddress" : "SecondAddress") || peer.Text("PeerAddress") != configuration.Text(first ? "SecondAddress" : "FirstAddress"))
                 throw new OperationException("隧道内地址与已验收的双端配置不同。");
-            peers.Add(new JsonObject { ["Instance"] = instance, ["Peer"] = peer.DeepClone(), ["RemoteHash"] = state.Text("WireGuardTunnel.RemoteHash") });
+            peers.Add(new JsonObject { ["Instance"] = instance, ["Peer"] = peer.DeepClone(), ["RemoteHash"] = state.Text(component + ".RemoteHash") });
         }
         return new JsonObject { ["Configuration"] = configuration.DeepClone(), ["Peers"] = peers };
     }
@@ -49,7 +63,7 @@ public static class TcpChainUnderlay
         foreach (var record in WireGuardTunnels.List(store).Where(r => r.Text("Phase") == "Active"))
             foreach (var segment in new[] { "FrontRelay", "RelayLanding" })
             {
-                var candidate = chain.DeepClone().AsObject();
+                var candidate = chain.DeepClone().AsObject(); candidate.Remove("WireGuards");
                 var pair = segment == "FrontRelay" ? new[] { chain.Text("FrontInstance"), chain.Text("RelayInstance") } : [chain.Text("RelayInstance"), chain.Text("LandingInstance")];
                 if (!WireGuardTunnels.Instances(record["Configuration"]!.AsObject()).ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(pair)) continue;
                 JsonObject reference;
@@ -59,6 +73,12 @@ public static class TcpChainUnderlay
             }
     }
     public static JsonObject? Resolve(ArchiveStore store, JsonObject chain)
+    {
+        Validate(chain); JsonObject? first = null;
+        foreach (var reference in References(chain)) { var c = ResolveSingle(store, WithReference(chain, reference)); first ??= c; }
+        return first;
+    }
+    private static JsonObject? ResolveSingle(ArchiveStore store, JsonObject chain)
     {
         Validate(chain); if (!Selected(chain)) return null;
         var record = ArchiveStore.ReadJson(WireGuardTunnels.FileName(store.Paths, chain.Text("WireGuard.Id")));
@@ -78,16 +98,17 @@ public static class TcpChainUnderlay
     public static string Target(ArchiveStore store, JsonObject chain, bool fromFront)
     {
         var target = chain.Text(fromFront ? "RelayInstance" : "LandingInstance");
-        var tunnel = Resolve(store, chain);
-        if (tunnel != null && chain.Text("WireGuard.Segment") == (fromFront ? "FrontRelay" : "RelayLanding")) return Inner(tunnel, target);
+        _ = Resolve(store, chain);
+        var reference = References(chain).SingleOrDefault(r => r.Text("Segment") == (fromFront ? "FrontRelay" : "RelayLanding"));
+        if (reference != null) return Inner(ResolveSingle(store, WithReference(chain, reference))!, target);
         return TcpChains.ServerAddress(TcpChains.Plan(store, target), chain);
     }
     public static JsonObject Rule(ArchiveStore store, JsonObject chain, bool front, int port)
     {
         var rule = TcpChains.Rule(chain, front, Target(store, chain, front), port);
-        if (!front && chain.Text("WireGuard.Segment") == "FrontRelay")
+        if (!front && HasSegment(chain, "FrontRelay"))
         {
-            var tunnel = Resolve(store, chain)!;
+            var tunnel = ResolveSingle(store, WithReference(chain, References(chain).Single(r => r.Text("Segment") == "FrontRelay")))!;
             rule["ListenFamily"] = "IPv4";
             rule["AllowedSources"] = new JsonArray(Inner(tunnel, chain.Text("FrontInstance")) + "/32");
         }
@@ -95,12 +116,12 @@ public static class TcpChainUnderlay
     }
     public static void GuardRemoval(ArchiveStore store, string id)
     {
-        if (TcpChains.List(store).Any(r => (TcpChains.Pending(r) || r.Text("Phase") == "Active") && r.Text("Configuration.WireGuard.Id") == id))
+        if (TcpChains.List(store).Any(r => (TcpChains.Pending(r) || r.Text("Phase") == "Active") && References(r["Configuration"]!.AsObject()).Any(reference => reference.Text("Id") == id)))
             throw new OperationException("此隧道仍被跨实例线路依赖，请先从线路页移除线路；线路移除不会删除隧道。");
     }
-    public static string RelaySourceDescription(JsonObject chain) => chain.Text("WireGuard.Segment") == "FrontRelay"
+    public static string RelaySourceDescription(JsonObject chain) => HasSegment(chain, "FrontRelay")
         ? "WireGuard 前置对端的隧道内 IPv4 /32 地址" : chain.Text("FrontSourceAddress") + TcpChains.Prefix(chain);
     public static string Summary(JsonObject chain) => !Selected(chain) ? "实例间连接：原生直连。" :
-        "WireGuard 加密段：" + (chain.Text("WireGuard.Segment") == "FrontRelay" ? "前置 → 中转" : "中转 → 落地") +
-        "；沿用已验收的两端隧道与 IPv4 /32 内地址。另一段与客户端入口沿用所选地址族。不会回退到公网连接；线路移除与恢复只处理转发，不重建、删除或恢复隧道。";
+        "WireGuard 加密段：" + string.Join("、", References(chain).Select(r => r.Text("Segment") == "FrontRelay" ? "前置 → 中转" : "中转 → 落地")) +
+        "；沿用已验收的两端隧道与 IPv4 /32 内地址。未加密段与客户端入口沿用所选地址族。两个加密段逐段核验，彼此独立。不会回退到公网连接；线路移除与恢复只处理转发，不重建、删除或恢复隧道。";
 }

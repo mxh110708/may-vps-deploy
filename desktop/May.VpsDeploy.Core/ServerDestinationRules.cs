@@ -15,7 +15,7 @@ public static class ServerDestinationRules
     public const int MaximumRules = 32;
     public static string KindLabel(string kind) => kind switch { "Domain" => "完整域名", "Suffix" => "域名及其子域名", "Cidr" => "目标 IP 网段", "RuleSet" => "分类规则集", _ => throw new OperationException("请选择受支持的匹配类型。") };
     public static string ActionLabel(string action) => action switch { "NextHop" => "所选落地", "Direct" => "入口机直连", "Reject" => "阻断", _ => throw new OperationException("请选择受支持的出站动作。") };
-    public static JsonArray Normalize(JsonNode? value)
+    public static JsonArray Normalize(JsonNode? value, Func<string, string>? targetIdentity = null)
     {
         if (value == null) return new();
         if (value is not JsonArray input || input.Count > MaximumRules) throw new OperationException("分流规则最多 32 条，请分项核对。");
@@ -24,7 +24,7 @@ public static class ServerDestinationRules
         {
             if (item is not JsonObject rule || rule.Count is < 3 or > 5 || rule.Any(p => p.Key is not ("Kind" or "Value" or "Action" or "Target" or "RuleSet") || p.Key!="RuleSet"&&(p.Value is not JsonValue text || !text.TryGetValue<string>(out _)))) throw new OperationException("分流规则字段无效。");
             var kind = rule.Text("Kind"); var action = rule.Text("Action"); KindLabel(kind); ActionLabel(action);
-            var target = rule.Text("Target"); if (target != "") { if (action != "NextHop") throw new OperationException("只有落地动作可以指定附加落地。"); ServerOutboundRouting.HopId(target); }
+            var target = rule.Text("Target"); if (target != "") { if (action != "NextHop") throw new OperationException("只有落地动作可以指定附加落地。"); _ = (targetIdentity ?? ServerOutboundRouting.HopId)(target); }
             var raw = rule.Text("Value");
             if (raw.Length is < 1 or > 300 || raw.Any(char.IsControl)) throw new OperationException("请填写一个域名或 CIDR 网段，不支持控制字符。");
             string canonical;
@@ -105,22 +105,26 @@ public static class ServerDestinationRules
     public static JsonArray Render(string role, JsonArray rules, string[] inboundTags)
     {
         if (!ServerOutboundRouting.Roles.Contains(role)) throw new OperationException("请选择受支持的入站组件。");
+        return RenderNative(role == "RealityEntry", rules, inboundTags, decision => decision.Action == "Reject" ? "block" : decision.Action == "Direct" ? "direct" : decision.Target == "" ? ServerOutboundRouting.Tag : ServerOutboundRouting.HopTag(decision.Target));
+    }
+    public static JsonArray RenderNative(bool xray, JsonArray rules, string[] inboundTags, Func<ServerDestinationDecision, string> target)
+    {
         var result = new JsonArray();
         foreach (var item in ServerRuleSets.Expand(rules))
         {
             var kind = item.Text("Kind"); var value = item.Text("Value"); var action = item.Text("Action");
-            var rule = new JsonObject { [role == "RealityEntry" ? "inboundTag" : "inbound"] = new JsonArray(inboundTags.Select(t => (JsonNode?)JsonValue.Create(t)).ToArray()), ["network"] = "tcp" };
-            if (role == "RealityEntry")
+            var rule = new JsonObject { [xray ? "inboundTag" : "inbound"] = new JsonArray(inboundTags.Select(t => (JsonNode?)JsonValue.Create(t)).ToArray()), ["network"] = "tcp" };
+            if (xray)
             {
                 rule["type"] = "field"; rule[kind == "Cidr" ? "ip" : "domain"] = new JsonArray(kind == "Cidr" ? value : (kind == "Domain" ? "full:" : "domain:") + value);
-                rule["outboundTag"] = action == "Reject" ? "block" : action == "Direct" ? "direct" : item.Text("Target") == "" ? ServerOutboundRouting.Tag : ServerOutboundRouting.HopTag(item.Text("Target"));
+                rule["outboundTag"] = target(new(action, item.Text("Target")));
             }
             else
             {
                 if (kind == "Suffix") { rule["domain"] = new JsonArray(value); rule["domain_suffix"] = new JsonArray("." + value); }
                 else rule[kind == "Cidr" ? "ip_cidr" : "domain"] = new JsonArray(value);
                 rule["action"] = action == "Reject" ? "reject" : "route";
-                if (action != "Reject") rule["outbound"] = action == "Direct" ? "direct" : item.Text("Target") == "" ? ServerOutboundRouting.Tag : ServerOutboundRouting.HopTag(item.Text("Target"));
+                if (action != "Reject") rule["outbound"] = target(new(action, item.Text("Target")));
             }
             result.Add(rule);
         }

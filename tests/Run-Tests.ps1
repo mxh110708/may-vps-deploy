@@ -1759,6 +1759,10 @@ if($pythonCommandForClient){
     if($LASTEXITCODE -ne 0){throw 'Academic classification and campus access policy tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_health_audit.py')
     if($LASTEXITCODE -ne 0){throw 'Health audit behavior tests failed.'}
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_resource_certificates.py')
+    if($LASTEXITCODE -ne 0){throw 'Read-only public certificate resource checks failed.'}
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_client_output_review.py')
+    if($LASTEXITCODE -ne 0){throw 'Client output difference and native fragment checks failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_network_runtime.py')
     if ($LASTEXITCODE -ne 0) { throw 'Network runtime tests failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_network_audit.py')
@@ -1779,12 +1783,18 @@ if($pythonCommandForClient){
     if ($LASTEXITCODE -ne 0) { throw 'Native QUIC client source extraction regression failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_wireguard.py')
     if ($LASTEXITCODE -ne 0) { throw 'WireGuard ownership and scoped recovery regressions failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_chain30.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Adjacent tunnel and TCP PROXY resource/path regressions failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_inbound_host.py')
-    if ($LASTEXITCODE -ne 0) { throw 'Independent inbound ownership regression failed.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Independent inbound lifecycle tests failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_inbound_policy.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Independent inbound policy and native path ownership regression failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_hysteria_hopping.py')
     if ($LASTEXITCODE -ne 0) { throw 'Hysteria hopping firewall scope regression failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_server_quic_probe.py')
     if ($LASTEXITCODE -ne 0) { throw 'Server QUIC probe boundary regression failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_server_stream_next_hops.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Server stream next-hop and private probe input regression failed.' }
 }
 if($bash -and $pythonCommandForClient){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_tcp_forwarding.py')

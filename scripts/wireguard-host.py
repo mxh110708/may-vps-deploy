@@ -1,13 +1,13 @@
 """Scoped WireGuard files, preflight and recovery. Embedded after ForwardHost
 and wireguard-runtime.py by RemoteAssets, not a general remote command runner.
 """
-WG_UNIT = '/etc/systemd/system/may-wireguard.service'
-WG_PROGRAM = '/usr/local/libexec/may-wireguard'
+WG_UNIT = '/etc/systemd/system/may-wireguard' + WG_SUFFIX + '.service'
+WG_PROGRAM = '/usr/local/libexec/may-wireguard' + WG_SUFFIX
 
 
 class WireGuardHost(ForwardHost):
     CONFIG, DIRECTORY, ACL = WG_CONFIG, WG_DIRECTORY, WG_CONFIG
-    PREFIX, ACL_UNIT = 'may-wireguard', 'may-wireguard.service'
+    PREFIX, ACL_UNIT = 'may-wireguard' + WG_SUFFIX, 'may-wireguard' + WG_SUFFIX + '.service'
     JOURNAL = 'wireguard-state.json'
     EXTRA_FILES = (WG_KEY, WG_UNIT, WG_PROGRAM)
 
@@ -16,7 +16,7 @@ class WireGuardHost(ForwardHost):
     def units(self):
         result = []
         for directory in ('/etc/systemd/system', '/run/systemd/system', '/usr/lib/systemd/system'):
-            result.extend('/' + str(p.relative_to(self.root)) for p in self.path(directory).glob('may-wireguard.service*'))
+            result.extend('/' + str(p.relative_to(self.root)) for p in self.path(directory).glob(self.ACL_UNIT + '*'))
         return sorted(result)
 
     def unit_path(self, name): return '/etc/systemd/system/' + name
@@ -70,7 +70,7 @@ class WireGuardHost(ForwardHost):
         observed = self.read()
         if observed['Hash'] != 'Absent': return observed
         for directory in ('/etc/systemd/system', '/run/systemd/system', '/usr/lib/systemd/system'):
-            if self.path(directory + '/may-wireguard.service').exists(): raise ValueError('WireGuard unit namespace occupied.')
+            if self.path(directory + '/' + self.ACL_UNIT).exists(): raise ValueError('WireGuard unit namespace occupied.')
         for ip in (c['LocalAddress'], c['PeerAddress']):
             if json.loads(self.command(['ip', '-j', '-4', 'route', 'show', 'exact', ip + '/32']).stdout):
                 raise ValueError('A route already occupies a WireGuard host address.')

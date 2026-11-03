@@ -22,7 +22,7 @@ internal sealed partial class BoundaryTests
         var version = await new ExternalToolRunner().RunAsync(xray, ["version"], null, TimeSpan.FromSeconds(10), ct); Check(version.ExitCode == 0 && version.Output.Contains("26.3.27"), "external transport fixture used another Xray version");
         using var key = RSA.Create(2048); var request = new CertificateRequest("CN=stream.example.test", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1); var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("stream.example.test"); san.AddIpAddress(IPAddress.Loopback); request.CertificateExtensions.Add(san.Build()); request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
         using var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(2));
-        await using var origin = await HysteriaHttpsTarget.Start(repository, f, cert, key, ct); await using var dns = new TuicDnsTarget(); var processes = new List<int>(); var cases = new JsonArray();
+        await using var origin = await HysteriaHttpsTarget.Start(repository, f, cert, key, ct); await using var dns = new TuicDnsTarget(); var processes = new List<TestProcessIdentity>(); var cases = new JsonArray();
         foreach (var (protocol, transport, early) in new[] { ("vless", "ws", false), ("trojan", "ws", false), ("vless", "ws", true), ("trojan", "ws", true), ("vless", "grpc", false), ("trojan", "grpc", false) })
         {
             var port = TcpPort(); var scheme = ClientSchemes.New(f.Paths); var region = scheme["Layout"]!.Strings("region_groups")[0];
@@ -37,7 +37,7 @@ internal sealed partial class BoundaryTests
             else { stream["grpcSettings"] = new JsonObject { ["serviceName"] = node.Text("sing_box.transport.service_name"), ["multiMode"] = false }; stream["tlsSettings"] = new JsonObject { ["alpn"] = new JsonArray("h2"), ["certificates"] = new JsonArray(new JsonObject { ["certificate"] = Lines(cert.ExportCertificatePem()), ["key"] = Lines(key.ExportPkcs8PrivateKeyPem()) }) }; }
             var settings = protocol == "vless" ? new JsonObject { ["decryption"] = "none", ["clients"] = new JsonArray(new JsonObject { ["id"] = StreamUuid }) } : new JsonObject { ["clients"] = new JsonArray(new JsonObject { ["password"] = node.Text("sing_box.password") }) };
             var server = new JsonObject { ["log"] = new JsonObject { ["loglevel"] = "error" }, ["inbounds"] = new JsonArray(new JsonObject { ["listen"] = "127.0.0.1", ["port"] = port, ["protocol"] = protocol, ["settings"] = settings, ["streamSettings"] = stream }), ["outbounds"] = new JsonArray(new JsonObject { ["protocol"] = "freedom", ["tag"] = "local-test-targets" }) };
-            await using var running = await ServerQuicProcess.Start(xray, server, directory, true, port, ct); processes.Add(running.Process.Id);
+            await using var running = await ServerQuicProcess.Start(xray, server, directory, true, port, ct); processes.Add(new TestProcessIdentity(running.Process));
             foreach (var clientName in new[] { "sing-box", "mihomo" })
             {
                 var candidate = node.DeepClone().AsObject();
@@ -46,7 +46,7 @@ internal sealed partial class BoundaryTests
                 if (!early) { candidate["sing_box"]!["tls"]!["utls"] = new JsonObject { ["enabled"] = true, ["fingerprint"] = "firefox" }; candidate["clash"]!["client-fingerprint"] = "firefox"; candidate["sing_box"]!["tls"]!["alpn"] = new JsonArray(transport == "ws" ? "http/1.1" : "h2"); candidate["clash"]!["alpn"] = new JsonArray(transport == "ws" ? "http/1.1" : "h2"); }
                 await using (var client = await Round15Client.Start(clientName, assets.ResolveCore(clientName), candidate, cert, directory, ct))
                 {
-                    processes.Add(client.Process.Id); using var http = TuicHttp(client.Port, cert); var before = origin.Requests;
+                    processes.Add(new TestProcessIdentity(client.Process)); using var http = TuicHttp(client.Port, cert); var before = origin.Requests;
                     try
                     {
                         var body = await http.GetStringAsync("https://127.0.0.1:" + origin.Port, ct);
@@ -70,7 +70,7 @@ internal sealed partial class BoundaryTests
                         else if (failure == "host") { bad["sing_box"]!["transport"]!["headers"]!["Host"] = "wrong.example.test"; bad["clash"]!["ws-opts"]!["headers"]!["Host"] = "wrong.example.test"; }
                         else if (transport == "ws") { bad["sing_box"]!["transport"]!["path"] = "/wrong-path"; bad["clash"]!["ws-opts"]!["path"] = "/wrong-path"; }
                         else { bad["sing_box"]!["transport"]!["service_name"] = "WrongService"; bad["clash"]!["grpc-opts"]!["grpc-service-name"] = "WrongService"; }
-                        await using var client = await Round15Client.Start(clientName, assets.ResolveCore(clientName), bad, cert, directory, ct); processes.Add(client.Process.Id); using var http = TuicHttp(client.Port, cert); http.Timeout = TimeSpan.FromSeconds(2); var count = origin.Requests; var refused = false;
+                        await using var client = await Round15Client.Start(clientName, assets.ResolveCore(clientName), bad, cert, directory, ct); processes.Add(new TestProcessIdentity(client.Process)); using var http = TuicHttp(client.Port, cert); http.Timeout = TimeSpan.FromSeconds(2); var count = origin.Requests; var refused = false;
                         try { await http.GetStringAsync("https://127.0.0.1:" + origin.Port, ct); } catch (Exception e) when (e is HttpRequestException or OperationCanceledException) { refused = true; }
                         Check(refused && origin.Requests == count, clientName + " bypassed " + protocol + "/" + transport + " failure " + failure);
                     }
@@ -79,7 +79,7 @@ internal sealed partial class BoundaryTests
             }
             Console.WriteLine("Round 18 native: " + protocol + "/" + transport + (early ? " early-data" : "") + " dual clients authenticated HTTPS/UDP passed.");
         }
-        Check(processes.All(id => { try { using var process = Process.GetProcessById(id); return process.HasExited; } catch (ArgumentException) { return true; } }), "round 18 left owned protocol cores running");
+        Check(processes.All(identity => identity.Exited), "round 18 left owned protocol cores running");
         if (Environment.GetEnvironmentVariable("MAY_R18_EVIDENCE") is {} evidence) ArchiveStore.WriteJson(Path.GetFullPath(evidence), new JsonObject { ["SyntheticOnly"] = true, ["Xray"] = "26.3.27", ["Cases"] = cases, ["OwnedCoresStopped"] = true });
         static JsonArray Lines(string pem) => new(pem.Trim().Split('\n').Select(l => (JsonNode?)JsonValue.Create(l.TrimEnd('\r'))).ToArray());
     }

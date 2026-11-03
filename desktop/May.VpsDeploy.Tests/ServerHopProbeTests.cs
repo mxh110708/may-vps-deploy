@@ -9,6 +9,10 @@ using May.VpsDeploy.Infrastructure;
 
 internal sealed partial class BoundaryTests
 {
+    private static void SetHopProbeInput(ProcessStartInfo start, string directory, JsonArray items)
+    {
+        var file = SafePath.Resolve(directory, "hop-probes-" + Guid.NewGuid().ToString("N") + ".private.json"); File.WriteAllText(file, items.ToJsonString()); start.Environment["VPS_PARAM_PROBES_JSON_FILE"] = file;
+    }
     public async Task RunHopProbeTests() { using var f = new Fixture(repository); await ServerHopProbeRuntime(f); Console.WriteLine($"PASS: {assertions} real Python/core TLS acceptance and cleanup assertions."); }
     private async Task ServerHopProbeRuntime(Fixture f)
     {
@@ -104,7 +108,7 @@ with socket.socket() as listener:
                     var testSource = scenario == "cancel" ? source.Replace("actual = query(port,", "raise InterruptedError('synthetic cancellation')\n            actual = query(port,") : source;
                     if (scenario == "cancel") File.WriteAllText(probeFile, testSource); else File.WriteAllText(probeFile, source);
                     var start = new ProcessStartInfo(python) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true }; foreach (var arg in new[] { probeFile, binary, role }) start.ArgumentList.Add(arg);
-                    start.Environment["SSL_CERT_FILE"] = scenario == "untrusted" ? SafePath.Resolve(temp, "missing.pem") : trustFile; start.Environment["VPS_PARAM_PROBES_JSON"] = items.ToJsonString(); start.Environment["TEST_PID_FILE"] = trace; start.Environment["TEST_FAILURE_FILE"] = SafePath.Resolve(temp, "failure.txt"); start.Environment["TMP"] = temp; start.Environment["TEMP"] = temp; start.Environment["TMPDIR"] = temp;
+                    start.Environment["SSL_CERT_FILE"] = scenario == "untrusted" ? SafePath.Resolve(temp, "missing.pem") : trustFile; SetHopProbeInput(start, temp, items); start.Environment["TEST_PID_FILE"] = trace; start.Environment["TEST_FAILURE_FILE"] = SafePath.Resolve(temp, "failure.txt"); start.Environment["TMP"] = temp; start.Environment["TEMP"] = temp; start.Environment["TMPDIR"] = temp;
                     using var probe = Process.Start(start)!; var stdout = probe.StandardOutput.ReadToEndAsync(); var stderr = probe.StandardError.ReadToEndAsync(); await probe.WaitForExitAsync(stop.Token); var output = await stdout; var error = await stderr;
                     var detail = File.Exists(SafePath.Resolve(temp, "failure.txt")) ? File.ReadAllText(SafePath.Resolve(temp, "failure.txt")).Replace(password, "[synthetic-secret]", StringComparison.Ordinal) : "";
                     Check((probe.ExitCode == 0) == (scenario == "pass") && !output.Contains(password) && !error.Contains(password) && !error.Contains("Traceback"), "real probe status or redaction failed: " + role + "/" + scenario + ": " + detail);

@@ -5,12 +5,14 @@ using May.VpsDeploy.Infrastructure;
 
 var repository = Path.GetFullPath(args.Length == 0 ? Path.Combine(AppContext.BaseDirectory, "../../../../../") : args[0]);
 if (args.Contains("--fonts-only")) new BoundaryTests(repository).RunFontTests();
+else if (args.Contains("--resources-only")) await new BoundaryTests(repository).RunResource31Tests();
 else if (args.Contains("--deployment-only")) await new BoundaryTests(repository).RunDeploymentTests();
 else if (args.Contains("--background-only")) await new BoundaryTests(repository).RunBackgroundTests();
 else if (args.Contains("--network-only")) await new BoundaryTests(repository).RunNetworkTests();
 else if (args.Contains("--ssh-only")) await new BoundaryTests(repository).RunSshTests();
 else if (args.Contains("--client-routes-only")) await new BoundaryTests(repository).RunClientRouteTests();
 else if (args.Contains("--client-output-only")) await new BoundaryTests(repository).RunClientOutputTests();
+else if (args.Contains("--client-batch-only")) await new BoundaryTests(repository).RunClientBatch32Tests();
 else if (args.Contains("--client-groups-only")) await new BoundaryTests(repository).RunClientGroupTests();
 else if (args.Contains("--source-sync-only")) await new BoundaryTests(repository).RunSourceSyncTests();
 else if (args.Contains("--server-rule-sets-only")) await new BoundaryTests(repository).RunServerRuleSetTests();
@@ -18,6 +20,9 @@ else if (args.Contains("--server-rule-sets-model-only")) await new BoundaryTests
 else if (args.Contains("--server-outbound-only")) await new BoundaryTests(repository).RunServerOutboundTests();
 else if (args.Contains("--server-quic-only")) await new BoundaryTests(repository).RunServerQuicTests();
 else if (args.Contains("--server-quic-model-only")) await new BoundaryTests(repository).RunServerQuicTests(modelOnly: true);
+else if (args.Contains("--server-stream-only")) await new BoundaryTests(repository).RunServerStream29Tests();
+else if (args.Contains("--server-stream-model-only")) await new BoundaryTests(repository).RunServerStream29Tests(modelOnly: true);
+else if (args.Contains("--server-probe-input-only")) await new BoundaryTests(repository).RunServerProbeInputTests();
 else if (args.Contains("--server-quic-vm")) await new BoundaryTests(repository).RunServerQuicVmTests(args[Array.IndexOf(args, "--server-quic-vm") + 1]);
 else if (args.Contains("--reality-outbound-only")) await new BoundaryTests(repository).RunRealityOutboundTests();
 else if (args.Contains("--server-rules-only")) await new BoundaryTests(repository).RunServerDestinationTests();
@@ -37,12 +42,17 @@ else if (args.Contains("--tcp-chain-only")) await new BoundaryTests(repository).
 else if (args.Contains("--shared-chains-only")) await new BoundaryTests(repository).RunSharedChainTests();
 else if (args.Contains("--shared-chains-vm")) { var i=Array.IndexOf(args,"--shared-chains-vm");var family=args[i+2];await new BoundaryTests(repository).RunChain21VmTests(args[i+1],family=="IPv6"?"FrontRelay":null,family); }
 else if (args.Contains("--chain24-only")) await new BoundaryTests(repository).RunChain24Tests();
+else if (args.Contains("--chain30-vm")) { var i=Array.IndexOf(args,"--chain30-vm"); if(args.Length<=i+2) throw new ArgumentException("Choose an explicit IPv4 or IPv6 matrix and a fresh three-guest manifest."); await new BoundaryTests(repository).RunChain21VmTests(args[i+1],"Both",caseFamily:args[i+2]); }
 else if (args.Contains("--chain24-vm")) await new BoundaryTests(repository).RunChain21VmTests(args[Array.IndexOf(args,"--chain24-vm")+1],args[Array.IndexOf(args,"--chain24-vm")+2]);
+else if (args.Contains("--chain30-only")) await new BoundaryTests(repository).RunChain30Tests();
 else if (args.Contains("--wireguard-only")) await new BoundaryTests(repository).RunWireGuardTests();
 else if (args.Contains("--wireguard-vm")) await new BoundaryTests(repository).RunWireGuardVmTests(args[Array.IndexOf(args,"--wireguard-vm")+1]);
 else if (args.Contains("--chain21-only")) await new BoundaryTests(repository).RunChain21Tests();
 else if (args.Contains("--chain21-vm")) await new BoundaryTests(repository).RunChain21VmTests(args[Array.IndexOf(args,"--chain21-vm")+1]);
 else if (args.Contains("--inbounds-only")) await new BoundaryTests(repository).RunInboundTests();
+else if (args.Contains("--inbound-policy-only")) await new BoundaryTests(repository).RunInboundPolicy28Tests();
+else if (args.Contains("--inbound-policy-model-only")) await new BoundaryTests(repository).RunInboundPolicy28Tests(true);
+else if (args.Contains("--inbound-policy-probe-only")) await new BoundaryTests(repository).RunInboundPolicy28ProbeTests();
 else if (args.Contains("--hysteria-only")) await new BoundaryTests(repository).RunHysteriaTests();
 else if (args.Contains("--tuic-only")) await new BoundaryTests(repository).RunTuicTests();
 else if (args.Contains("--tuic-model-only")) await new BoundaryTests(repository).RunTuicModelTests();
@@ -80,7 +90,7 @@ internal sealed partial class BoundaryTests(string repository)
     }
     public async Task Run(string group = "all")
     {
-        string[] groups = ["foundation", "clients", "xhttp", "chains", "quic", "udp", "operations"];
+        string[] groups = ["foundation", "clients", "xhttp", "chains", "quic", "udp", "server-stream", "operations"];
         if (group != "all" && !groups.Contains(group)) throw new ArgumentException("Unknown test group: " + group);
         Console.WriteLine("START: C# regression group " + group);
         bool Includes(string name) => group == "all" || group == name;
@@ -95,6 +105,7 @@ internal sealed partial class BoundaryTests(string repository)
         }
         if (Includes("clients"))
         {
+            using (var batch = new Fixture(repository)) { ClientBatch32Model(batch); await ClientBatch32Runtime(batch); }
             await SourceSyncExperience();
             await SourceSyncDownloadExperience();
             await ServerRuleSetExperience();
@@ -121,6 +132,7 @@ internal sealed partial class BoundaryTests(string repository)
         }
         if (Includes("chains"))
         {
+            await Chain30Coverage();
             using (var forwardedNodes = new Fixture(repository)) await ForwardedNodeExperience(forwardedNodes);
             using (var forwarding = new Fixture(repository)) { await TcpForwardExperience(forwarding); await TcpForwardValidationLoopback(forwarding); }
             await TcpChainExperience();
@@ -129,6 +141,9 @@ internal sealed partial class BoundaryTests(string repository)
             await SharedChainCoverage();
             await WireGuardCoverage();
             await InboundExperience();
+            await InboundPolicy28Model();
+            await InboundPolicy28Runtime();
+            await InboundPolicy28ProbeRuntime();
         }
         if (Includes("quic"))
         {
@@ -146,8 +161,14 @@ internal sealed partial class BoundaryTests(string repository)
             await ServerQuicRuntime();
             using (var udpForwarding = new Fixture(repository)) { await UdpForwardExperience(udpForwarding); await UdpForwardLoopback(udpForwarding); await UdpProxySourceExperience(udpForwarding); await UdpProxyWorkflow(udpForwarding); await UdpProxyRuntime(udpForwarding); }
         }
+        if (Includes("server-stream"))
+        {
+            await ServerStream29Model();
+            await ServerStream29Runtime();
+        }
         if (Includes("operations"))
         {
+            await Resource31Coverage();
             await MonitoringArchiveExperience(f);
             using (var monitorRead = new Fixture(repository)) await MonitorReadExperience(monitorRead);
             using (var mayMonitor = new Fixture(repository)) await MayMonitorExperience(mayMonitor);

@@ -37,9 +37,9 @@ public sealed partial class MainWindow
         }
         selector.SelectionChanged += (_, _) => Refresh(); source.SelectionChanged += (_, _) => Refresh(); Refresh(); return (dialog, options, query);
     }
-    private async Task UpgradeCore(JsonObject plan)
+    private async Task UpgradeCore(JsonObject plan, string? initialProtocol = null)
     {
-        var relative = selectedInstance!; JsonObject? previous = null;
+        var relative = selectedInstance!; JsonObject? previous = initialProtocol == null ? null : new() { ["Scope"] = "Protocol", ["Source"] = "Fixed", ["Protocol"] = initialProtocol };
         while (true)
         {
             var sheet = CoreUpgradeDialog(plan, previous); var result = await ShowDialog(sheet.Dialog);

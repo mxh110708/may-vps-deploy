@@ -1,11 +1,17 @@
 # May VPS Deploy 历史与专题记录
 
+2026-11-03：[第三十一轮证书与运维资源总览](OPERATIONS-RESOURCES-ROUND-31-2026-11-03.zh-CN.md)接入到期、归档／核验来源、共享和间接使用者及准确维护入口；源码与隔离验收完成，未推送／发行／安装。
+
+2026-11-02：第三十轮增加两个相邻 WireGuard 段、两个独立槽位、明确端口映射和限定 PROXY 输出；实现与证据以[本轮记录](FORWARDING-WIREGUARD-ROUND-30-2026-11-02.zh-CN.md)为准，未推送／发行／安装。
+
 这些文件保留各轮实现、版本和验收证据。日期、候选状态、已知缺口、旧品牌及旧菜单按当时事实解释，不作为当前安装步骤。历史报告里的「本轮不发布」「尚未迁移」不代表今天仍未发行；也不能把后来的修复倒写成早期测试已通过。
 
 当前教程从[文档目录](README.md)进入。未注明当前维护状态的专题按历史／技术参考阅读；原始 M5 样本与异常说明不因文档重构改变。
 
 | 记录 | 原文件 |
 | --- | --- |
+| [第二十九轮：常用服务器下一跳（未发行）](SERVER-STREAM-NEXT-HOPS-ROUND-29-2026-11-02.zh-CN.md) | `SERVER-STREAM-NEXT-HOPS-ROUND-29-2026-11-02.zh-CN.md` |
+| [第二十八轮：独立入站策略（未发行）](INBOUND-POLICY-ROUND-28-2026-11-02.zh-CN.md) | `INBOUND-POLICY-ROUND-28-2026-11-02.zh-CN.md` |
 | [第二十七轮：分享与客户端输出往返](CLIENT-OUTPUT-ROUND-27-2026-11-02.zh-CN.md) | `CLIENT-OUTPUT-ROUND-27-2026-11-02.zh-CN.md` |
 | [第二十六轮：服务器分类规则与版本恢复（v0.9.40）](SERVER-RULESETS-ROUND-26-2026-11-01.zh-CN.md) | `SERVER-RULESETS-ROUND-26-2026-11-01.zh-CN.md` |
 | [第二十五轮：来源与跨方案同步（v0.9.40）](SOURCE-SYNC-ROUND-25-2026-11-01.zh-CN.md) | `SOURCE-SYNC-ROUND-25-2026-11-01.zh-CN.md` |

@@ -72,6 +72,7 @@ public sealed class TcpForwardValidation(ArchiveStore store, ClientRouteDiagnost
                     else throw new OperationException("未知的 TCP 转发验收方式。");
                 }
             }
+            if (rule.ContainsKey("ProxyProtocol")) foreach (var check in item["Checks"]!.AsArray().OfType<JsonObject>()) check["ProxyProtocol"] = rule.Text("ProxyProtocol");
             result["Items"]!.AsArray().Add(item);
         }
         return result;

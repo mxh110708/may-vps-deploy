@@ -49,6 +49,7 @@ public static partial class ServerOutboundRouting
             var added = AddedRules("RealityEntry", policy, tags, family, plan, named);
             for (var i = added.Count - 1; i >= 0; i--) rules.Insert(0, added[i]!.DeepClone());
             metadata = new JsonObject { ["Version"] = 1, ["Name"] = node.Text("name"), ["Endpoint"] = new IPEndPoint(endpoint, native.Number("server_port")).ToString(), ["ExpectedAddress"] = egress.ToString(), ["EgressFamily"] = family, ["OutboundFingerprint"] = ArchiveStore.Fingerprint(next), ["RulesFingerprint"] = ArchiveStore.Fingerprint(added), ["SchemeId"] = source?.Text("SchemeId"), ["NodeId"] = source?.Text("NodeId"), ["NodeFingerprint"] = ArchiveStore.Fingerprint(node) };
+            if (IsStream(native)) metadata["Connection"] = ConnectionSummary(native);
             if (policy.Count > 0) { metadata["DestinationRules"] = policy; metadata["DestinationRulesNetwork"] = "tcp"; }
             if (named.Count > 0) metadata["AdditionalHops"] = named;
         }

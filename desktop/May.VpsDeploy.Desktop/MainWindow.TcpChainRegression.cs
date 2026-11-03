@@ -18,6 +18,7 @@ public sealed partial class MainWindow
         static TextBox Input(ContentDialog dialog, string tag) => Find<TextBox>(dialog).Single(t => t.Tag as string == "TcpChain." + tag);
         static ComboBox Choice(ContentDialog dialog, string tag) => Find<ComboBox>(dialog).Single(t => t.Tag as string == "TcpChain." + tag);
         static int Index(ComboBox box, string value) => box.Items.Cast<ComboBoxItem>().ToList().FindIndex(i => i.Tag as string == value);
+        string? secondWireGuardFile = null;
         var originalSelected = selectedInstance; var template = store.ListInstances().First(); var plans = new List<JsonObject>(); var relatives = new List<string>(); var history = new TaskHistory(store).Read().Count; Task? pending = null;
         var sourceScheme = ClientSchemes.New(paths); sourceScheme["Name"] = "Chain UI fixture"; string? chainFile = null; string? secondChainFile = null; string? wireGuardFile = null; var originalSize = AppWindow.Size;
         try
@@ -38,6 +39,13 @@ public sealed partial class MainWindow
                 ArchiveStore.WriteJson(SafePath.Resolve(paths.Instance(relatives[i]),"deployment-plan.json"),p);var state=ArchiveStore.ReadJson(SafePath.Resolve(paths.Instance(relatives[i]),"deployment-state.json"));state["WireGuardTunnel"]=new JsonObject{["RemoteHash"]=ArchiveStore.Fingerprint(peer),["ConfigurationFingerprint"]=ArchiveStore.Fingerprint(peer)};ArchiveStore.WriteJson(SafePath.Resolve(paths.Instance(relatives[i]),"deployment-state.json"),state);
             }
             wireGuardFile=WireGuardTunnels.FileName(paths,wg.Text("Id"));ArchiveStore.WriteJson(wireGuardFile,new JsonObject{["Version"]=1,["Configuration"]=wg.DeepClone(),["Phase"]="Active",["Validation"]=new JsonObject{["Status"]="Passed",["Scope"]="BidirectionalWireGuardApplications",["ConfigurationFingerprint"]=ArchiveStore.Fingerprint(wg)}});
+            var wgSecond = WireGuardTunnels.New(relatives[1]); wgSecond["SecondInstance"] = relatives[2]; wgSecond["FirstSlot"] = 1; wgSecond["FirstPort"] = 51821; wgSecond["FirstAddress"] = "10.203.1.1"; wgSecond["SecondAddress"] = "10.203.1.2";
+            for (var i = 1; i < 3; i++)
+            {
+                var key = WireGuardTunnels.Component(wgSecond, relatives[i]); var peer = WireGuardTunnels.Peer(wgSecond, plans[i], plans[i == 1 ? 2 : 1], i == 1); peer["PublicKey"] = Convert.ToBase64String(Enumerable.Repeat((byte)(i+2),32).ToArray()); peer["PeerPublicKey"] = Convert.ToBase64String(Enumerable.Repeat((byte)(5-i),32).ToArray()); plans[i][key] = peer;
+                ArchiveStore.WriteJson(SafePath.Resolve(paths.Instance(relatives[i]),"deployment-plan.json"), plans[i]); var stateFile = SafePath.Resolve(paths.Instance(relatives[i]),"deployment-state.json"); var state = ArchiveStore.ReadJson(stateFile); state[key] = new JsonObject { ["RemoteHash"] = ArchiveStore.Fingerprint(peer), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(peer) }; ArchiveStore.WriteJson(stateFile,state);
+            }
+            secondWireGuardFile = WireGuardTunnels.FileName(paths,wgSecond.Text("Id")); ArchiveStore.WriteJson(secondWireGuardFile,new JsonObject { ["Version"] = 1, ["Configuration"] = wgSecond.DeepClone(), ["Phase"] = "Active", ["Validation"] = new JsonObject { ["Status"] = "Passed", ["Scope"] = "BidirectionalWireGuardApplications", ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(wgSecond) } });
             selectedInstance = relatives[0]; SelectPage("instances"); Require(Find<Button>(shell).Any(b => b.Content as string == "管理线路"), "实例页缺少跨实例入口。");
             var scale = shell.XamlRoot?.RasterizationScale ?? 1; AppWindow.Resize(new((int)(1000 * scale), (int)(720 * scale)));
             pending = TcpChainSheet(relatives[0], plans[0]); var form = await Dialog();
@@ -60,11 +68,14 @@ public sealed partial class MainWindow
             await RegressionPress(form,"PrimaryButton");
             Require(activeTestDialog == form && Find<TextBlock>(form).Any(t => t.Tag as string == "TcpChain.Error" && !string.IsNullOrWhiteSpace(t.Text)) && new TaskHistory(store).Read().Count == history, "已失效的通道选择仍进入执行或静默回退原生连接。");
             ArchiveStore.WriteJson(wireGuardFile,savedTunnel);
+            underlay = Choice(form,"Underlay"); await RegressionSelect(underlay, Index(underlay,wg.Text("Id")+":FrontRelay+"+wgSecond.Text("Id")+":RelayLanding"));
+            Require(!Input(form,"SourceAddress").IsEnabled && Find<TextBlock>(form).Any(t=>t.Text.Contains("前置 → 中转") && t.Text.Contains("中转 → 落地")), "两段选择或双段范围说明缺失。");
             await RegressionPress(form, "PrimaryButton"); var review = await Dialog(form); var texts = string.Join("\n", Find<TextBlock>(review).Select(t => t.Text));
             Require(texts.Contains("审阅跨实例线路") && relatives.All(texts.Contains) && texts.Contains("198.51.100.0/24") && texts.Contains("/32") && texts.Contains("18443") && texts.Contains("18444") && !texts.Contains(node.Text("sing_box.uuid")), "审阅缺少依赖、端口、规范白名单或泄露凭据。");
             await Capture(SafePath.Resolve(output, "tcp-chain-review.png"), review); await RegressionPress(review, "CloseButton"); await pending;
             Require(new TaskHistory(store).Read().Count == history && relatives.All(r => TcpChains.Plan(store, r)["TcpChain"] == null), "取消线路审阅仍执行或保存依赖。");
-            File.Delete(wireGuardFile);wireGuardFile=null;
+            File.Delete(wireGuardFile);wireGuardFile=null; File.Delete(secondWireGuardFile);secondWireGuardFile=null;
+            for (var i=1;i<3;i++) { foreach(var key in WireGuardTunnels.Components) plans[i].Remove(key); ArchiveStore.WriteJson(SafePath.Resolve(paths.Instance(relatives[i]),"deployment-plan.json"),plans[i]); var stateFile=SafePath.Resolve(paths.Instance(relatives[i]),"deployment-state.json"); var state=ArchiveStore.ReadJson(stateFile); foreach(var key in WireGuardTunnels.Components) state.Remove(key); ArchiveStore.WriteJson(stateFile,state); }
             for(var i=0;i<2;i++){plans[i].Remove("WireGuardTunnel");ArchiveStore.WriteJson(SafePath.Resolve(paths.Instance(relatives[i]),"deployment-plan.json"),plans[i]);var state=ArchiveStore.ReadJson(SafePath.Resolve(paths.Instance(relatives[i]),"deployment-state.json"));state.Remove("WireGuardTunnel");ArchiveStore.WriteJson(SafePath.Resolve(paths.Instance(relatives[i]),"deployment-state.json"),state);}
             var c = TcpChains.New(relatives[0]); c["Name"] = "已保存线路"; c["RelayInstance"] = relatives[1]; c["LandingInstance"] = relatives[2]; c["FrontSources"] = new JsonArray("198.51.100.0/24"); c["FrontSourceAddress"] = plans[0].Text("Server.IPv4"); c["Landing"] = new JsonObject { ["SchemeId"] = sourceScheme.Text("Id"), ["NodeId"] = node.Text("Id"), ["NodeFingerprint"] = ArchiveStore.Fingerprint(node) };
             for (var i = 0; i < 3; i++)
@@ -102,7 +113,7 @@ public sealed partial class MainWindow
             Require(executionRows["chain-preflight"].State == TaskStepState.Completed && executionRows["chain-backup"].State == TaskStepState.Failed, "执行阶段未显示实际完成及失败状态。");
             FinishExecution(new TaskRecord(testTask, OperationKind.TcpChain, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, TaskOutcome.NeedsRecovery, "chain-backup", "合成恢复提示", InstanceRelativePath: relatives[0])); Require(heading.Text == "跨实例线路结果" && StageLabel("chain-backup") == "建立两台恢复点", "跨实例结果或阶段名称显示错误。");
             await Capture(SafePath.Resolve(output, "tcp-chain-progress.png"), page);
-            return new JsonObject { ["entry"] = true, ["required_participants"] = true, ["managed_landing_refill"] = true, ["source_refill"] = true, ["all_dependencies_reviewed"] = true, ["canonical_whitelist"] = true, ["no_auth_in_review"] = true, ["cancel_no_task"] = true, ["shared_route_from_relay"] = true, ["remove_review"] = true, ["recovery_entry"] = true, ["staged_progress"] = true, ["failed_stage_visible"] = true, ["draft_preserved"] = true, ["wireguard_choice"] = true, ["unused_public_source_disabled"] = true, ["stale_tunnel_refused"] = true };
+            return new JsonObject { ["entry"] = true, ["required_participants"] = true, ["managed_landing_refill"] = true, ["source_refill"] = true, ["all_dependencies_reviewed"] = true, ["canonical_whitelist"] = true, ["no_auth_in_review"] = true, ["cancel_no_task"] = true, ["shared_route_from_relay"] = true, ["remove_review"] = true, ["recovery_entry"] = true, ["staged_progress"] = true, ["failed_stage_visible"] = true, ["draft_preserved"] = true, ["wireguard_choice"] = true, ["two_adjacent_choices"] = true, ["unused_public_source_disabled"] = true, ["stale_tunnel_refused"] = true };
         }
         finally
         {
@@ -110,7 +121,8 @@ public sealed partial class MainWindow
             if (chainFile != null && File.Exists(chainFile)) File.Delete(chainFile);
             if (secondChainFile != null && File.Exists(secondChainFile)) File.Delete(secondChainFile);
             if (wireGuardFile != null && File.Exists(wireGuardFile)) File.Delete(wireGuardFile);
-            foreach(var relative in relatives){var p=TcpChains.Plan(store,relative);p.Remove("WireGuardTunnel");ArchiveStore.WriteJson(SafePath.Resolve(paths.Instance(relative),"deployment-plan.json"),p);}
+            if (secondWireGuardFile != null && File.Exists(secondWireGuardFile)) File.Delete(secondWireGuardFile);
+            foreach(var relative in relatives){var p=TcpChains.Plan(store,relative);p.Remove("WireGuardTunnel");p.Remove("WireGuardTunnel2");ArchiveStore.WriteJson(SafePath.Resolve(paths.Instance(relative),"deployment-plan.json"),p);}
             foreach (var relative in relatives) { var p = TcpChains.Plan(store, relative); p.Remove("TcpChain"); p.Remove("TcpChains"); ArchiveStore.WriteJson(SafePath.Resolve(paths.Instance(relative), "deployment-plan.json"), p); var deletion = new InstanceDeletion(store); deletion.Delete(deletion.Review(relative)); }
             var schemeFile = ServerOutboundRouting.SchemeFile(paths, sourceScheme.Text("Id")); if (File.Exists(schemeFile)) File.Delete(schemeFile);
             ClearExecution(); selectedInstance = originalSelected; AppWindow.Resize(originalSize); SelectPage("instances");

@@ -3,7 +3,7 @@ using May.VpsDeploy.Core;
 
 namespace May.VpsDeploy.Infrastructure;
 
-public sealed class ClientWorkbench(ArchiveStore store, IExternalToolRunner tools, IValidationAssets assets, string python)
+public sealed partial class ClientWorkbench(ArchiveStore store, IExternalToolRunner tools, IValidationAssets assets, string python)
 {
     private string SchemeFile(JsonObject scheme)
     {

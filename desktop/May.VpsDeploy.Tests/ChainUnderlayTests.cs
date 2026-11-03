@@ -23,6 +23,7 @@ internal sealed partial class BoundaryTests
     }
     private JsonObject SeedChainUnderlay(Fixture f, List<JsonObject> plans, ChainRemote remote, JsonObject chain, string segment)
     {
+        if (segment == "Both") return SeedChain30Underlays(f, plans, remote, chain);
         // Reverse the saved peer order for one segment: direction is determined
         // by instance identity, never by assumptions about First/Second.
         var indices = segment == "FrontRelay" ? new[] { 1,0 } : [1,2];

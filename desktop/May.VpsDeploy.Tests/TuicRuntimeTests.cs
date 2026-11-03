@@ -83,8 +83,8 @@ internal sealed partial class BoundaryTests
     private static HttpClient TuicHttp(int port, X509Certificate2 ca) => new(new HttpClientHandler { Proxy = new WebProxy("http://127.0.0.1:" + port), UseProxy = true, ServerCertificateCustomValidationCallback = (_, cert, _, _) => cert?.GetCertHashString() == ca.GetCertHashString() }) { Timeout = TimeSpan.FromSeconds(7) };
     private sealed class TuicDnsTarget : IAsyncDisposable
     {
-        private readonly UdpClient socket = new(new IPEndPoint(IPAddress.Loopback, 0)); private readonly CancellationTokenSource stop = new(); private readonly Task worker; public int Packets; public volatile bool Invalid; public int Port => ((IPEndPoint)socket.Client.LocalEndPoint!).Port;
-        public TuicDnsTarget() { worker = Task.Run(async () => { try { while (!stop.IsCancellationRequested) { var packet = await socket.ReceiveAsync(stop.Token); Interlocked.Increment(ref Packets); var response = DnsAnswer(packet.Buffer); if (Invalid) response[0] ^= 1; await socket.SendAsync(response, packet.RemoteEndPoint, stop.Token); } } catch (Exception error) when (error is OperationCanceledException or SocketException or ObjectDisposedException) { } }); }
+        private readonly UdpClient socket; private readonly CancellationTokenSource stop = new(); private readonly Task worker; public int Packets; public volatile bool Invalid; public int Port => ((IPEndPoint)socket.Client.LocalEndPoint!).Port;
+        public TuicDnsTarget(IPAddress? address = null) { socket = new(new IPEndPoint(address ?? IPAddress.Loopback, 0)); worker = Task.Run(async () => { try { while (!stop.IsCancellationRequested) { var packet = await socket.ReceiveAsync(stop.Token); Interlocked.Increment(ref Packets); var response = DnsAnswer(packet.Buffer); if (Invalid) response[0] ^= 1; await socket.SendAsync(response, packet.RemoteEndPoint, stop.Token); } } catch (Exception error) when (error is OperationCanceledException or SocketException or ObjectDisposedException) { } }); }
         public async ValueTask DisposeAsync() { stop.Cancel(); socket.Dispose(); await worker; stop.Dispose(); }
     }
 }

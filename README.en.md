@@ -8,7 +8,17 @@ A Windows desktop tool for deploying and maintaining Debian VPS instances, proxy
 
 The supported desktop target is Windows 10 2004 or later / Windows 11 amd64. Remote lifecycle acceptance targets Debian 12/13 amd64. The packaged application bundles .NET, WinUI and its configuration helper; PowerShell, Python and a development SDK are not required for normal desktop use.
 
-This documentation baseline is **v0.9.40**. A repository branch is not proof of the version installed on your computer.
+This documentation baseline is **v0.9.41**. A repository branch is not proof of the version installed on your computer.
+
+Included [round 28](docs/INBOUND-POLICY-ROUND-28-2026-11-02.zh-CN.md) adds ordered TCP categories and multiple referenced outbounds to independent inbounds, with pinned snapshots, dependency checks, path acceptance and scoped recovery. Application UDP keeps the default outbound. Updating the desktop application does not automatically change deployed services.
+
+Included [round 29](docs/SERVER-STREAM-NEXT-HOPS-ROUND-29-2026-11-02.zh-CN.md) adds bounded VLESS TLS/Reality, Trojan TLS and AnyTLS server next hops, plus supported sing-box WS/gRPC sources. It preserves authentication, verified TLS, ECH and session settings, and extends review, actual acceptance and scoped recovery. Check the fixed-core and peer interoperability matrix before use.
+
+Included [round 30](docs/FORWARDING-WIREGUARD-ROUND-30-2026-11-02.zh-CN.md) supports both adjacent WireGuard segments in a three-host chain, with two independently owned slots per host. Explicit per-port mappings support multiple listeners and targets. Bounded TCP PROXY v1/v2 output requires a compatible TLS target; it never trusts incoming address headers. Dependencies and scoped recovery remain enforced.
+
+Included [round 31](docs/OPERATIONS-RESOURCES-ROUND-31-2026-11-03.zh-CN.md) adds a certificate and operations resource overview with expiration, observation freshness, shared consumers, transitive impact and scoped maintenance entrypoints. Viewing resources does not issue certificates or change services.
+
+[Round 32](docs/CLIENT-BATCH-OUTPUT-ROUND-32-2026-11-03.zh-CN.md) adds reviewed node batch edits, native Mihomo/May Route merge fragments with disclosed upstream dependencies, and credential-free full-configuration export differences. Canceling a review writes nothing; changed sources or targets require a new review. Native fragments retain advanced fields but need the destination configuration's DNS, routing and listeners.
 
 The [round 24 work](docs/CHAIN-WIREGUARD-ROUND-24-2026-11-01.zh-CN.md) lets a three-host chain reuse an accepted WireGuard pair on either adjacent hop. It pins both peers, verifies fresh bidirectional traffic and the complete proxy path, and preserves the independent tunnel during chain removal or compensation. It is included in v0.9.40.
 
@@ -20,7 +30,7 @@ This release includes [round 15 Hysteria2 sharing and port hopping](docs/HYSTERI
 
 This release also includes [round 22 WireGuard host-to-host channels](docs/WIREGUARD-ROUND-22-2026-10-30.zh-CN.md): kernel WireGuard, IPv4/IPv6 outer endpoints, private IPv4 peer routes, two-host review and compensation, bidirectional TCP/UDP acceptance and reboot verification. It does not replace existing chains or configure a default-route VPN.
 
-| Area | v0.9.40 capabilities |
+| Area | v0.9.41 capabilities |
 | --- | --- |
 | Instances | New deployment, adoption of recognized layouts, SSH identity checks, health inspection, maintenance and retirement. |
 | Inbounds | Reality, AnyTLS, SS2022, Hysteria2, TUIC v5 and supported XHTTP combinations, with separate listener, user, certificate, outbound and recovery identities. |

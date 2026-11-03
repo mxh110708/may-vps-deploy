@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using May.VpsDeploy.Core;
+using May.VpsDeploy.Infrastructure;
 
 namespace May.VpsDeploy.Desktop;
 
@@ -20,12 +21,17 @@ public sealed partial class MainWindow
         if (box.SelectedItem is ComboBoxItem first) model[key] = (string)first.Tag;
         box.SelectionChanged += (_, _) => { if (box.SelectedItem is ComboBoxItem item) model[key] = (string)item.Tag; }; return box;
     }
-    private async Task OperationSheet(OperationKind kind, JsonObject plan)
+    private async Task OperationSheet(OperationKind kind, JsonObject plan, string initialProtocol = "")
     {
         if (kind == OperationKind.Upgrade) { await UpgradeCore(plan); return; }
         if (kind == OperationKind.TuneNetwork) { SelectPage("network"); return; }
         if (kind == OperationKind.Komari) throw new OperationException("请从实例页选择具体的监控或访问组件。");
         var options = new JsonObject { ["Scope"] = kind == OperationKind.TuneNetwork ? "Network" : kind == OperationKind.Decommission ? "ManagedInstance" : "Protocol" };
+        if (initialProtocol != "")
+        {
+            if (kind is not (OperationKind.ProtocolState or OperationKind.RotateCredentials) || !DeploymentPlans.Roles[..3].Contains(initialProtocol) || !ComponentInstallations.ProtocolInstalled(plan, initialProtocol)) throw new OperationException("协议维护目标已变化，请重新选择。");
+            options["Protocol"] = initialProtocol;
+        }
         var panel = Column(Text("选择本次操作范围，再审阅执行。", 14, true));
         if (kind is OperationKind.ProtocolState or OperationKind.RotateCredentials) panel.Children.Add(Choice("协议", options, "Protocol", DeploymentPlans.Roles[..3].Where(role => plan.Flag("ProtocolInventory." + role + ".Installed", plan.Text("Role") == role)).Select(role => (role, RoleLabel(role)))));
         if (kind == OperationKind.ProtocolState) panel.Children.Add(Choice("操作", options, "Action", [("Switch", "切换到此入口"), ("Enable", "启用"), ("Disable", "停用备用"), ("Uninstall", "卸载此协议")]));
@@ -185,10 +191,10 @@ public sealed partial class MainWindow
     }
     private async Task PublishClients()
     {
-        var selected = scheme ?? throw new OperationException("请先选择方案。"); var clash = selected.Text("Targets.Clash"); var sing = selected.Text("Targets.SingBox"); workbench.PreparePublish(selected, clash, sing);
-        RememberScheme();
-        if (!await ConfirmAsync(new("审阅配置导出", ClientSchemes.OutputLabel(selected) + " 的候选已校验。将导出到以下文件，已有文件会先备份：\n" + string.Join("\n", ClientSchemes.SelectedTargets(selected, clash, sing).Select(t => t.Path)) + "\n导出后由你自行导入客户端。"), CancellationToken.None)) return;
-        await RunBackground("导出配置文件", token => { token.ThrowIfCancellationRequested(); workbench.Publish(selected, clash, sing); Show("所选配置已导出，恢复副本与事务记录已保存。", InfoBarSeverity.Success); return Task.CompletedTask; });
+        var selected = scheme ?? throw new OperationException("请先选择方案。"); ClientPublishReview? review = null;
+        await RunBackground("读取配置差异", async token => review = await workbench.PreviewPublishAsync(selected, selected.Text("Targets.Clash"), selected.Text("Targets.SingBox"), token));
+        if (review == null || !await ConfirmAsync(new("审阅配置导出差异", ClientPublishReviewText(review)), CancellationToken.None)) return;
+        await RunBackground("导出配置文件", token => { token.ThrowIfCancellationRequested(); workbench.PublishReviewed(selected, review); workbench.Save(selected); RememberScheme(); Show("所选配置已导出，方案与导出位置已保存，恢复副本与事务记录已保留。", InfoBarSeverity.Success); return Task.CompletedTask; });
     }
     private void Settings()
     {

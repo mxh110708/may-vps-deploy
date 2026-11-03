@@ -158,16 +158,21 @@ public sealed partial class MainWindow
             case "suite.source-sync":
             case "suite.server-rule-sets":
             case "suite.server-outbound":
+            case "suite.server-stream":
             case "suite.client-share":
             case "suite.client-roundtrip":
             case "suite.tcp-forward":
             case "suite.tcp-chain":
             case "suite.wireguard":
             case "suite.inbounds":
+            case "suite.inbound-policy":
             case "suite.hysteria":
             case "suite.tuic":
             case "suite.xhttp":
             case "suite.udp-forward":
+            case "suite.resources":
+            case "suite.client-batch":
+            case "suite.maintenance":
             case "suite.run":
             {
                 if (taskCancellation != null || activeTestDialog != null || testSuiteState == "running") throw new OperationException("当前状态不能开始界面回归。");
@@ -186,26 +191,29 @@ public sealed partial class MainWindow
                             result[name] = await run(directory); testSuiteResult = result.DeepClone().AsObject(); Checkpoint();
                         }
                         if (command == "suite.run") { await Run("deployment", DeploymentRegression); await Run("maintenance", MaintenanceRegression); await Run("additions", AdditionsRegression); await Run("window_placement", WindowPlacementRegression); }
+                        if (command == "suite.maintenance") await Run("maintenance", MaintenanceRegression);
                         if (command is "suite.run" or "suite.client-routes") await Run("client_routes", ClientRoutesRegression);
                         if (command is "suite.run" or "suite.forwarded-nodes") await Run("forwarded_nodes", ForwardedNodesRegression);
                         if (command is "suite.run" or "suite.monitor-read") await Run("monitor_read", MonitoringRegression);
                         if (command is "suite.run" or "suite.may-monitor") await Run("may_monitor", MayMonitorRegression);
                         if (command is "suite.run" or "suite.monitor-access") await Run("monitor_access", MonitorAccessRegression);
                         if (command is "suite.run" or "suite.client-output") await Run("client_output", ClientOutputRegression);
+                        if (command is "suite.run" or "suite.client-batch") await Run("client_batch", ClientBatchRegression);
                         if (command is "suite.run" or "suite.client-groups") await Run("client_groups", ClientGroupRegression);
                         if (command is "suite.run" or "suite.source-sync") await Run("source_sync", SourceSyncRegression);
                         if (command is "suite.run" or "suite.server-rule-sets") await Run("server_rule_sets", ServerRuleSetRegression);
-                        if (command is "suite.run" or "suite.server-outbound") await Run("server_outbound", ServerOutboundRegression);
+                        if (command is "suite.run" or "suite.server-outbound" or "suite.server-stream") await Run("server_outbound", ServerOutboundRegression);
                         if (command is "suite.run" or "suite.client-share") await Run("client_share", ClientShareRegression);
                         if (command is "suite.run" or "suite.client-roundtrip") await Run("client_roundtrip", ClientRoundtripRegression);
                         if (command is "suite.run" or "suite.tcp-forward") await Run("tcp_forward", TcpForwardRegression);
                         if (command is "suite.run" or "suite.wireguard") await Run("wireguard", WireGuardRegression);
                         if (command is "suite.run" or "suite.tcp-chain") await Run("tcp_chain", TcpChainRegression);
-                        if (command is "suite.run" or "suite.inbounds") await Run("inbounds", InboundRegression);
+                        if (command is "suite.run" or "suite.inbounds" or "suite.inbound-policy") await Run("inbounds", InboundRegression);
                         if (command is "suite.run" or "suite.hysteria") await Run("hysteria", HysteriaRegression);
                         if (command is "suite.run" or "suite.tuic") await Run("tuic", TuicRegression);
                         if (command is "suite.run" or "suite.xhttp") await Run("xhttp", XhttpRegression);
                         if (command is "suite.run" or "suite.udp-forward") await Run("udp_forward", UdpForwardRegression);
+                        if (command is "suite.run" or "suite.resources") await Run("resources", ResourceRegression);
                         if (testActivations != 0 || testForegroundSamples != 0) throw new OperationException("界面回归获得前台焦点。");
                         testSuiteResult = result; testSuiteState = "passed";
                     }

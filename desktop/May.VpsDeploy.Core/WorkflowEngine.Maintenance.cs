@@ -23,16 +23,17 @@ public sealed partial class WorkflowEngine
             catch (Exception error) when (error is OperationException or IOException or System.Text.Json.JsonException) { }
             audit[component] = new JsonObject { ["MatchesArchive"] = matched, ["Scope"] = "ConfigurationSocketsWhitelist" };
         }
-        if (c.Plan["WireGuardTunnel"] is JsonObject tunnel)
+        foreach (var component in WireGuardTunnels.Components.Where(k => c.Plan[k] is JsonObject))
         {
+            var tunnel = c.Plan[component]!.AsObject();
             var matched = false;
             try
             {
-                var response = await c.Run("wireguard-read.sh", timeout: 45, marker: "WIREGUARD_READ"); var current = JsonNode.Parse(RemoteAssets.Marker(response.Output, "WIREGUARD_STATE"))!;
-                matched = current.Text("Hash") == c.State.Text("WireGuardTunnel.RemoteHash") && JsonNode.DeepEquals(current["Configuration"], tunnel) && current.Flag("Healthy");
+                var response = await c.Run("wireguard-read.sh", new() { ["WIREGUARD_SLOT"] = component == "WireGuardTunnel" ? "0" : "1", ["WIREGUARD_EXPECTED_HASH"] = c.State.Text(component + ".RemoteHash") }, timeout: 45, marker: "WIREGUARD_READ"); var current = JsonNode.Parse(RemoteAssets.Marker(response.Output, "WIREGUARD_STATE"))!;
+                matched = current.Text("Hash") == c.State.Text(component + ".RemoteHash") && JsonNode.DeepEquals(current["Configuration"], tunnel) && current.Flag("Healthy");
             }
             catch (Exception error) when (error is OperationException or IOException or System.Text.Json.JsonException) { }
-            audit["WireGuardTunnel"] = new JsonObject { ["MatchesArchive"] = matched, ["Scope"] = "ConfigurationInterfaceRoutes" };
+            audit[component] = new JsonObject { ["MatchesArchive"] = matched, ["Scope"] = "ConfigurationInterfaceRoutes" };
         }
         if (c.Plan["InboundModel"] is JsonObject inbounds)
         {
@@ -74,6 +75,23 @@ public sealed partial class WorkflowEngine
         foreach (var field in new[] { "MonitoringInventory", "KomariInstalled", "KomariController", "Cloudflared" }) c.State[field] = state[field]!.DeepClone();
         foreach (var field in new[] { "KomariController", "Cloudflared" }) if (plan[field] != null) c.Plan[field] = plan[field]!.DeepClone();
         foreach (var field in new[] { "ComponentUpgrades", "InstalledProgramVersions" }) { if (state[field] != null) c.State[field] = state[field]!.DeepClone(); else c.State.Remove(field); }
+        JsonObject? certificates = null;
+        try
+        {
+            var request = OperationsResources.CertificateRequest(c.Plan);
+            if (request["Items"]!.AsArray().Count > 0)
+            {
+                var reply = await c.Run("resource-certificates-read.sh", new() { ["CERTIFICATE_REQUEST"] = request.ToJsonString() }, timeout: 180, marker: "RESOURCE_READ_OK");
+                certificates = OperationsResources.ValidateCertificates(request, JsonNode.Parse(RemoteAssets.Marker(reply.Output, "RESOURCE_CERTIFICATES"))!.AsObject(), DateTimeOffset.UtcNow);
+            }
+            else certificates = new JsonObject { ["Version"] = 1, ["CollectedAt"] = DateTimeOffset.UtcNow, ["Items"] = new JsonArray() };
+        }
+        catch (Exception error) when (error is OperationException or IOException or System.Text.Json.JsonException)
+        {
+            c.Warnings = true; c.Report("证书资源核验未完成", "保留归档元数据，未将旧核验当作当前结果；从资源总览重新核对。");
+        }
+        c.State["ResourceObservation"] = OperationsResources.Observation(c.Plan, c.State, audit, certificates, DateTimeOffset.UtcNow);
+        c.Warnings |= OperationsResources.Build([new(c.Request.InstanceRelativePath, c.Plan, c.State, true)], DateTimeOffset.UtcNow).Items.Any(i => i.Kind == "Certificate" && OperationsResources.NeedsAttention(i));
         c.State["LastHealthAudit"] = new JsonObject { ["At"] = DateTimeOffset.UtcNow, ["File"] = "health-audits/" + c.Id + ".json" };
         c.Save(); c.Report("健康审计完成", "远端证据及监控组件状态已归档；任务完成表示读取完成，不代表全部检查健康。");
     }
@@ -85,7 +103,7 @@ public sealed partial class WorkflowEngine
         store.WriteSecret(SafePath.Resolve(backup, "secrets.dotnet.private.json"), c.Secrets); c.Save();
         var role = DeploymentPlans.Roles.Contains(c.Plan.Text("Role")) ? c.Plan.Text("Role") : "MonitorOnly";
         var parameters = new Dictionary<string, string> { ["SOURCE_ROLE"] = role, ["TARGET_ROLE"] = role, ["TIMEOUT_MINUTES"] = c.Request.Kind == OperationKind.InstallComponent ? "60" : "20", ["QUIESCE_KOMARI_CONTROLLER"] = Bool(components.Contains("KomariController")), ["COMPONENTS"] = string.Join(',', components), ["CONTROL_TASK_ID"] = c.Id, ["NETWORK_SNAPSHOT"] = Bool(c.Request.Kind == OperationKind.TuneNetwork) };
-        if (components.Contains("WireGuardTunnel")) { parameters["WIREGUARD_EXPECTED_HASH"] = c.State.Text("WireGuardTunnel.RemoteHash", "Absent"); parameters["WIREGUARD_PAIR_ID"] = c.Request.Options.Text("Configuration.Id"); c.Pending["WireGuardTunnelId"] = parameters["WIREGUARD_PAIR_ID"]; c.Save(); }
+        if (components.Contains("WireGuardTunnel")) { parameters["WIREGUARD_EXPECTED_HASH"] = c.State.Text(WireGuardTunnels.Component(c.Request.Options["Configuration"]!.AsObject(), c.Request.InstanceRelativePath) + ".RemoteHash", "Absent"); parameters["WIREGUARD_PAIR_ID"] = c.Request.Options.Text("Configuration.Id"); c.Pending["WireGuardTunnelId"] = parameters["WIREGUARD_PAIR_ID"]; c.Save(); }
         if (components.Contains("TcpForwarding")) parameters["TCP_FORWARD_EXPECTED_HASH"] = c.State.Text("TcpForwarding.RemoteHash", "Absent");
         if (c.Request.Kind == OperationKind.TcpChain) { parameters["TCP_CHAIN_ID"] = c.Request.Options.Text("Configuration.Id"); c.Pending["TcpChainId"] = parameters["TCP_CHAIN_ID"]; c.Save(); }
         if (components.Contains("UdpForwarding")) parameters["UDP_FORWARD_EXPECTED_HASH"] = c.State.Text("UdpForwarding.RemoteHash", "Absent");
@@ -211,7 +229,7 @@ public sealed partial class WorkflowEngine
         }
         if (components.Contains("Network")) { Restore(c.Plan, oldPlan, "NetworkTuning"); Restore(c.State, oldState, "NetworkTuning"); }
         if (components.Contains("Firewall")) Restore(c.Plan, oldPlan, "Firewall");
-        if (components.Contains("WireGuardTunnel")) { Restore(c.Plan, oldPlan, "WireGuardTunnel"); Restore(c.State, oldState, "WireGuardTunnel"); }
+        if (components.Contains("WireGuardTunnel")) { var key = WireGuardTunnels.Component(c.Request.Options["Configuration"]!.AsObject(), c.Request.InstanceRelativePath); Restore(c.Plan, oldPlan, key); Restore(c.State, oldState, key); }
         if (components.Contains("TcpForwarding")) { Restore(c.Plan, oldPlan, "TcpForwarding"); Restore(c.State, oldState, "TcpForwarding"); }
         if (components.Contains("UdpForwarding")) { Restore(c.Plan, oldPlan, "UdpForwarding"); Restore(c.State, oldState, "UdpForwarding"); }
         if (components.Contains("Inbounds")) { Restore(c.Plan, oldPlan, "InboundModel"); Restore(c.State, oldState, "Inbounds"); Restore(c.Secrets, oldSecrets, "Inbounds"); }

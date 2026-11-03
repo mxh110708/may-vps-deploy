@@ -25,18 +25,25 @@ public static partial class InboundRendering
             ManagedNodeSources.Verify(store, new JsonArray(node["ManagedOrigin"]?.DeepClone()).WithoutNulls());
             ForwardedNodeSources.VerifyNodes(store, [node]);
             InboundSources.VerifyNodes(store, [node]);
-            if (node["sing_box"] is not JsonObject native || native.Text("type") is not ("shadowsocks" or "vless" or "anytls" or "hysteria2" or "tuic") || native.Text("detour") != "" || native.Text("network") == "udp") throw new OperationException("出站须为直接可连接的受支持原生代理节点。");
-            if (ServerOutboundRouting.IsQuic(native)) { var quic = ServerOutboundRouting.NextHop(node); quic["tag"] = "egress"; return quic; }
+            if (node["sing_box"] is not JsonObject native || native.Text("type") is not ("shadowsocks" or "vless" or "trojan" or "anytls" or "hysteria2" or "tuic") || native.Text("detour") != "" || native.Text("network") == "udp") throw new OperationException("出站须为直接可连接的受支持原生代理节点。");
+            if (ServerOutboundRouting.IsQuic(native) || ServerOutboundRouting.IsStream(native)) { var next = ServerOutboundRouting.NextHop(node, allowForwarded: ServerOutboundRouting.IsStream(native)); next["tag"] = "egress"; return next; }
             var result = native.DeepClone().AsObject(); result["tag"] = "egress"; return result;
         }
         finally { scheme.Clear(); }
     }
     private static JsonArray WithoutNulls(this JsonArray values) => new(values.Where(v => v != null).Select(v => v!.DeepClone()).ToArray());
+    public static void ValidateOutboundLoop(JsonObject plan, JsonObject model, JsonObject actual)
+    {
+        if (actual.Text("server") != "" && new[] { plan.Text("Server.IPv4"), plan.Text("Server.IPv6"), "127.0.0.1", "::1", "localhost" }.Contains(actual.Text("server")) && InboundCatalog.Items(model, "Inbounds").Any(i => Hysteria2Ports.ListenerPorts(i).Contains(actual.Number("server_port")))) throw new OperationException("出站指向本实例的入站，可能形成环路。");
+    }
     public static bool RequiresApplicationUdp(ArchiveStore store, string instance, JsonObject model, string inboundId)
     {
         var inbound = InboundCatalog.Items(model, "Inbounds").Single(i => i.Text("Id") == inboundId);
         var outbound = InboundCatalog.Items(model, "Outbounds").Single(o => o.Text("Id") == inbound.Text("OutboundId"));
-        return inbound.Text("Protocol") is "TuicV5" or "VLESS" || outbound.Text("Kind") == "Proxy" && ServerOutboundRouting.IsQuic(ResolveOutbound(store, instance, outbound));
+        if (inbound.Text("Protocol") is "TuicV5" or "VLESS" || InboundRoutingPolicy.Rules(inbound).Count > 0) return true;
+        if (outbound.Text("Kind") != "Proxy") return false;
+        var native = ResolveOutbound(store, instance, outbound);
+        return ServerOutboundRouting.IsQuic(native) || ServerOutboundRouting.IsStream(native);
     }
     public static JsonObject Configuration(ArchiveStore store, JsonObject plan, JsonObject model, JsonObject credentials, JsonObject inbound)
     {
@@ -71,11 +78,11 @@ public static partial class InboundRendering
         else { input["method"] = options.Text("Method"); input["password"] = credentials.Text("Inbounds." + id + ".ServerKey"); }
         var outbound = InboundCatalog.Items(model, "Outbounds").Single(o => o.Text("Id") == inbound.Text("OutboundId"));
         var actual = ResolveOutbound(store, plan.Text("Provider") + "/" + plan.Text("Instance") + "/May-VPS-Deploy", outbound);
-        if (actual.Text("server") != "" && new[] { plan.Text("Server.IPv4"), plan.Text("Server.IPv6"), "127.0.0.1", "::1", "localhost" }.Contains(actual.Text("server")) && InboundCatalog.Items(model, "Inbounds").Any(i => Hysteria2Ports.ListenerPorts(i).Contains(actual.Number("server_port")))) throw new OperationException("出站指向本实例的入站，可能形成环路。");
-        if (inbound.Text("Protocol") == "Reality") return XrayReality(inbound, credentials, options.AsObject(), outbound, actual);
-        if (inbound.Text("Protocol") == "VLESS") return XrayXhttp(inbound, credentials, outbound);
+        ValidateOutboundLoop(plan, model, actual);
+        if (inbound.Text("Protocol") == "Reality") return InboundRoutingPolicy.Apply(store, plan, model, inbound, XrayReality(inbound, credentials, options.AsObject(), outbound, actual));
+        if (inbound.Text("Protocol") == "VLESS") return InboundRoutingPolicy.Apply(store, plan, model, inbound, XrayXhttp(inbound, credentials, outbound, actual));
         var rules = new JsonArray(); if (outbound.Text("Family") != "Auto") rules.Add(new JsonObject { ["ip_version"] = outbound.Text("Family") == "IPv4" ? 6 : 4, ["action"] = "reject" });
-        return new JsonObject { ["log"] = new JsonObject { ["level"] = "warn", ["timestamp"] = true }, ["dns"] = new JsonObject { ["servers"] = new JsonArray(new JsonObject { ["type"] = "local", ["tag"] = "local" }) }, ["inbounds"] = new JsonArray(input), ["outbounds"] = new JsonArray(actual), ["route"] = new JsonObject { ["final"] = "egress", ["rules"] = rules } };
+        return InboundRoutingPolicy.Apply(store, plan, model, inbound, new JsonObject { ["log"] = new JsonObject { ["level"] = "warn", ["timestamp"] = true }, ["dns"] = new JsonObject { ["servers"] = new JsonArray(new JsonObject { ["type"] = "local", ["tag"] = "local" }) }, ["inbounds"] = new JsonArray(input), ["outbounds"] = new JsonArray(actual), ["route"] = new JsonObject { ["final"] = "egress", ["rules"] = rules } });
     }
     private static JsonObject XrayReality(JsonObject inbound, JsonObject credentials, JsonObject options, JsonObject outbound, JsonObject native)
     {
@@ -92,10 +99,12 @@ public static partial class InboundRendering
         foreach (var inbound in InboundCatalog.Items(model, "Inbounds"))
         {
             var config = Configuration(store, plan, model, credentials, inbound); var bytes = ArchiveStore.JsonBytes(config); var id = inbound.Text("Id");
+            if (bytes.Length > 1048576) throw new OperationException("单个入站生成配置超过 1 MiB，请缩小分类规则范围。");
             configs[id] = Convert.ToBase64String(bytes);
             var outbound = InboundCatalog.Items(model, "Outbounds").Single(o => o.Text("Id") == inbound.Text("OutboundId"));
             var coreHash = InboundCatalog.UsesXray(inbound) ? core["Reality"]!.Text("Sha256") : core.Text("Sha256");
             var clientIdentity = new JsonObject { ["CoreSha256"] = coreHash, ["Options"] = inbound["Options"]!.DeepClone(), ["Certificate"] = InboundCatalog.Items(model, "Certificates").SingleOrDefault(c => c.Text("Id") == inbound.Text("CertificateId"))?.Text("Sha256") ?? "", ["Family"] = outbound.Text("Family"), ["ExpectedAddress"] = outbound.Text("ExpectedAddress") };
+            if (InboundRoutingPolicy.Rules(inbound).Count > 0) clientIdentity["Routing"] = InboundRoutingPolicy.Identity(model, inbound);
             bindings.Add(new JsonObject { ["Id"] = id, ["Enabled"] = inbound.Flag("Enabled"), ["Sha256"] = ArchiveStore.Digest(bytes), ["ClientSha256"] = ArchiveStore.Fingerprint(clientIdentity), ["Port"] = inbound.Number("Listener.Port"), ["Address"] = inbound.Text("Listener.Address"), ["Udp"] = InboundCatalog.UsesUdp(inbound) });
         }
         return new JsonObject { ["Version"] = 1, ["Model"] = model.DeepClone(), ["Bindings"] = bindings, ["Configurations"] = configs, ["Core"] = core };
@@ -107,7 +116,9 @@ public static partial class InboundRendering
         var core = System.IO.File.Exists(stateFile) ? ArchiveStore.ReadJson(stateFile).At("Inbounds.Core") as JsonObject ?? Core(store.Paths) : Core(store.Paths);
         var outbound = InboundCatalog.Items(model, "Outbounds").Single(o => o.Text("Id") == inbound.Text("OutboundId"));
         var selected = InboundCatalog.UsesXray(inbound) ? core["Reality"]! : core; var coreIdentity = selected.DeepClone().AsObject(); coreIdentity.Remove("Reality");
-        return ArchiveStore.Fingerprint(new JsonObject { ["Id"] = inbound.Text("Id"), ["Enabled"] = inbound.Flag("Enabled"), ["Configuration"] = config, ["Options"] = inbound["Options"]!.DeepClone(), ["Egress"] = new JsonObject { ["Family"] = outbound.Text("Family"), ["ExpectedAddress"] = outbound.Text("ExpectedAddress") }, ["Core"] = coreIdentity });
+        var identity = new JsonObject { ["Id"] = inbound.Text("Id"), ["Enabled"] = inbound.Flag("Enabled"), ["Configuration"] = config, ["Options"] = inbound["Options"]!.DeepClone(), ["Egress"] = new JsonObject { ["Family"] = outbound.Text("Family"), ["ExpectedAddress"] = outbound.Text("ExpectedAddress") }, ["Core"] = coreIdentity };
+        if (InboundRoutingPolicy.Rules(inbound).Count > 0) identity["Routing"] = InboundRoutingPolicy.Identity(model, inbound);
+        return ArchiveStore.Fingerprint(identity);
     }
     public static IEnumerable<JsonObject> Nodes(ArchiveStore store, string instance, JsonObject plan, JsonObject model, JsonObject credentials)
     {
@@ -156,7 +167,7 @@ public static partial class InboundRendering
     }
     public static void ValidatePorts(JsonObject plan, JsonObject state, JsonObject model)
     {
-        var reserved = new HashSet<int> { plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue"), plan.Number("Server.BootstrapSshPort"), plan.Number("MayMonitorServer.Port"), plan.Number("WireGuardTunnel.ListenPort") };
+        var reserved = new HashSet<int>(WireGuardTunnels.Peers(plan).Select(p => p.Number("ListenPort"))) { plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue"), plan.Number("Server.BootstrapSshPort"), plan.Number("MayMonitorServer.Port"), plan.Number("WireGuardTunnel.ListenPort") };
         foreach (var (role, fields) in new[] { ("RealityEntry", new[] { "Ports.XrayPrimary", "Ports.XrayBackup" }), ("AnyTlsEntry", new[] { "Ports.AnyTlsPrimary" }), ("ShadowsocksLanding", new[] { "Ports.LandingShadowsocks" }) }) if (plan.Flag("ProtocolInventory." + role + ".Installed", DeploymentPlans.Uses(plan, role))) foreach (var field in fields) reserved.Add(plan.Number(field));
         foreach (var rule in TcpForwarding.Rules(plan["TcpForwarding"] as JsonObject).Concat(UdpForwarding.Rules(plan["UdpForwarding"] as JsonObject))) reserved.Add(rule.Number("ListenPort"));
         if (plan.Text("Reality.TargetMode") == "LocalOwnedTls") reserved.Add(plan.Number("Reality.LocalHttpsPort"));

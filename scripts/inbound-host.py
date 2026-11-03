@@ -136,8 +136,8 @@ def validate_xhttp_extra(extra):
 
 def validate_xhttp(model, item, source):
     outbound = [o for o in model['Outbounds'] if o['Id'] == item['OutboundId']]
-    if len(outbound) != 1 or outbound[0].get('Kind') != 'Direct':
-        raise ValueError('Bounded XHTTP requires a direct server outbound.')
+    if len(outbound) != 1:
+        raise ValueError('XHTTP requires one unambiguous default outbound.')
     options = item['Options']; transport = options.get('Transport', {})
     if set(options) != {'ServerName','Security','Transport','Reality'} or not {'Type','Path','Host','Mode'} <= set(transport) or set(transport)-{'Type','Path','Host','Mode','HTTPVersion','Extra'} or transport['Type']!='XHTTP' or transport['Mode'] not in ('auto','stream-one','stream-up','packet-up') or not isinstance(transport['Path'],str) or len(transport['Path'])>8192 or any(ord(c)<32 for c in transport['Path']):
         raise ValueError('Unsupported XHTTP model.')
@@ -161,6 +161,118 @@ def validate_xhttp(model, item, source):
         r=options['Reality']; actual=stream['realitySettings']
         if item['CertificateId'] or set(r)!={'HandshakeServer','HandshakePort','PublicKey','ShortId'} or set(actual)!={'show','target','xver','serverNames','privateKey','shortIds'} or actual['show'] is not False or actual['xver']!=0 or actual['serverNames']!=[options['ServerName']] or actual['target']!=r['HandshakeServer']+':'+str(r['HandshakePort']) or actual['shortIds']!=[r['ShortId']] or not re.fullmatch('[A-Za-z0-9_-]{43}',actual['privateKey']):
             raise ValueError('XHTTP Reality identity differs.')
+
+
+def validate_inbound_policy(model, item, config):
+    if 'Routing' not in item:
+        return
+    if set(item) != {'Id','Name','Protocol','Enabled','Listener','UserIds','CertificateId','OutboundId','Options','Routing'}:
+        raise ValueError('Unknown policy inbound fields.')
+    policy = item['Routing']
+    if not isinstance(policy, dict) or set(policy) != {'Version','Rules'} or type(policy['Version']) is not int or policy['Version'] != 1 or not isinstance(policy['Rules'], list) or not 1 <= len(policy['Rules']) <= 32:
+        raise ValueError('Unsupported inbound routing policy.')
+    resources = {}
+    for outbound in model['Outbounds']:
+        if not isinstance(outbound, dict) or set(outbound) != {'Id','Name','Kind','Family','ExpectedAddress','Source'} or outbound['Kind'] not in ('Direct','Proxy') or outbound['Family'] not in ('Auto','IPv4','IPv6') or not isinstance(outbound['Name'], str) or not 1 <= len(outbound['Name']) <= 60 or any(ord(c)<32 for c in outbound['Name']):
+            raise ValueError('Invalid policy outbound resource.')
+        identifier = identity(outbound['Id'])
+        if identifier in resources or not isinstance(outbound['ExpectedAddress'], str) or not isinstance(outbound['Source'], dict):
+            raise ValueError('Duplicate or invalid policy outbound identity.')
+        if outbound['ExpectedAddress']:
+            address = ipaddress.ip_address(outbound['ExpectedAddress'])
+            if outbound['Family'] != 'Auto' and address.version != (6 if outbound['Family']=='IPv6' else 4):
+                raise ValueError('Policy outbound egress family differs.')
+        source = outbound['Source']
+        if outbound['Kind']=='Direct':
+            if source: raise ValueError('Direct policy resource contains a proxy source.')
+        elif set(source) != {'SchemeId','NodeId','Fingerprint'} or not isinstance(source['Fingerprint'], str) or not re.fullmatch('[a-f0-9]{64}', source['Fingerprint']):
+            raise ValueError('Policy proxy source is incomplete.')
+        else:
+            identity(source['SchemeId']);identity(source['NodeId'])
+        resources[identifier] = outbound
+    targets, seen, expanded = [item['OutboundId']], set(), []
+    def term(value):
+        if not isinstance(value, dict) or set(value) != {'Kind','Value'} or value['Kind'] not in ('Domain','Suffix','Cidr') or not isinstance(value['Value'], str) or not 1 <= len(value['Value']) <= 300:
+            raise ValueError('Unsupported policy matching primitive.')
+        if value['Kind'] == 'Cidr':
+            network = ipaddress.ip_network(value['Value'], strict=True)
+            if str(network) != value['Value']:
+                raise ValueError('Policy network is not canonical.')
+        elif not all(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', part) for part in value['Value'].split('.')) or len(value['Value']) > 253:
+            raise ValueError('Policy domain is not canonical.')
+        return value
+    for rule in policy['Rules']:
+        if not isinstance(rule, dict) or not {'Kind','Value','Action'} <= set(rule) or set(rule)-{'Kind','Value','Action','Target','RuleSet'} or rule['Action'] not in ('NextHop','Direct','Reject') or not isinstance(rule['Value'], str):
+            raise ValueError('Invalid policy rule fields.')
+        target = rule.get('Target', '')
+        if not isinstance(target, str) or 'Target' in rule and not target:
+            raise ValueError('Policy target must be an explicit resource identity.')
+        if target:
+            identity(target)
+            if rule['Action'] != 'NextHop' or target not in resources:
+                raise ValueError('Policy references a removed or invalid outbound.')
+            if target not in targets:
+                targets.append(target)
+        key = (rule['Kind'], rule['Value'])
+        if key in seen:
+            raise ValueError('Duplicate policy rule.')
+        seen.add(key)
+        if rule['Kind'] == 'RuleSet':
+            snapshot = rule.get('RuleSet')
+            if not isinstance(snapshot, dict) or set(snapshot) != {'Schema','Id','Name','Revision','Rules'} or type(snapshot['Schema']) is not int or snapshot['Schema'] != 1 or snapshot['Id'] != rule['Value'] or not re.fullmatch('[a-z0-9][a-z0-9-]{0,63}', snapshot['Id']) or not isinstance(snapshot['Name'], str) or not 1 <= len(snapshot['Name']) <= 100 or any(ord(c)<32 for c in snapshot['Name']) or not isinstance(snapshot['Revision'], str) or not re.fullmatch(r'(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})(?:-[a-zA-Z0-9.-]{1,24})?', snapshot['Revision']) or not isinstance(snapshot['Rules'], list) or not 1 <= len(snapshot['Rules']) <= 2048:
+                raise ValueError('Invalid pinned policy rule-set version.')
+            terms = [term(t) for t in snapshot['Rules']]
+            if len({(t['Kind'], t['Value']) for t in terms}) != len(terms):
+                raise ValueError('Duplicate category primitives.')
+        else:
+            if 'RuleSet' in rule:
+                raise ValueError('Unexpected policy snapshot.')
+            terms = [term({'Kind':rule['Kind'], 'Value':rule['Value']})]
+        expanded.extend(dict(t, Action=rule['Action'], Target=target) for t in terms)
+        if len(expanded) > 4096:
+            raise ValueError('Policy expansion exceeds its bound.')
+    if len(targets) > 8 or any(i not in resources for i in targets):
+        raise ValueError('Policy outbound resources are incomplete.')
+    xray = item['Protocol'] in ('Reality','VLESS')
+    def tag(identifier):
+        return 'egress' if identifier == item['OutboundId'] else 'policy-' + identifier
+    expected_tags = {tag(i) for i in targets}
+    if xray:
+        expected_tags.add('block')
+    if any(r['Action']=='Direct' for r in expanded):
+        expected_tags.add('policy-direct')
+    outputs = config['outbounds']
+    if len(outputs) != len(expected_tags) or {o.get('tag') for o in outputs} != expected_tags:
+        raise ValueError('Policy contains missing or unowned native outbounds.')
+    for identifier in targets:
+        value = next(o for o in outputs if o['tag']==tag(identifier))
+        direct = value.get('protocol' if xray else 'type') == ('freedom' if xray else 'direct')
+        if direct != (resources[identifier]['Kind']=='Direct'):
+            raise ValueError('Native policy target differs from its resource kind.')
+        if not direct and value.get('protocol' if xray else 'type') not in (('shadowsocks','hysteria','vless','trojan') if xray else ('shadowsocks','vless','trojan','anytls','hysteria2','tuic')):
+            raise ValueError('Unsupported native policy proxy type.')
+    rules = []
+    for rule in expanded:
+        kind, value, action = rule['Kind'], rule['Value'], rule['Action']
+        output = 'block' if action=='Reject' else 'policy-direct' if action=='Direct' else tag(rule['Target'] or item['OutboundId'])
+        if xray:
+            native = {'inboundTag':[item['Id']], 'network':'tcp', 'type':'field',
+                      'ip' if kind=='Cidr' else 'domain':[value if kind=='Cidr' else ('full:' if kind=='Domain' else 'domain:')+value], 'outboundTag':output}
+        else:
+            native = {'inbound':[item['Id']], 'network':'tcp', 'action':'reject' if action=='Reject' else 'route'}
+            if kind=='Suffix':
+                native.update(domain=[value], domain_suffix=['.'+value])
+            else:
+                native['ip_cidr' if kind=='Cidr' else 'domain']=[value]
+            if action!='Reject':
+                native['outbound']=output
+        rules.append(native)
+    family = resources[item['OutboundId']]['Family']
+    if family != 'Auto':
+        rules.append({'type':'field', 'ip':['::/0' if family=='IPv4' else '0.0.0.0/0'], 'outboundTag':'block'} if xray else {'ip_version':6 if family=='IPv4' else 4, 'action':'reject'})
+    actual = config['routing' if xray else 'route']
+    if actual != ({'domainStrategy':'AsIs','rules':rules} if xray else {'final':'egress','rules':rules}):
+        raise ValueError('Native policy order, targets, TCP scope or fallback differs.')
 
 
 def normalize(payload):
@@ -194,7 +306,13 @@ def normalize(payload):
         source = config['inbounds'][0]
         if item['Protocol'] not in ('Reality', 'AnyTLS', 'Shadowsocks2022','Hysteria2','TuicV5','VLESS') or source.get('protocol' if reality else 'type') != {'Reality':'vless','VLESS':'vless','AnyTLS':'anytls','Shadowsocks2022':'shadowsocks','Hysteria2':'hysteria2','TuicV5':'tuic'}[item['Protocol']] or source.get('tag') != identifier or source.get('listen') != binding['Address'] or source.get('port' if reality else 'listen_port') != binding['Port'] or item['Enabled'] != binding['Enabled'] or binding['Udp'] != (item['Protocol'] in ('Shadowsocks2022','Hysteria2','TuicV5') or item['Protocol']=='VLESS' and item['Options']['Transport'].get('HTTPVersion','2')=='3'):
             raise ValueError('Rendered inbound differs from the catalogue.')
-        if item['Protocol']=='VLESS': validate_xhttp(model, item, source)
+        if item['Protocol']=='VLESS':
+            validate_xhttp(model, item, source)
+            target = next(o for o in model['Outbounds'] if o['Id']==item['OutboundId'])
+            defaults = [o for o in config['outbounds'] if o.get('tag')=='egress']
+            if len(defaults)!=1 or target['Kind']=='Direct' and defaults[0].get('protocol')!='freedom' or target['Kind']=='Proxy' and defaults[0].get('protocol') not in ('shadowsocks','hysteria','vless','trojan'):
+                raise ValueError('XHTTP default outbound differs from its catalogue resource.')
+        validate_inbound_policy(model, item, config)
         if reality and ('Reality' not in payload['Core'] or selected_core(payload,identifier)['Engine']!='xray'): raise ValueError('Reality requires its pinned Xray core.')
     return payload
 

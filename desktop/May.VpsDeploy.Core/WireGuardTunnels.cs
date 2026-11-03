@@ -5,10 +5,27 @@ namespace May.VpsDeploy.Core;
 
 public sealed record WireGuardPreview(JsonObject Configuration, JsonObject? Record, string Summary);
 
-// A single authenticated point-to-point underlay per host, with /32 peer routes.
+// Up to two independent authenticated point-to-point interfaces per host, with /32 routes.
 // Private keys are generated on the hosts and never enter operation options.
 public static class WireGuardTunnels
 {
+    public static IReadOnlyList<string> Components { get; } = Array.AsReadOnly(new[] { "WireGuardTunnel", "WireGuardTunnel2" });
+    public static int Slot(JsonObject c, string instance)
+    {
+        var field = instance == c.Text("FirstInstance") ? "FirstSlot" : instance == c.Text("SecondInstance") ? "SecondSlot" : throw new OperationException("实例不属于隧道。");
+        if (!c.ContainsKey(field)) return 0;
+        return c[field] is JsonValue v && v.TryGetValue<int>(out var slot) && slot is 0 or 1 ? slot : throw new OperationException("隧道槽位须为 0 或 1。");
+    }
+    public static string Component(JsonObject c, string instance) => Components[Slot(c, instance)];
+    public static int AvailableSlot(JsonObject plan) => plan[Components[0]] == null ? 0 : plan[Components[1]] == null ? 1 : throw new OperationException("此实例两个隧道槽位均已使用。");
+    public static IEnumerable<JsonObject> Peers(JsonObject plan)
+    {
+        foreach (var key in Components)
+        {
+            if (plan.ContainsKey(key) && plan[key] is not JsonObject) throw new OperationException("隧道槽位归档格式无效，未忽略该依赖。");
+            if (plan[key] is JsonObject peer) yield return peer;
+        }
+    }
     public static string FileName(AppPaths paths, string id) => paths.Resolve("private/wireguard-tunnels/" + TcpChains.Id(id) + ".json");
     public static string[] Instances(JsonObject c) => [c.Text("FirstInstance"), c.Text("SecondInstance")];
     public static bool Pending(JsonObject r) => r.Text("Phase") is not ("Active" or "Removed" or "RolledBack");
@@ -44,12 +61,12 @@ public static class WireGuardTunnels
         string[] fields = ["Version", "Id", "Name", "FirstInstance", "SecondInstance", "Family", "FirstPort", "SecondPort", "FirstAddress", "SecondAddress", "Mtu", "KeepaliveSeconds"];
         foreach (var field in new[] { "Id", "Name", "FirstInstance", "SecondInstance", "Family", "FirstAddress", "SecondAddress" })
             if (c[field] is not JsonValue text || !text.TryGetValue<string>(out _)) throw new OperationException("隧道文本字段类型无效。");
-        if (c.Count != fields.Length || c.Any(v => !fields.Contains(v.Key)) || c["Version"] is not JsonValue version || !version.TryGetValue<int>(out var schema) || schema != 1 || c.Text("Name").Length is < 1 or > 60 || c.Text("Name").Any(char.IsControl)) throw new OperationException("隧道字段、版本或名称无效。");
+        if (fields.Any(field => !c.ContainsKey(field)) || c.Any(v => !fields.Contains(v.Key) && v.Key is not ("FirstSlot" or "SecondSlot")) || c["Version"] is not JsonValue version || !version.TryGetValue<int>(out var schema) || schema != 1 || c.Text("Name").Length is < 1 or > 60 || c.Text("Name").Any(char.IsControl)) throw new OperationException("隧道字段、版本或名称无效。");
         _ = TcpChains.Id(c.Text("Id"));
         if (c["Family"] is not JsonValue family || !family.TryGetValue<string>(out var f) || f is not ("IPv4" or "IPv6")) throw new OperationException("请选择 IPv4 或 IPv6 外层地址族。");
         foreach (var (key, min, max) in new[] { ("FirstPort", 1024, 65535), ("SecondPort", 1024, 65535), ("Mtu", 1280, 1420), ("KeepaliveSeconds", 0, 120) })
             if (c[key] is not JsonValue value || !value.TryGetValue<int>(out var n) || n < min || n > max || key == "KeepaliveSeconds" && n is > 0 and < 15) throw new OperationException("隧道端口、MTU 或保活范围无效（保活关闭或 15–120 秒）。");
-        foreach (var instance in Instances(c)) OperationPolicy.Validate(new(OperationKind.HealthAudit, instance, new()));
+        foreach (var instance in Instances(c)) { OperationPolicy.Validate(new(OperationKind.HealthAudit, instance, new())); _ = Slot(c, instance); }
         if (Instances(c).Distinct(StringComparer.OrdinalIgnoreCase).Count() != 2 || request.InstanceRelativePath != c.Text("FirstInstance")) throw new OperationException("请选择不同的两台实例，并从第一台统一管理。");
         if (InnerAddress(c.Text("FirstAddress")) == InnerAddress(c.Text("SecondAddress"))) throw new OperationException("两端的隧道内地址不能相同。");
     }
@@ -78,16 +95,21 @@ public static class WireGuardTunnels
             if (!lifecycle.Managed || action != "Recover" && lifecycle.NeedsRecovery) throw new OperationException("参与实例尚未接入或有其他待恢复事务。");
             if (action != "Recover" && state["WireGuardTunnelTransaction"] != null) throw new OperationException("参与实例存在待恢复的隧道事务。");
             foreach (var other in List(store).Where(r => r.Text("Configuration.Id") != c.Text("Id") && (Pending(r) || r.Text("Phase") == "Active")))
-                if (Instances(other["Configuration"]!.AsObject()).Contains(instance, StringComparer.OrdinalIgnoreCase)) throw new OperationException("每台实例限参与一条活动或待恢复的 WireGuard 隧道。");
-            var port = c.Number(index == 0 ? "FirstPort" : "SecondPort");
-            if (action == "Apply" && (plan["WireGuardTunnel"] != null || state.Text("WireGuardTunnel.RemoteHash", "Absent") != "Absent")) throw new OperationException("该实例已有隧道组件，请先核对或移除。");
+                if (Instances(other["Configuration"]!.AsObject()).Contains(instance, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (Pending(other)) throw new OperationException("参与实例有另一待恢复的隧道事务，请先统一恢复。");
+                    if (Slot(other["Configuration"]!.AsObject(), instance) == Slot(c, instance)) throw new OperationException("所选隧道槽位已有活动隧道。");
+                }
+            var port = c.Number(index == 0 ? "FirstPort" : "SecondPort"); var component = Component(c, instance);
+            if (action == "Apply" && (plan[component] != null || state.Text(component + ".RemoteHash", "Absent") != "Absent")) throw new OperationException("该实例已有隧道组件，请先核对或移除。");
             if (action == "Apply" && (UdpForwarding.Rules(plan["UdpForwarding"] as JsonObject).Any(r => r.Number("ListenPort") == port) || InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").Where(InboundCatalog.UsesUdp).SelectMany(Hysteria2Ports.ListenerPorts).Contains(port) || plan.Flag("ProtocolInventory.ShadowsocksLanding.Installed", DeploymentPlans.Uses(plan, "ShadowsocksLanding")) && plan.Number("Ports.LandingShadowsocks") == port)) throw new OperationException("WireGuard UDP 端口与已有组件冲突。");
             var peer = Peer(c, plan, plans[1 - index], index == 0);
+            if (action == "Apply" && Peers(plan).Any(p => p.Number("ListenPort") == port || new[] { p.Text("LocalAddress"), p.Text("PeerAddress") }.Intersect(new[] { peer.Text("LocalAddress"), peer.Text("PeerAddress") }).Any())) throw new OperationException("隧道端口或内层 /32 地址与另一通道冲突；两个相邻通道使用不同地址。");
             if (action == "Remove" && new[] { "TcpForwarding", "UdpForwarding" }.SelectMany(component => TcpForwarding.Rules(plan[component] as JsonObject)).Any(r => r.Text("TargetAddress") == peer.Text("PeerAddress"))) throw new OperationException("此隧道仍被转发规则使用，请先移除这些规则，再移除隧道。");
             if (new[] { peer.Text("LocalAddress"), peer.Text("PeerAddress") }.Any(a => plans.Any(p => a == p.Text("Server.IPv4")))) throw new OperationException("隧道内地址不能覆盖管理地址或外层地址。");
-            if (action != "Apply" && action != "Recover" && (plan.Text("WireGuardTunnel.Id") != c.Text("Id") || state.Text("WireGuardTunnel.RemoteHash").Length != 64)) throw new OperationException("参与实例的隧道归档身份不完整。");
+            if (action != "Apply" && action != "Recover" && (plan.Text(component + ".Id") != c.Text("Id") || state.Text(component + ".RemoteHash").Length != 64)) throw new OperationException("参与实例的隧道归档身份不完整。");
         }
-        var scope = string.Join("\n", plans.Select((p, i) => Instances(c)[i] + " · " + c.Number(i == 0 ? "FirstPort" : "SecondPort") + "/UDP · " + c.Text(i == 0 ? "FirstAddress" : "SecondAddress") + "/32 · " + (p.Text("Firewall.Mode") == "PreserveExisting" ? "外部防火墙须已放行" : "精确更新受管防火墙")));
+        var scope = string.Join("\n", plans.Select((p, i) => Instances(c)[i] + " · " + c.Number(i == 0 ? "FirstPort" : "SecondPort") + "/UDP · " + c.Text(i == 0 ? "FirstAddress" : "SecondAddress") + "/32 · 槽位 " + Slot(c, Instances(c)[i]) + " · " + (p.Text("Firewall.Mode") == "PreserveExisting" ? "外部防火墙须已放行" : "精确更新受管防火墙")));
         return new(c, record, "WireGuard 实例间加密通道 · " + action + "\n" + scope + "\n外层 " + c.Text("Family") + "；内层 IPv4 对端主机路由；MTU " + c.Number("Mtu") + "；保活 " + c.Number("KeepaliveSeconds") + " 秒。\n缺少时按服务器现有 APT 源安装 wireguard-tools，移除隧道不卸载共享系统工具。隧道对端可访问本机已有监听服务，只选择可信实例。私钥仅留在两端。双向 TCP 与 UDP 随机挑战、配置与管理连接全部核对后提交。仅恢复本次隧道及涉及的受管防火墙。不会修改默认路由、DNS、转发开关或现有代理。");
     }
     public static void GuardOperation(ArchiveStore store, OperationRequest request)

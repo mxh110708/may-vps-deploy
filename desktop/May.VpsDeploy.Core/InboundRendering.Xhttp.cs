@@ -4,7 +4,7 @@ namespace May.VpsDeploy.Core;
 
 public static partial class InboundRendering
 {
-    private static JsonObject XrayXhttp(JsonObject inbound, JsonObject credentials, JsonObject outbound)
+    private static JsonObject XrayXhttp(JsonObject inbound, JsonObject credentials, JsonObject outbound, JsonObject actual)
     {
         var options = inbound["Options"]!; var clients = new JsonArray(inbound.Strings("UserIds").Select(id => (JsonNode)new JsonObject { ["id"] = credentials.Text("Users." + id + ".Value"), ["email"] = id }).ToArray());
         var xhttp=new JsonObject { ["host"] = options.Text("Transport.Host"), ["path"] = options.Text("Transport.Path"), ["mode"] = options.Text("Transport.Mode","auto") };
@@ -21,7 +21,7 @@ public static partial class InboundRendering
         {
             ["log"] = new JsonObject { ["access"] = "none", ["loglevel"] = "warning" },
             ["inbounds"] = new JsonArray(new JsonObject { ["tag"] = inbound.Text("Id"), ["listen"] = inbound.Text("Listener.Address"), ["port"] = inbound.Number("Listener.Port"), ["protocol"] = "vless", ["settings"] = new JsonObject { ["decryption"] = "none", ["clients"] = clients }, ["streamSettings"] = stream }),
-            ["outbounds"] = new JsonArray(new JsonObject { ["tag"] = "egress", ["protocol"] = "freedom", ["settings"] = new JsonObject { ["domainStrategy"] = outbound.Text("Family") switch { "IPv4" => "ForceIPv4", "IPv6" => "ForceIPv6", _ => "AsIs" } } }, new JsonObject { ["tag"] = "block", ["protocol"] = "blackhole" }),
+            ["outbounds"] = new JsonArray(outbound.Text("Kind") == "Direct" ? new JsonObject { ["tag"] = "egress", ["protocol"] = "freedom", ["settings"] = new JsonObject { ["domainStrategy"] = outbound.Text("Family") switch { "IPv4" => "ForceIPv4", "IPv6" => "ForceIPv6", _ => "AsIs" } } } : ServerOutboundRouting.XrayNextHop(actual), new JsonObject { ["tag"] = "block", ["protocol"] = "blackhole" }),
             ["routing"] = new JsonObject { ["domainStrategy"] = "AsIs", ["rules"] = rules }
         };
     }

@@ -213,6 +213,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         public async Task<CommandResult> Run(string asset, Dictionary<string, string>? parameters = null, bool mutation = false, int timeout = 600, string? marker = null, int? port = null, bool bootstrap = false)
         {
             Cancellation.ThrowIfCancellationRequested(); parameters ??= [];
+            if (Request.Kind == OperationKind.WireGuardTunnel && Request.Options["Configuration"] is JsonObject tunnel) parameters["WIREGUARD_SLOT"] = WireGuardTunnels.Slot(tunnel, Request.InstanceRelativePath).ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (mutation && !asset.StartsWith("kernel-", StringComparison.Ordinal) && asset is not ("may-monitor-lifecycle.sh" or "tcp-chain-rollback.sh" or "wireguard-pair-rollback.sh" or "protocol-migration-trigger-rollback.sh" or "maintenance-transaction-commit.sh" or "maintenance-transaction-status.sh") && Pending?.Text("RemoteBackup") is { Length: > 0 } backup) parameters["EXPECTED_TRANSACTION"] = backup;
             Report(asset[..^3], mutation ? "正在执行受管步骤，取消将在安全边界处理。" : "正在读取远端状态。");
             await using var session = await Session(port, bootstrap: bootstrap);

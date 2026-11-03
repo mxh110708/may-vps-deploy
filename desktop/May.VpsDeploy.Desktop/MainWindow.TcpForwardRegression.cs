@@ -33,13 +33,15 @@ public sealed partial class MainWindow
             Require(Input(form, "TcpForward.Sources.0").AcceptsReturn && Find<ComboBox>(form).Any(b => b.Tag as string == "TcpForward.Validation.0"), "白名单或实际验收控件缺失。");
             await Press(form, "PrimaryButton"); await Task.Delay(80); Require(activeTestDialog == form && Find<TextBlock>(form).Single(t => t.Tag as string == "TcpForward.Error").Text.Length > 0, "非法转发未保留表单。");
             await RegressionFill(Input(form, "TcpForward.Port.0"), "55001"); await RegressionFill(Input(form, "TcpForward.Target.0"), "192.0.2.20"); await RegressionFill(Input(form, "TcpForward.TargetPort.0"), "443"); await RegressionFill(Input(form, "TcpForward.Sources.0"), "198.51.100.88/24"); await RegressionFill(Input(form, "TcpForward.Sni.0"), "target.example.test");
-            await Invoke(form, "TcpForward.Add"); await Task.Delay(50); Require(Find<Button>(form).Count(b => (b.Tag as string)?.StartsWith("TcpForward.Remove.") == true) == 2, "规则没有竖向增加。");
+            await RegressionSelect(Find<ComboBox>(form).Single(c => c.Tag as string == "TcpForward.ProxyProtocol.0"), 2);
+            await Invoke(form, "TcpForward.Copy.0"); await Task.Delay(50); Require(Input(form,"TcpForward.Target.1").Text == "192.0.2.20" && Input(form,"TcpForward.Port.1").Text == "0" && Find<ComboBox>(form).Single(c => c.Tag as string == "TcpForward.ProxyProtocol.1").SelectedIndex == 2, "复制映射丢失目标／PROXY或复用了冲突端口。");
+            Require(Find<Button>(form).Count(b => (b.Tag as string)?.StartsWith("TcpForward.Remove.") == true) == 2, "规则没有竖向增加。");
             await Invoke(form, "TcpForward.Remove.1"); await Task.Delay(50); Require(Input(form, "TcpForward.Port.0").Text == "55001", "移除另一规则丢失已有草稿。");
             var visual = Find<Border>(form).Where(b => b.ActualWidth > 250 && b.ActualHeight > 100).OrderByDescending(b => b.ActualWidth * b.ActualHeight).FirstOrDefault() ?? (UIElement)form;
             await Capture(SafePath.Resolve(output, "tcp-forward-form.png"), visual);
             await Press(form, "PrimaryButton"); var review = await Dialog(form);
             ArchiveStore.WriteJson(SafePath.Resolve(output, "tcp-forward-review.json"), new JsonObject { ["Title"] = review.Title?.ToString(), ["Text"] = new JsonArray(Find<TextBlock>(review).Select(t => (JsonNode?)JsonValue.Create(t.Text)).ToArray()) });
-            Require(Find<TextBlock>(review).Any(t => t.Text == "审阅 TCP 转发变更") && Find<TextBlock>(review).Any(t => t.Text.Contains("198.51.100.0/24") && t.Text.Contains("55001") && t.Text.Contains("已有转发连接中断")), "最终审阅缺少规范来源或中断范围。");
+            Require(Find<TextBlock>(review).Any(t => t.Text == "审阅 TCP 转发变更") && Find<TextBlock>(review).Any(t => t.Text.Contains("198.51.100.0/24") && t.Text.Contains("55001") && t.Text.Contains("已有转发连接中断") && t.Text.Contains("PROXY v2")), "最终审阅缺少规范来源或中断范围。");
             await Press(review, "CloseButton"); await pending; Require(ClientSchemes.SourceFingerprint(file) == initial && new TaskHistory(store).Read().Count == history, "取消审阅仍启动转发任务。");
             pending = TcpForwardSheet(relative, plan); form = await Dialog(); await RegressionSelect(Find<ComboBox>(form).Single(c => c.Tag as string == "TcpForward.Action"), 1); await Press(form, "PrimaryButton"); await Task.Delay(80);
             Require(activeTestDialog == form && Find<TextBlock>(form).Single(t => t.Tag as string == "TcpForward.Error").Text.Contains("尚未配置"), "空实例检查未明确阻止。"); await Press(form, "CloseButton"); await pending;
@@ -50,7 +52,7 @@ public sealed partial class MainWindow
             await RegressionSelect(Find<ComboBox>(form).Single(c => c.Tag as string == "TcpForward.Action"), 2); await Press(form, "PrimaryButton"); review = await Dialog(form);
             Require(Find<TextBlock>(review).Any(t => t.Text.Contains("移除当前实例全部受管 TCP 转发")), "移除审阅未明确组件范围。"); await Press(review, "CloseButton"); await pending;
             Require(ClientSchemes.SourceFingerprint(file) == savedHash && taskCancellation == null && new TaskHistory(store).Read().Count == history, "移除审阅取消仍改变配置。");
-            return new() { ["instance_entry"] = true, ["whitelist_application_controls"] = true, ["invalid_keeps_form"] = true, ["vertical_add_remove"] = true, ["draft_preserved"] = true, ["normalized_scoped_review"] = true, ["cancel_no_task"] = true, ["absent_check_guard"] = true, ["saved_rule_refill"] = true, ["remove_review_cancel"] = true };
+            return new() { ["instance_entry"] = true, ["whitelist_application_controls"] = true, ["invalid_keeps_form"] = true, ["vertical_add_remove"] = true, ["duplicate_mapping"] = true, ["explicit_proxy_output"] = true, ["draft_preserved"] = true, ["normalized_scoped_review"] = true, ["cancel_no_task"] = true, ["absent_check_guard"] = true, ["saved_rule_refill"] = true, ["remove_review_cancel"] = true };
         }
         finally
         {

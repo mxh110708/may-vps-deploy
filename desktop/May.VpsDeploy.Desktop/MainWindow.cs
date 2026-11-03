@@ -65,9 +65,9 @@ public sealed partial class MainWindow : Window, IUserInteraction
         var body = new Grid(); body.ColumnDefinitions.Add(new() { Width = new GridLength(220) }); body.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
         var sidebar = new StackPanel { Padding = new Thickness(14, 22, 14, 18), Spacing = 5 };
         sidebar.Children.Add(new StackPanel { Margin = new Thickness(12, 0, 0, 26), Spacing = 8, Children = { new TextBlock { Text = "May Deploy", FontSize = 26, Foreground = Brush(Paint.SidebarText), FontFamily = new FontFamily("ms-appx:///Fonts/SourceSerif4-600.ttf#Source Serif 4"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold }, new TextBlock { Text = "VPS 部署与维护", FontSize = 12, Foreground = Brush(Paint.SidebarMuted) } } });
-        foreach (var (id, label, icon) in new[] { ("overview", "概述", Symbol.Home), ("instances", "实例", Symbol.World), ("monitoring", "监测", Symbol.View), ("deploy", "部署", Symbol.Add), ("clients", "配置设计", Symbol.Link), ("network", "网络调优", Symbol.Globe), ("records", "记录", Symbol.Clock), ("settings", "设置", Symbol.Setting) })
+        foreach (var (id, label, icon) in new[] { ("overview", "概述", Symbol.Home), ("instances", "实例", Symbol.World), ("resources", "运维资源", Symbol.Library), ("monitoring", "监测", Symbol.View), ("deploy", "部署", Symbol.Add), ("clients", "配置设计", Symbol.Link), ("network", "网络调优", Symbol.Globe), ("records", "记录", Symbol.Clock), ("settings", "设置", Symbol.Setting) })
         { var labelText = Text(label, 14); labelText.Foreground = Brush(Paint.SidebarText); var button = new Button { Content = Row(new SymbolIcon(icon) { Width = 18, Height = 18, Foreground = Brush(Paint.SidebarIcon) }, labelText), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(14, 11, 14, 11), Background = Brush(Paint.Sidebar), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(7) }; button.Click += (_, _) => SelectPage(id); navigation[id] = button; sidebar.Children.Add(button); }
-        body.Children.Add(new Border { Background = Brush(Paint.Sidebar), BorderBrush = Brush(Paint.SidebarBorder), BorderThickness = new Thickness(0, 0, 1, 0), Child = sidebar });
+        body.Children.Add(new Border { Background = Brush(Paint.Sidebar), BorderBrush = Brush(Paint.SidebarBorder), BorderThickness = new Thickness(0, 0, 1, 0), Child = new ScrollViewer { Content = sidebar, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
         pageHost.Content = page;
         var content = new ScrollViewer { Content = new StackPanel { Spacing = 22, Margin = new Thickness(36, 24, 36, 28), Children = { new StackPanel { Spacing = 7, Children = { heading, caption } }, notice, pageHost } }, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }; Grid.SetColumn(content, 1); body.Children.Add(content);
         mainScroll = content;
@@ -137,8 +137,8 @@ public sealed partial class MainWindow : Window, IUserInteraction
         CancelNodeReorder();
         StopMonitoring();
         ClearExecution();
-        currentPage = id; page.Children.Clear(); disclosures.Clear(); pageAction.Content = null; notice.IsOpen = false; heading.Text = id switch { "overview" => "概述", "instances" => "实例", "monitoring" => "持续监测", "deploy" => "部署", "clients" => "配置设计", "network" => "网络调优", "records" => "任务记录", _ => "设置" }; caption.Text = id switch { "overview" => "集中管理你的 VPS 与连接配置。", "instances" => "选择实例，查看归档并进行维护。", "monitoring" => "读取 May Monitor 授权节点的最近状态。", "deploy" => "组合选择用途，审阅计划，然后执行。", "clients" => "选择目标，设计连接，校验后导出配置。", "network" => "部署完成后，按需要单独审阅并调整网络参数。", "records" => "查看任务结果和需要处理的恢复记录。", _ => "应用更新、外观设置与私人数据。" };
-        try { switch (id) { case "overview": Overview(); break; case "instances": Instances(); break; case "monitoring": MonitoringPage(); break; case "deploy": Deployment(); break; case "clients": Clients(); break; case "network": NetworkPage(); break; case "records": Records(); break; default: Settings(); break; } } catch (Exception error) { Show(error is OperationException safe ? safe.Message : "本地记录暂时无法读取，请核对数据目录。", InfoBarSeverity.Error); }
+        currentPage = id; page.Children.Clear(); disclosures.Clear(); pageAction.Content = null; notice.IsOpen = false; heading.Text = id switch { "overview" => "概述", "instances" => "实例", "resources" => "运维资源", "monitoring" => "持续监测", "deploy" => "部署", "clients" => "配置设计", "network" => "网络调优", "records" => "任务记录", _ => "设置" }; caption.Text = id switch { "overview" => "集中管理你的 VPS 与连接配置。", "instances" => "选择实例，查看归档并进行维护。", "resources" => "统一查看证书到期、资源使用者、变更影响与维护入口。", "monitoring" => "读取 May Monitor 授权节点的最近状态。", "deploy" => "组合选择用途，审阅计划，然后执行。", "clients" => "选择目标，设计连接，校验后导出配置。", "network" => "部署完成后，按需要单独审阅并调整网络参数。", "records" => "查看任务结果和需要处理的恢复记录。", _ => "应用更新、外观设置与私人数据。" };
+        try { switch (id) { case "overview": Overview(); break; case "instances": Instances(); break; case "resources": ResourcesPage(); break; case "monitoring": MonitoringPage(); break; case "deploy": Deployment(); break; case "clients": Clients(); break; case "network": NetworkPage(); break; case "records": Records(); break; default: Settings(); break; } } catch (Exception error) { Show(error is OperationException safe ? safe.Message : "本地记录暂时无法读取，请核对数据目录。", InfoBarSeverity.Error); }
         if (Content is DependencyObject root) ApplyFont(root);
     }
     private void SelectPage(string id)
@@ -189,6 +189,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
             if (status.Managed && !status.NeedsRecovery)
             {
             details.Children.Add(GroupLabel("日常维护"));
+            details.Children.Add(SettingsGroup(SettingRow("证书与运维资源", "到期状态、共享使用者和变更影响", Symbol.Library, Action("查看资源", () => { resourceFilter["Instance"] = relative; resourceFilter["Kind"] = ""; resourcePage = 0; SelectPage("resources"); return Task.CompletedTask; }))));
             var forwarding = TcpForwarding.Rules(plan["TcpForwarding"] as JsonObject).ToArray();
             details.Children.Add(SettingsGroup(SettingRow("独立 TCP 端口转发", forwarding.Length == 0 ? "按需激活、来源白名单与实际转发验收" : forwarding.Count(r => r.Flag("Enabled")) + " 条已启用 · " + forwarding.Length + " 条已保存；实际状态需核对", Symbol.Forward, Action("管理转发", () => TcpForwardSheet(relative, plan)))));
             details.Children.Add(SettingsGroup(SettingRow("WireGuard 实例间隧道", "双端加密 · 对端主机路由 · 统一验收和恢复", Symbol.Link, Action("管理隧道", () => WireGuardSheet(relative, plan)))));
@@ -281,7 +282,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
     private void RefreshTaskResultPage()
     {
         if (ShowingExecution) return;
-        if (currentPage is not ("instances" or "records" or "overview" or "network")) return;
+        if (currentPage is not ("instances" or "records" or "overview" or "network" or "resources")) return;
         var shown = notice.IsOpen; var message = notice.Message; var severity = notice.Severity;
         SelectPage(currentPage); if (shown) Show(message, severity);
     }

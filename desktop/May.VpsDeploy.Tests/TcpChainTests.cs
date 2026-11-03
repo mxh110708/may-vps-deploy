@@ -136,6 +136,7 @@ internal sealed partial class BoundaryTests
         public string Address => address; public FakeRemote Inner { get; } = new(); public JsonObject? Configuration { get; set; } public JsonObject? InboundState { get; set; } private JsonObject? original;
         public bool Unavailable { get; set; } public bool Drift { get; set; } public string Failure { get; set; } = ""; public string? MachineAddress { get; set; } public int ApplyCalls { get; private set; } public int Compensations { get; private set; }
         public JsonObject? WireGuard { get; set; }
+        public JsonObject? WireGuard2 { get; set; }
         public bool SplitTransports { get; set; }
         public JsonObject? UdpConfiguration { get; set; }
         private JsonObject? originalUdp;
@@ -155,7 +156,7 @@ internal sealed partial class BoundaryTests
             {
                 WireGuardReads++;
                 var drift = WireGuardFailure == "wg-drift" || WireGuardFailure == "wg-late-drift" && WireGuardReads >= 3;
-                return new(0, Marker("WIREGUARD_STATE", new JsonObject { ["Hash"] = drift ? new string('f',64) : ArchiveStore.Fingerprint(WireGuard!), ["Configuration"] = WireGuard?.DeepClone(), ["Healthy"] = true }.ToJsonString()) + "VPSDEPLOY_WIREGUARD_READ\n", "");
+                return new(0, Marker("WIREGUARD_STATE", new JsonObject { ["Hash"] = drift ? new string('f',64) : ArchiveStore.Fingerprint(Parameter("WIREGUARD_SLOT") == "1" ? WireGuard2! : WireGuard!), ["Configuration"] = (Parameter("WIREGUARD_SLOT") == "1" ? WireGuard2 : WireGuard)?.DeepClone(), ["Healthy"] = true }.ToJsonString()) + "VPSDEPLOY_WIREGUARD_READ\n", "");
             }
             if (asset == "wireguard-proof.sh")
             {

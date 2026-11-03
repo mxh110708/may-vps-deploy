@@ -87,8 +87,10 @@ class ProbeBoundaries(unittest.TestCase):
             source = ASSET.replace('/usr/local', target + '/usr/local')
             script = path / 'fixture.sh'
             script.write_bytes(source.encode('utf-8'))
+            probes = path / 'probe-input.private.json'
+            probes.write_text('[]', encoding='utf-8')
             for role in ('AnyTlsEntry', 'RealityEntry', 'Other'):
-                result = subprocess.run([BASH, str(script)], env=dict(os.environ, VPS_PARAM_ROLE=role, VPS_PARAM_PROBES_JSON='[]'), capture_output=True, timeout=10)
+                result = subprocess.run([BASH, str(script)], env=dict(os.environ, VPS_PARAM_ROLE=role, VPS_PARAM_PROBES_JSON_FILE=str(probes)), capture_output=True, timeout=10)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn(b'PASSED', result.stdout)
 

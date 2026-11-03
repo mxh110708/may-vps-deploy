@@ -47,6 +47,14 @@ public sealed partial class MainWindow
             }
             var saved = new JsonObject { ["Version"] = 1, ["Configuration"] = c.DeepClone(), ["Phase"] = "Active", ["Validation"] = new JsonObject { ["Status"] = "Passed" } }; recordFile = WireGuardTunnels.FileName(paths, c.Text("Id")); ArchiveStore.WriteJson(recordFile, saved);
             pending = WireGuardSheet(relatives[1], plans[1]); form = await Dialog(); Require(Box(form,"Selection").SelectedIndex == 1 && Find<TextBlock>(form).Any(t => relatives.All(t.Text.Contains)), "从第二台没有显示同一隧道。");
+            await RegressionSelect(Box(form,"Selection"),0);
+            Require(Input(form,"FirstPort").Text == "51821" && Input(form,"FirstAddress").Text != c.Text("SecondAddress"), "第二槽位的端口或内层地址建议冲突。");
+            var anotherPeer = Box(form,"Peer"); await RegressionSelect(anotherPeer,anotherPeer.Items.Cast<ComboBoxItem>().ToList().FindIndex(i => i.Tag as string == relatives[0]));
+            Require(Input(form,"SecondPort").Text == "51821", "第二端槽位改变后表单未显示实际审阅端口。");
+            await RegressionPress(form,"PrimaryButton"); review=await Dialog(form);
+            Require(Find<TextBlock>(review).Any(t => t.Text.Contains("槽位 1") && t.Text.Contains("51821")), "新第二槽位审阅缺少明确端口和范围。");
+            await RegressionPress(review,"CloseButton"); await pending;
+            pending = WireGuardSheet(relatives[1], plans[1]); form = await Dialog();
             await RegressionSelect(Box(form,"Action"), 1); await RegressionPress(form,"PrimaryButton"); review = await Dialog(form); Require(Find<TextBlock>(review).Any(t => t.Text.Contains("Remove")), "移除未单独审阅。"); await RegressionPress(review,"CloseButton"); await pending;
             saved["Phase"] = "NeedsRecovery"; saved["Transaction"] = new JsonObject { ["TaskId"] = Guid.NewGuid().ToString("N") }; ArchiveStore.WriteJson(recordFile, saved);
             var pendingState = ArchiveStore.ReadJson(SafePath.Resolve(paths.Instance(relatives[1]), "deployment-state.json")); pendingState["WireGuardTunnelTransaction"] = new JsonObject { ["TaskId"] = saved.Text("Transaction.TaskId") }; ArchiveStore.WriteJson(SafePath.Resolve(paths.Instance(relatives[1]), "deployment-state.json"), pendingState);
@@ -56,7 +64,7 @@ public sealed partial class MainWindow
             Require(executionRows.Count == 5 && heading.Text == "WireGuard 隧道任务" && Find<TextBlock>(page).Any(t => relatives.All(t.Text.Contains)), "隧道执行页丢失阶段或双端范围。");
             Require(new TaskHistory(store).Read().Count == history && taskCancellation == null, "回归意外执行远端操作。");
             await Capture(SafePath.Resolve(output, "wireguard-progress.png"), page);
-            return new() { ["entry"] = true, ["required_peer"] = true, ["draft_preserved"] = true, ["both_hosts_reviewed"] = true, ["scope_reviewed"] = true, ["cancel_no_task"] = true, ["shared_record"] = true, ["remove_review"] = true, ["recovery_entry"] = true, ["staged_progress"] = true };
+            return new() { ["entry"] = true, ["required_peer"] = true, ["draft_preserved"] = true, ["both_hosts_reviewed"] = true, ["scope_reviewed"] = true, ["cancel_no_task"] = true, ["shared_record"] = true, ["remove_review"] = true, ["recovery_entry"] = true, ["staged_progress"] = true, ["second_slot_suggestion"] = true, ["second_endpoint_visible"] = true, ["second_slot_reviewed"] = true };
         }
         finally
         {

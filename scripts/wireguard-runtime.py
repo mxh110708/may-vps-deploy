@@ -14,10 +14,13 @@ import subprocess
 import sys
 import time
 
-WG_DIRECTORY = '/etc/may-vps-deploy-wireguard'
+WG_SLOT = globals().get('WG_SLOT', 0)
+if type(WG_SLOT) is not int or WG_SLOT not in (0, 1): raise ValueError('Invalid WireGuard slot.')
+WG_SUFFIX = '' if WG_SLOT == 0 else '-2'
+WG_DIRECTORY = '/etc/may-vps-deploy-wireguard' + WG_SUFFIX
 WG_CONFIG = WG_DIRECTORY + '/configuration.json'
 WG_KEY = WG_DIRECTORY + '/private.key'
-WG_INTERFACE = 'maywg0'
+WG_INTERFACE = 'maywg' + str(WG_SLOT)
 
 
 def wg_command(args, *, check=True, input=None):

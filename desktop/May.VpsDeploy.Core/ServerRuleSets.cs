@@ -26,10 +26,10 @@ public static class ServerRuleSets
         return new(){["Schema"]=1,["Id"]=set.Text("Id"),["Name"]=set.Text("Name"),["Revision"]=set.Text("Revision"),["Rules"]=output};
     }
     public static string Digest(JsonObject set)=>ArchiveStore.Fingerprint(Normalize(set));
-    public static JsonObject Rule(JsonObject set,string action="NextHop",string target="")
+    public static JsonObject Rule(JsonObject set,string action="NextHop",string target="",Func<string,string>? targetIdentity=null)
     {
         var snapshot=Normalize(set);var rule=new JsonObject{["Kind"]="RuleSet",["Value"]=snapshot.Text("Id"),["Action"]=action,["RuleSet"]=snapshot};if(target!="")rule["Target"]=target;
-        return ServerDestinationRules.Normalize(new JsonArray(rule))[0]!.DeepClone().AsObject();
+        return ServerDestinationRules.Normalize(new JsonArray(rule),targetIdentity)[0]!.DeepClone().AsObject();
     }
     public static IEnumerable<JsonObject> Expand(JsonArray rules)
     {

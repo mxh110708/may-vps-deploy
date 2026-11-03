@@ -55,15 +55,19 @@ public sealed partial class MainWindow
                 }
                 checkType.SelectionChanged += (_, _) => { var kind = checkModel.Text("Type"); rule["Validation"] = kind == "Tls" ? new JsonObject { ["Type"] = kind, ["ServerName"] = "" } : new JsonObject { ["Type"] = kind }; RefreshCheck(); };
                 RefreshCheck();
+                var proxyModel = new JsonObject { ["Mode"] = rule.Text("ProxyProtocol", "None") };
+                var proxy = Choice("PROXY 输出（目标须支持，并用 TLS 证书握手验收）", proxyModel, "Mode", [("None", "关闭 · 普通 TCP 转发"), ("v1", "发送 PROXY v1"), ("v2", "发送 PROXY v2 · TCP 地址，无 TLV")]); proxy.Tag = "TcpForward.ProxyProtocol." + i;
+                proxy.SelectionChanged += (_, _) => { if (proxyModel.Text("Mode") == "None") rule.Remove("ProxyProtocol"); else rule["ProxyProtocol"] = proxyModel.Text("Mode"); };
+                var copy = Action("复制为另一入口／目标", () => { var duplicate = rule.DeepClone().AsObject(); duplicate["Id"] = Guid.NewGuid().ToString("N"); duplicate["Name"] = "TCP 转发副本"; duplicate["ListenPort"] = 0; rules.Add(duplicate); Refresh(); return Task.CompletedTask; }); copy.Tag = "TcpForward.Copy." + i; copy.IsEnabled = rules.Count < TcpForwarding.MaximumRules;
                 var remove = Action("移除此规则", () => { rules.RemoveAt(index); Refresh(); return Task.CompletedTask; }); remove.Tag = "TcpForward.Remove." + i;
-                rows.Children.Add(Card(Column(Text("转发 " + (i + 1), 17), name, enabled, Fields(family, port), Fields(target, targetPort), sources, checkType, checks, remove)));
+                rows.Children.Add(Card(Column(Text("转发 " + (i + 1), 17), name, enabled, Fields(family, port), Fields(target, targetPort), sources, proxy, checkType, checks, copy, remove)));
             }
             if (add != null) add.IsEnabled = rules.Count < TcpForwarding.MaximumRules;
         }
         add = Action("添加 TCP 转发", () => { rules.Add(TcpForwarding.NewRule()); Refresh(); return Task.CompletedTask; }); add.Tag = "TcpForward.Add";
         Refresh();
         var editor = Column(rows, add); operation.SelectionChanged += (_, _) => editor.Visibility = model.Text("Action") == "Apply" ? Visibility.Visible : Visibility.Collapsed;
-        var dialog = OperationDialog("独立 TCP 端口转发", DialogScroll(Column(Text("独立监听并转发到一个 IP 目标；仅 TCP。允许来源应包含此电脑的公网 IP 或网段，双栈验收需同时放行两种地址。0.0.0.0/0、::/0 表示相应地址族的所有来源。确认前不连接或修改 VPS。", 14, true), operation, editor, error)), "审阅");
+        var dialog = OperationDialog("独立 TCP 端口转发", DialogScroll(Column(Text("每条监听映射一个明确目标，最多16条，可复用目标或配置不同目标；仅 TCP。PROXY 仅输出当前 socket 的来源，不解析客户端 PROXY 头。目标必须限定只信任本转发服务器；发送到普通 TLS／SSH 会被验收拒绝。允许来源应包含此电脑的公网 IP 或网段，双栈验收需同时放行两种地址。0.0.0.0/0、::/0 表示相应地址族的所有来源。确认前不连接或修改 VPS。", 14, true), operation, editor, error)), "审阅");
         JsonObject? options = null;
         dialog.PrimaryButtonClick += (_, args) =>
         {

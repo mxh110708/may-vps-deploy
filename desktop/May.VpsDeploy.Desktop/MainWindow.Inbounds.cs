@@ -8,15 +8,19 @@ namespace May.VpsDeploy.Desktop;
 
 public sealed partial class MainWindow
 {
-    private async Task InboundsSheet(string relative, JsonObject plan)
+    private async Task InboundsSheet(string relative, JsonObject plan, string initialGroup = "Inbounds", string initialId = "", string initialAction = "Apply")
     {
         var saved = (plan["InboundModel"] ?? InboundCatalog.Empty()).DeepClone().AsObject(); var model = saved.DeepClone().AsObject();
         var allSecrets = store.ReadSecret(SafePath.Resolve(paths.Instance(relative), "secrets.dotnet.private.json"));
         var savedCredentials = (allSecrets["Inbounds"] ?? InboundCatalog.EmptyCredentials()).DeepClone().AsObject(); allSecrets.Clear(); var credentials = savedCredentials.DeepClone().AsObject();
-        var selection = new JsonObject { ["Action"] = "Apply", ["Group"] = "Inbounds", ["Protocol"] = "Shadowsocks2022", ["UserKind"] = "Password" };
+        if (!new[] { "Inbounds", "Users", "Certificates", "Outbounds" }.Contains(initialGroup) || initialId != "" && !InboundCatalog.Items(model, initialGroup).Any(i => i.Text("Id") == initialId)) throw new OperationException("资源引用已变化，请刷新后重新选择。");
+        if (initialAction is not ("Apply" or "Check" or "UpgradeSingBox" or "UpgradeXray")) throw new OperationException("入站维护操作无效。");
+        var selection = new JsonObject { ["Action"] = initialAction, ["Group"] = initialGroup, ["Protocol"] = "Shadowsocks2022", ["UserKind"] = "Password" };
         var selectedIds = new Dictionary<string,string>(); var rows = new StackPanel { Spacing=16 }; var error = Text("",14,true); error.Tag="Inbounds.Error";
+        if (initialId != "") selectedIds[initialGroup] = initialId;
+        var policyInputs = new List<(JsonObject Rule, TextBox Input)>();
         var assets = new ValidationAssets(paths,"windows-amd64"); var tools = new ExternalToolRunner();
-        var sources = workbench.List().SelectMany(s => (s["Nodes"] as JsonArray)?.OfType<JsonObject>().Where(n=>n["sing_box"] is JsonObject native && native.Text("type") is "vless" or "anytls" or "shadowsocks" or "hysteria2" or "tuic" && n.Text("ManagedOrigin.Instance") != relative && n.Text("InboundOrigin.Instance") != relative).Select(n=>(Scheme:s,Node:n)) ?? []).ToArray();
+        var sources = workbench.List().SelectMany(s => (s["Nodes"] as JsonArray)?.OfType<JsonObject>().Where(n=>ServerOutboundRouting.SupportedIndependentNode(n) && n.Text("ManagedOrigin.Instance") != relative && n.Text("InboundOrigin.Instance") != relative).Select(n=>(Scheme:s,Node:n)) ?? []).ToArray();
         var action = Choice("操作",selection,"Action",[("Apply","保存模型变更"),("Check","只读检查已保存模型"),("UpgradeSingBox","更新当前包内固定 sing-box 核心"),("UpgradeXray","更新当前包内固定 Xray 核心")]); action.Tag="Inbounds.Action";
         var group = Choice("资源类别",selection,"Group",[("Inbounds","入站与监听"),("Users","用户与凭据"),("Certificates","证书"),("Outbounds","出站")]); group.Tag="Inbounds.Group";
         void Edit(Action edit) { try { edit(); error.Text=""; } catch(OperationException exception) { error.Text=exception.Message; } }
@@ -30,6 +34,7 @@ public sealed partial class MainWindow
         }
         void Refresh()
         {
+            CaptureDestinationRules(policyInputs); policyInputs.Clear();
             rows.Children.Clear();error.Text="";
             if(selection.Text("Action")!="Apply") { rows.Children.Add(Text("检查或核心更新使用已保存的模型与凭据；草稿保留。更新只替换所选核心，并重新验收引用它的受影响入站；另一核心保持原版本。",14,true));return; }
             var category=selection.Text("Group");var items=InboundCatalog.Items(model,category).ToArray();
@@ -71,7 +76,9 @@ public sealed partial class MainWindow
                     var userId=user.Text("Id");var box=new CheckBox{Content=user.Text("Name"),IsChecked=current.Strings("UserIds").Contains(userId),Tag="Inbounds.User."+userId};
                     box.Checked+=(_,_)=>{if(!current.Strings("UserIds").Contains(userId))current["UserIds"]!.AsArray().Add(userId);};box.Unchecked+=(_,_)=>{var value=current["UserIds"]!.AsArray().FirstOrDefault(n=>n!.ToString()==userId);if(value!=null)current["UserIds"]!.AsArray().Remove(value);};rows.Children.Add(box);
                 }
-                var outbound=Choice("出站引用",current,"OutboundId",InboundCatalog.Items(model,"Outbounds").Select(o=>(o.Text("Id"),o.Text("Name"))),true);outbound.Tag="Inbounds.Outbound";rows.Children.Add(outbound);
+                var outbound=Choice("默认出站引用",current,"OutboundId",InboundCatalog.Items(model,"Outbounds").Select(o=>(o.Text("Id"),o.Text("Name"))),true);outbound.Tag="Inbounds.Outbound";outbound.SelectionChanged+=(_,_)=>Refresh();rows.Children.Add(outbound);
+                current["Routing"] ??= new JsonObject { ["Version"] = 1, ["Rules"] = new JsonArray() };
+                rows.Children.Add(ServerDestinationEditor(current["Routing"]!["Rules"]!.AsArray(), policyInputs, InboundCatalog.Items(model,"Outbounds").Where(o=>o.Text("Id")!=current.Text("OutboundId")).ToDictionary(o=>o.Text("Id"),o=>o.Text("Name")), independent:true));
                 if(protocol!="Shadowsocks2022") {var sni=Field("TLS / Reality SNI",options,"ServerName");sni.Tag="Inbounds.Sni";rows.Children.Add(sni);}
                 if(protocol=="Reality")
                 {
@@ -147,11 +154,12 @@ public sealed partial class MainWindow
             }
             else
             {
+                rows.Children.Add(Text("引用此去向的入站（含 TCP 例外）：" + string.Join("，", InboundCatalog.Items(model,"Inbounds").Where(i=>InboundRoutingPolicy.References(i).Contains(current.Text("Id"))).Select(i=>i.Text("Name"))),14,true));
                 var type=Choice("出站类型",current,"Kind",[("Direct","直连"),("Proxy","已保存代理节点")]);type.Tag="Inbounds.OutboundKind";type.SelectionChanged+=(_,_)=>{if(current.Text("Kind")=="Direct")current["Source"]=new JsonObject();Refresh();};rows.Children.Add(type);rows.Children.Add(Choice("出口地址族",current,"Family",[("IPv4","IPv4"),("IPv6","IPv6"),("Auto","自动")]));rows.Children.Add(Field("预期出口 IP（可留空，只观测地址族）",current,"ExpectedAddress"));
                 if(current.Text("Kind")=="Proxy")
                 {
-                    rows.Children.Add(Text("sing-box 支持 Hysteria2 / TUIC v5 下一跳；Reality 使用固定 Xray，仅支持可转换的 Shadowsocks / Hysteria2。QUIC 出站必须同时通过 HTTPS 与应用 UDP 回程，来源变化需重新选择并审阅。",13,true));
-                    var proxyModel=new JsonObject{["Source"]=current.Text("Source.SchemeId")+":"+current.Text("Source.NodeId")};var source=Choice("代理来源",proxyModel,"Source",sources.Select(s=>(s.Scheme.Text("Id")+":"+s.Node.Text("Id"),s.Scheme.Text("Name")+" / "+s.Node.Text("name"))),true);source.Tag="Inbounds.ProxySource";
+                    rows.Children.Add(Text(ServerOutboundRouting.CapabilitySummary + "默认路径验收 HTTPS 与必要应用 UDP；分类例外只验收对应 TCP 去向。来源变化需重新选择并审阅。",13,true));
+                    var proxyModel=new JsonObject{["Source"]=current.Text("Source.SchemeId")+":"+current.Text("Source.NodeId")};var source=Choice("代理来源",proxyModel,"Source",sources.Select(s=>(s.Scheme.Text("Id")+":"+s.Node.Text("Id"),s.Scheme.Text("Name")+" / "+s.Node.Text("name")+" · "+ServerOutboundRouting.ConnectionLabel(s.Node["sing_box"]!.AsObject()))),true);source.Tag="Inbounds.ProxySource";
                     source.SelectionChanged+=(_,_)=>{var chosen=sources.FirstOrDefault(s=>s.Scheme.Text("Id")+":"+s.Node.Text("Id")==proxyModel.Text("Source"));if(chosen.Node!=null)current["Source"]=new JsonObject{["SchemeId"]=chosen.Scheme.Text("Id"),["NodeId"]=chosen.Node.Text("Id"),["Fingerprint"]=ArchiveStore.Fingerprint(chosen.Node)};};rows.Children.Add(source);
                 }
             }
@@ -162,7 +170,7 @@ public sealed partial class MainWindow
         if(existing.Count>0)panel.Children.Add(Text("现有组件（继续使用原维护入口）："+string.Join("，",existing.Select(i=>i!.Text("Name"))),14,true));
         panel.Children.Add(action);panel.Children.Add(group);panel.Children.Add(rows);panel.Children.Add(error);
         var dialog=OperationDialog("通用多入站资源",DialogScroll(panel),"审阅");JsonObject? options=null;
-        dialog.PrimaryButtonClick+=(_,args)=>{try{var check=selection.Text("Action")!="Apply";options=InboundCatalog.Options(InstanceState(relative),selection.Text("Action"),check?saved:model,check?savedCredentials:credentials);var preview=InboundCatalog.Prepare(store,new(OperationKind.Inbounds,relative,options));preview.Credentials.Clear();preview.Payload["Configurations"]!.AsObject().Clear();error.Text="";}catch(OperationException exception){error.Text=exception.Message;args.Cancel=true;}};
+        dialog.PrimaryButtonClick+=(_,args)=>{try{CaptureDestinationRules(policyInputs);var check=selection.Text("Action")!="Apply";options=InboundCatalog.Options(InstanceState(relative),selection.Text("Action"),check?saved:model,check?savedCredentials:credentials);var preview=InboundCatalog.Prepare(store,new(OperationKind.Inbounds,relative,options));preview.Credentials.Clear();preview.Payload["Configurations"]!.AsObject().Clear();error.Text="";}catch(OperationException exception){error.Text=exception.Message;args.Cancel=true;}};
         try{if(await ShowDialog(dialog)==ContentDialogResult.Primary)await Submit(new(OperationKind.Inbounds,relative,options!));}
         finally{credentials.Clear();savedCredentials.Clear();if(options?["Credentials"] is JsonObject supplied)supplied.Clear();foreach(var source in sources.Select(s=>s.Scheme).Distinct())source.Clear();}
     }

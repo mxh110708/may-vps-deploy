@@ -121,6 +121,7 @@ public sealed partial class MainWindow
         var subscription = Action("添加订阅来源", AddClientSubscription); subscription.Tag = "ClientSources.Add"; var sourceCenter=Action("来源中心 · 定时与批量同步",ClientSourceCenter);sourceCenter.Tag="SourceSync.Center";page.Children.Add(Row(subscription,sourceCenter)); DesignerClientSources();
         DesignerNodeGroups();
         if (nodes.Count == 0) { page.Children.Add(Card(Column(Text("还没有节点", 18), Text("先添加至少一个入口节点。使用落地时，再添加落地节点并选择它连接的入口组。", 14, true)))); return; }
+        var batch = Action("批量管理节点", BatchClientNodes); batch.Tag = "ClientBatch.Open"; page.Children.Add(batch);
         var rows = new List<UIElement>();
         CancelNodeReorder(); nodeDropRows.Clear(); nodeDragSession = Guid.NewGuid().ToString("N");
         for (var i = 0; i < nodes.Count; i++)
@@ -164,8 +165,9 @@ public sealed partial class MainWindow
         var rules = Action("筛选与命名", EditClientOutputRules); rules.Tag = "ClientOutput.Rules";
         var previewButton = Action("预览与能力报告", PreviewClientOutput); previewButton.Tag = "ClientOutput.Preview";
         var share = Action("分享节点链接", () => ShareClientLinks(selected)); share.Tag = "ClientShare.Open";
+        var fragments = Action("导出原生节点片段", () => ExportClientFragments(selected)); fragments.Tag = "ClientFragment.Open";
         var output = ClientOutputRules.Preview(selected);
-        page.Children.Add(Card(Column(Text("输出处理 · " + (selected.Flag("OutputRules.Enabled") ? "已启用" : "沿用源节点"), 17), Row(rules, previewButton, share))));
+        page.Children.Add(Card(Column(Text("输出处理 · " + (selected.Flag("OutputRules.Enabled") ? "已启用" : "沿用源节点"), 17), Row(rules, previewButton, share), fragments)));
         foreach (var issue in output.Issues.Where(i => i.Severity == "Error")) page.Children.Add(Text(issue.Message, 14));
         var generate = Action("生成配置", async () => { try { await RunBackground("正在生成配置", async token => await workbench.BuildAsync(selected, token)); RememberScheme(); } finally { Navigate("clients"); } Show("配置已生成，方案已保存。", InfoBarSeverity.Success); }, selected["Candidate"] == null); generate.IsEnabled = selected["Nodes"]!.AsArray().Count > 0 && output.Ready;
         var validate = Action("校验配置", async () => { try { await RunBackground("正在校验配置", async token => await workbench.ValidateAsync(selected, token)); RememberScheme(); } finally { Navigate("clients"); } Show("所选客户端的核心校验通过。", InfoBarSeverity.Success); }, selected["Candidate"] != null && !validated); validate.IsEnabled = selected["Candidate"] != null;

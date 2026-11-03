@@ -1,6 +1,16 @@
 # Desktop walkthrough
 
-Baseline: May VPS Deploy v0.9.40 on Windows amd64. The Chinese [full manual](USER-GUIDE.zh-CN.md) covers all current desktop workflows; this guide gives the installation, acceptance and recovery sequence in English.
+Round 30 adds both adjacent WireGuard segments, independently mapped listener/target ports and explicit TCP PROXY v1/v2 output, included in v0.9.41. Accept each tunnel first, then select both segments in the chain editor. Consult the [scope and recovery guide](FORWARDING-WIREGUARD-ROUND-30-2026-11-02.zh-CN.md); branch documentation does not prove installed capabilities.
+
+Baseline: May VPS Deploy v0.9.41 on Windows amd64. The Chinese [full manual](USER-GUIDE.zh-CN.md) covers all current desktop workflows; this guide gives the installation, acceptance and recovery sequence in English.
+
+## Independent-inbound policies
+
+Round 28 adds an ordered policy editor below the default outbound in independent-inbound management. Select existing outbound resources, server-direct or reject for domain/CIDR categories; application UDP keeps the default path. Rule-set versions are pinned, referenced resources cannot be deleted, and changed sources require renewed review and acceptance. Server-direct uses the VPS network, not a campus network. See the [policy guide](INBOUND-POLICY-ROUND-28-2026-11-02.zh-CN.md); included in v0.9.41.
+
+## Server next hops
+
+The [round 29 next-hop guide](SERVER-STREAM-NEXT-HOPS-ROUND-29-2026-11-02.zh-CN.md) covers VLESS TLS/Reality, Trojan TLS, AnyTLS and bounded sing-box WS/gRPC sources. Save the complete source, select a core-compatible resource, review SNI/trust/transport/session settings, and require real HTTPS, egress and default application UDP before committing. Core-specific restrictions and the recorded TLS Vision peer limitation apply.
 
 ## Install
 
@@ -108,3 +118,14 @@ Initial categories cover campus/domestic academic sites, research/datasets, deve
 ## Share and native output round trips (round 27, v0.9.40)
 
 Import plain or Base64 lists directly, up to 200 nodes and 256 KiB decoded. TUIC v5 and plain TLS VLESS/Trojan connections support reviewed URI sharing and reimport; native Mihomo and sing-box configurations preserve their fields. Unsupported advanced options require full configuration output. See [round 27](CLIENT-OUTPUT-ROUND-27-2026-11-02.zh-CN.md).
+
+## Certificates and operations resources (round 31, v0.9.41)
+
+Open Operations Resources from the sidebar or the selected instance. Filter by associated instance, category, search and attention state. Details show direct and transitive consumers, including disabled inbounds, before routing to the same resource's existing maintenance workflow. Local refresh does not connect to servers or upgrade stored layouts. Remote observation requires selecting and reviewing one instance; 14/30-day expiry and 24-hour freshness states do not replace actual protocol acceptance. Viewing or cancelling does not issue certificates, restart services or submit changes. See [round 31](OPERATIONS-RESOURCES-ROUND-31-2026-11-03.zh-CN.md).
+
+
+## Node batch edits and native output (round 32)
+
+Open Configuration Design, then the node page and the batch manager. Filter, select and review all affected members before applying to the draft. Filtering retains hidden selections and shows their count. Save the scheme and regenerate/revalidate after changes. Referenced upstreams, active defaults and partially selected reusable groups block unsafe changes.
+
+On the export page, native merge fragments preserve the selected client format and all disclosed node/region dependencies, including advanced fields that cannot fit in sharing URIs. They do not contain complete DNS, routing or listener settings. Copy only after reviewing the extra dependencies, or save a new YAML/JSON file; merge and validate in the destination client. Full configuration export separately reviews added/removed/changed counts and DNS/routing/listener/settings changes without displaying authentication values. Canceling writes nothing; changed sources, candidates or destinations require review again. See the [detailed guide](CLIENT-BATCH-OUTPUT-ROUND-32-2026-11-03.zh-CN.md).

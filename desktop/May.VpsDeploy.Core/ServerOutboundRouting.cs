@@ -73,13 +73,22 @@ public static partial class ServerOutboundRouting
     {
         try { Id(node.Text("Id")); NextHop(node); return true; } catch (OperationException) { return false; }
     }
-    public static JsonObject NextHop(JsonObject node)
+    public static bool SupportedIndependentNode(JsonObject node)
     {
-        if (node["ForwardedOrigin"] != null) throw new OperationException("本轮服务器落地须选择原始代理节点，不能引用转发节点。");
+        if (node["sing_box"] is not JsonObject native || native.Text("detour") != "" || native.Text("network") == "udp") return false;
+        // Independent inbounds already accept validated forwarding sources and
+        // native SS parameters. Fixed-role restrictions are a separate scope.
+        if (native.Text("type") == "shadowsocks") return true;
+        try { NextHop(node, allowForwarded: IsStream(native)); return true; } catch (OperationException) { return false; }
+    }
+    public static JsonObject NextHop(JsonObject node, bool allowForwarded = false)
+    {
+        if (node["ForwardedOrigin"] != null && !allowForwarded) throw new OperationException("本轮服务器落地须选择原始代理节点，不能引用转发节点。");
         if (node["sing_box"] is not JsonObject native) throw new OperationException("下一跳缺少完整 sing-box 原生参数。");
         if (IsQuic(native)) QuicParameters(native);
-        else if (native.Text("type") != "shadowsocks" || native.Any(p => !new[] { "type", "tag", "server", "server_port", "method", "password" }.Contains(p.Key)) || !Methods.Contains(native.Text("method"))) throw new OperationException("下一跳支持完整 Shadowsocks、Hysteria2 或 TUIC v5；不接受插件、客户端 detour 或未支持的参数。");
-        if (native.Number("server_port") is < 1 or > 65535 || native.Text("password").Length is < 1 or > 4096 || native.Text("password").Any(char.IsControl)) throw new OperationException("下一跳的端口或鉴权参数无效。");
+        else if (IsStream(native)) StreamParameters(native);
+        else if (native.Text("type") != "shadowsocks" || native.Any(p => !new[] { "type", "tag", "server", "server_port", "method", "password" }.Contains(p.Key)) || !Methods.Contains(native.Text("method"))) throw new OperationException("下一跳不在当前核心支持范围，或含有插件、客户端 detour 等未知参数；不会删除字段后继续应用。");
+        if (native.Number("server_port") is < 1 or > 65535 || native.Text("type") != "vless" && (native.Text("password").Length is < 1 or > 4096 || native.Text("password").Any(char.IsControl))) throw new OperationException("下一跳的端口或鉴权参数无效。");
         Address(native.Text("server"));
         var name = node.Text("name"); if (name.Length is < 1 or > 120 || name.Any(char.IsControl)) throw new OperationException("下一跳名称无效。");
         var result = native.DeepClone().AsObject(); result["tag"] = Tag; result["server"] = Address(native.Text("server")).ToString();
@@ -121,6 +130,7 @@ public static partial class ServerOutboundRouting
             var added = AddedRules(role, policy, ["anytls-in"], family, plan, named);
             for (var i = added.Count - 1; i >= 0; i--) rules.Insert(0, added[i]!.DeepClone());
             metadata = new JsonObject { ["Version"] = 1, ["Name"] = node.Text("name"), ["Endpoint"] = new IPEndPoint(endpoint, next.Number("server_port")).ToString(), ["ExpectedAddress"] = expected.ToString(), ["EgressFamily"] = family, ["OutboundFingerprint"] = ArchiveStore.Fingerprint(next), ["RulesFingerprint"] = ArchiveStore.Fingerprint(added), ["SchemeId"] = source?.Text("SchemeId"), ["NodeId"] = source?.Text("NodeId"), ["NodeFingerprint"] = ArchiveStore.Fingerprint(node) };
+            if (IsStream(next)) metadata["Connection"] = ConnectionSummary(next);
             if (policy.Count > 0) { metadata["DestinationRules"] = policy; metadata["DestinationRulesNetwork"] = "tcp"; }
             if (named.Count > 0) metadata["AdditionalHops"] = named;
         }
@@ -136,7 +146,7 @@ public static partial class ServerOutboundRouting
         if (Roles.Contains(role) && plan.At("ServerOutbound." + role) is JsonObject metadata) Build(role, configuration, metadata, null, "", plan);
     }
     private static string Summary(string role, string inbounds, JsonObject? previous, JsonObject? metadata) =>
-        "入站：" + Label(role) + " / " + inbounds + "（全部用户，TCP 与 UDP）\n" + (previous == null ? "原策略：此入站原有出口策略。\n" : "原下一跳：" + previous.Text("Name") + " · " + previous.Text("Endpoint") + "\n") +
+        "入站：" + Label(role) + " / " + inbounds + "（全部用户，TCP 与 UDP）\n" + (previous == null ? "原策略：此入站原有出口策略。\n" : "原下一跳：" + previous.Text("Name") + " · " + previous.Text("Endpoint") + "\n") + (metadata?.Text("Connection") is { Length: > 0 } connection ? "下一跳连接：" + connection + "\n" : "") +
         (metadata == null ? "操作：移除受管固定下一跳、附加落地及分流例外，恢复原 " + (role == "RealityEntry" ? "Reality" : "AnyTLS") + " 出口策略。" : "默认下一跳：" + metadata.Text("Name") + " · " + metadata.Text("Endpoint") + "\n预期网站出口（默认落地）：" + metadata.Text("ExpectedAddress") + "（" + metadata.Text("EgressFamily") + "）\nIP 网段按对应落地的预期出口地址族核对；域名出口由落地处理。落地失败不会回退直连或其他落地。\n" + NamedHopsSummary(metadata) + "\n" + RulesSummary(metadata)) +
         (previous?["DestinationRules"] == null ? "" : "\n\n原分流例外：\n" + NamedHopsSummary(previous) + "\n" + RulesSummary(previous)) +
         "\n\n只重启当前 " + Label(role) + " 服务，现有连接会短暂断开。保留监听、入站凭据、Reality / TLS / ECH、防火墙、SSH、其他协议与监控。\n先核对实际配置摘要和服务状态，建立该组件专用恢复点，再应用并独立验证默认入口的 HTTPS、出口地址及 UDP。附加 TCP 落地从入口机逐一核验 TLS 与预期出口；业务规则命中仍需实际业务核对。验收不完整、失败或取消均恢复本次范围；回复不明先核对事务，不重放写入。\n下一跳凭据按本次审阅快照配置；方案后续刷新不会自动修改服务器。";

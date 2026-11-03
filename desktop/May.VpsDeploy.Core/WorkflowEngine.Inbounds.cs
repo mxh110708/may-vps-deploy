@@ -48,6 +48,14 @@ public sealed partial class WorkflowEngine
                     if (mismatch) throw new OperationException("本次启用的入站未全部正常运行，恢复本次范围。");
                     if (inboundValidation == null && running.Length > 0) throw new OperationException("通用入站实际验收适配器不可用。");
                     result = running.Length == 0 ? new JsonObject { ["Status"] = "Passed", ["Items"] = new JsonArray() } : await inboundValidation!.ValidateAsync(c.Plan, preview.Model, preview.Credentials, ids, c.File("inbound-validation/" + c.Id), new InlineProgress<string>(m => c.Report("入站代理 HTTPS 验收", m)), c.Cancellation);
+                    foreach (var inbound in running.Where(i => InboundRoutingPolicy.Rules(i).Count > 0))
+                    {
+                        var request = InboundRoutingPolicy.ProbeRequest(store, c.Plan, preview.Model, preview.Credentials, inbound);
+                        var reply = await c.Run("inbound-policy-probe.sh", new() { ["INBOUND_DOCUMENT"] = request.ToJsonString() }, timeout: 180, marker: "INBOUND_POLICY_PASSED");
+                        var proof = JsonNode.Parse(RemoteAssets.Marker(reply.Output, "INBOUND_POLICY_RESULT"))!.AsObject();
+                        InboundRoutingPolicy.RequirePaths(request, proof);
+                        foreach (var item in (result["Items"] as JsonArray ?? []).OfType<JsonObject>().Where(i => i.Text("InboundId") == inbound.Text("Id"))) item["PolicyValidation"] = proof.DeepClone();
+                    }
                     InboundSources.RequireValidation(store, c.Plan, preview.Model, preview.Credentials, ids, result);
                 }
                 var after = await Read(); if (after.Text("Hash") != observed.Text("Hash")) throw new OperationException("验收期间入站资源发生变化，未提交。");

@@ -48,7 +48,7 @@ public static partial class TcpChains
         Fields(request.Options, "Action", "Configuration");
         if (request.Options.Text("Action") is not ("Apply" or "Check" or "Remove" or "Recover")) throw new OperationException("跨实例线路操作无效。");
         var c = request.Options["Configuration"] as JsonObject ?? throw new OperationException("缺少线路配置。");
-        var shape = c.DeepClone().AsObject(); shape.Remove("Family"); shape.Remove("Transport"); shape.Remove("WireGuard");
+        var shape = c.DeepClone().AsObject(); shape.Remove("Family"); shape.Remove("Transport"); shape.Remove("WireGuard"); shape.Remove("WireGuards");
         Fields(shape, "Version", "Id", "Name", "FrontInstance", "RelayInstance", "LandingInstance", "FrontPort", "RelayPort", "FrontSources", "FrontSourceAddress", "Landing");
         _ = Family(c); _ = Transport(c); TcpChainUnderlay.Validate(c);
         if (c["Version"] is not JsonValue version || !version.TryGetValue<int>(out var schema) || schema != 1 || c.Text("Name").Length is < 1 or > 60 || c.Text("Name").Any(char.IsControl)) throw new OperationException("线路版本或名称无效。");
@@ -156,18 +156,24 @@ public static partial class TcpChains
     }
     public static void RequireValidation(JsonObject configuration, JsonObject node, JsonObject result)
     {
+        TcpChainUnderlay.Validate(configuration);
         if (result.Text("Status") != "Passed" || result.Text("From") != "Controller" || result.Text("Scope") != "TcpChainProxyHttps" || result.Text("ConnectionFingerprint") != ClientNodeImport.ConnectionFingerprint(node)
             || result.Text("ConfigurationFingerprint") != ArchiveStore.Fingerprint(configuration) || result.Text("Result.Status") != "Reachable") throw new OperationException("整条线路未完成代理协议与 HTTPS 出口验收，不能提交。", code: "TcpChainValidationIncomplete");
         if (Transport(configuration) == "UDP" && (result.Text("Result.ValidatedProtocol") != node.Text("sing_box.type") || !result.Flag("Result.UdpValidation.ResponseMatched") || result.Text("Result.UdpValidation.Transport") != "UDP")) throw new OperationException("UDP 线路须完成所选 QUIC 协议与应用 UDP 回程，不能以 TCP、直连 DNS 或单向发包替代。", code: "TcpChainValidationIncomplete");
-        if (TcpChainUnderlay.Selected(configuration))
+        foreach (var reference in TcpChainUnderlay.References(configuration))
         {
-            var proof = result["WireGuard"] as JsonObject; var directions = proof?["Directions"] as JsonArray;
-            if (proof == null || proof.Text("Status") != "Passed" || proof.Text("Scope") != "BidirectionalWireGuardApplications" || proof.Text("DependencyFingerprint") != configuration.Text("WireGuard.Fingerprint") ||
+            var single = TcpChainUnderlay.WithReference(configuration, reference);
+            var matches = (result.At("WireGuard.Segments") as JsonArray)?.OfType<JsonObject>().Where(p => p.Text("Id") == reference.Text("Id") && p.Text("Segment") == reference.Text("Segment")).ToArray() ?? [];
+            var proof = configuration.ContainsKey("WireGuards") ? matches.Length == 1 ? matches[0] : null : result["WireGuard"] as JsonObject;
+            var directions = proof?["Directions"] as JsonArray;
+            if (proof == null || proof.Text("Status") != "Passed" || proof.Text("Scope") != "BidirectionalWireGuardApplications" || proof.Text("DependencyFingerprint") != reference.Text("Fingerprint") ||
                 directions?.Count != 2 || directions.Any(p => p.Text("Status") != "Passed" || !p.Flag("TCP") || !p.Flag("UDP") || !p.Flag("ResponseMatched")) ||
-                !directions.Select(p => p.Text("FromInstance")).ToHashSet(StringComparer.Ordinal).SetEquals(TcpChainUnderlay.Participants(configuration)))
-                throw new OperationException("线路缺少所选 WireGuard 双端的本次 TCP／UDP 匹配证据。", code: "TcpChainUnderlayIncomplete");
+                !directions.Select(p => p.Text("FromInstance")).ToHashSet(StringComparer.Ordinal).SetEquals(TcpChainUnderlay.Participants(single)))
+                throw new OperationException("线路缺少所选 WireGuard 每段双端的本次 TCP／UDP 匹配证据。", code: "TcpChainUnderlayIncomplete");
         }
+        if (configuration.ContainsKey("WireGuards") && ((result.At("WireGuard.Segments") as JsonArray)?.Count != TcpChainUnderlay.References(configuration).Length || result.Text("WireGuard.Scope") != "AdjacentWireGuardApplications" || result.Text("WireGuard.Status") != "Passed")) throw new OperationException("多段隧道验收身份或数量不同。");
     }
+
     public static void VerifyOrigins(ArchiveStore store, JsonArray origins)
     {
         if (origins.Any(n => n is not JsonObject)) throw new OperationException("线路来源记录无效，请重新添加节点。");
@@ -251,7 +257,7 @@ public static partial class TcpChains
         };
         var actionLabel = action switch { "Apply" => "新建并验收", "Check" => "只读检查", "Remove" => "移除线路", _ => "恢复整条线路" };
         string FirewallLabel(JsonObject plan) => plan.Text("Firewall.Mode") == "PreserveExisting" ? "保留既有规则，需自行放行端口" : action == "Check" ? "当前使用受管规则" : "同步本次 " + Transport(c) + " 端口的受管放行规则";
-        var summary = $"{c.Text("Name")} · {actionLabel}\n前置：{c.Text("FrontInstance")} {Family(c)}:{c.Number("FrontPort")}\n↓ {Transport(c)}\n中转：{c.Text("RelayInstance")} {(c.Text("WireGuard.Segment") == "FrontRelay" ? "IPv4" : Family(c))}:{c.Number("RelayPort")}\n↓ {Transport(c)}\n落地：{c.Text("LandingInstance")} · {(c.Text("WireGuard.Segment") == "RelayLanding" ? "IPv4" : Family(c))}:{(landingPort > 0 ? landingPort.ToString() : "原归档端口")}\n\n前置允许来源：{string.Join("，", c.Strings("FrontSources"))}\n中转仅允许：{TcpChainUnderlay.RelaySourceDescription(c)}\n前置防火墙：{FirewallLabel(front)}\n中转防火墙：{FirewallLabel(relay)}\n落地防火墙沿用当前配置，请确认允许中转出口。\n\n{procedure}\n落地代理、鉴权及 TLS 参数沿用原配置。";
+        var summary = $"{c.Text("Name")} · {actionLabel}\n前置：{c.Text("FrontInstance")} {Family(c)}:{c.Number("FrontPort")}\n↓ {Transport(c)}\n中转：{c.Text("RelayInstance")} {(TcpChainUnderlay.HasSegment(c, "FrontRelay") ? "IPv4" : Family(c))}:{c.Number("RelayPort")}\n↓ {Transport(c)}\n落地：{c.Text("LandingInstance")} · {(TcpChainUnderlay.HasSegment(c, "RelayLanding") ? "IPv4" : Family(c))}:{(landingPort > 0 ? landingPort.ToString() : "原归档端口")}\n\n前置允许来源：{string.Join("，", c.Strings("FrontSources"))}\n中转仅允许：{TcpChainUnderlay.RelaySourceDescription(c)}\n前置防火墙：{FirewallLabel(front)}\n中转防火墙：{FirewallLabel(relay)}\n落地防火墙沿用当前配置，请确认允许中转出口。\n\n{procedure}\n落地代理、鉴权及 TLS 参数沿用原配置。";
         if (action != "Check") summary += "\n现有本组件连接或数据报会话会短暂中断，其他转发规则保留。失败或取消按两台的本次快照恢复；部分提交或连接中断时按任务身份核对，无法安全完成则保留待恢复记录。";
         summary += "\n每条线路三台、一种传输；可复用实例，监听端口须独立。原生连接段同一地址族，WireGuard 段为隧道内 IPv4。UDP 限固定端口 Hysteria2／TUIC，必须验收应用 UDP 回程。外部防火墙须放行，前置经 NAT 时须填真实出口。";
         var preserved = action is "Apply" or "Remove" ? Preserved(store, c) : [];

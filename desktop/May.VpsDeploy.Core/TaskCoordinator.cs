@@ -39,6 +39,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
     private string ArchiveFingerprint(OperationRequest request)
     {
         var directory = store.Paths.Instance(request.InstanceRelativePath); var files = new JsonObject();
+        if (request.Kind is OperationKind.TcpForward or OperationKind.TcpChain) files["scripts/tcp-proxy-worker.py"] = ClientSchemes.SourceFingerprint(store.Paths.Resolve("scripts/tcp-proxy-worker.py"));
         if (request.Kind == OperationKind.Inbounds)
         {
             foreach (var asset in new[] { "config/versions.json", "scripts/inbound-host.py", "assets/remote/inbound-read.sh", "assets/remote/inbound-apply.sh", "assets/remote/audit.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/protocol-migration-trigger-rollback.sh", "assets/remote/maintenance-transaction-status.sh", "assets/remote/maintenance-transaction-commit.sh", "assets/remote/maintenance-mutation-guard.sh", "assets/remote/nftables-apply.sh", "assets/remote/firewall-tools.sh", "assets/remote/firewall-preflight.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(asset));
@@ -64,7 +65,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
                     files["SharedSource:" + sibling.Text("Configuration.Id")] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, sibling.Text("Configuration.Landing.SchemeId")));
                     if (TcpChainUnderlay.Selected(sibling["Configuration"]!.AsObject()))
                     {
-                        files["SharedUnderlay:" + sibling.Text("Configuration.Id")] = ClientSchemes.SourceFingerprint(WireGuardTunnels.FileName(store.Paths, sibling.Text("Configuration.WireGuard.Id")));
+                        foreach (var reference in TcpChainUnderlay.References(sibling["Configuration"]!.AsObject())) files["SharedUnderlay:" + sibling.Text("Configuration.Id") + ":" + reference.Text("Id")] = ClientSchemes.SourceFingerprint(WireGuardTunnels.FileName(store.Paths, reference.Text("Id")));
                         foreach (var name in new[] { "scripts/wireguard-host.py", "scripts/wireguard-runtime.py", "assets/remote/wireguard-read.sh", "assets/remote/wireguard-proof.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
                     }
                 }
@@ -72,7 +73,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
             files["ChainSource"] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, config.Text("Landing.SchemeId")));
             if (TcpChainUnderlay.Selected(config))
             {
-                files["ChainWireGuard"] = ClientSchemes.SourceFingerprint(WireGuardTunnels.FileName(store.Paths, config.Text("WireGuard.Id")));
+                foreach (var reference in TcpChainUnderlay.References(config)) files["ChainWireGuard:" + reference.Text("Id")] = ClientSchemes.SourceFingerprint(WireGuardTunnels.FileName(store.Paths, reference.Text("Id")));
                 foreach (var name in new[] { "scripts/wireguard-host.py", "scripts/wireguard-runtime.py", "assets/remote/wireguard-read.sh", "assets/remote/wireguard-proof.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
             }
             foreach (var name in new[] { "scripts/udp-forwarding.py", "scripts/udp-forward-worker.py", "scripts/inbound-host.py", "assets/remote/udp-forward-read.sh", "assets/remote/udp-forward-apply.sh", "assets/remote/inbound-read.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));

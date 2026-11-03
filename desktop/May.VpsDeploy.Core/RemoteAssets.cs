@@ -18,6 +18,11 @@ public sealed class RemoteAssets(AppPaths paths)
         {
             if (!Regex.IsMatch(name, "^[A-Z][A-Z0-9_]*$")) throw new OperationException("远端参数名称无效。");
             var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+            if (name == "PROBES_JSON")
+            {
+                text.Append("VPS_PARAM_PROBES_JSON_FILE=$(mktemp /tmp/may-server-probes.XXXXXXXXXX)\nchmod 0600 \"$VPS_PARAM_PROBES_JSON_FILE\"\nexport VPS_PARAM_PROBES_JSON_FILE\ntrap 'rm -f -- \"$VPS_PARAM_PROBES_JSON_FILE\"' EXIT\nbase64 -d > \"$VPS_PARAM_PROBES_JSON_FILE\" <<'MAY_SERVER_PROBES_B64'\n").Append(encoded).Append("\nMAY_SERVER_PROBES_B64\n");
+                continue;
+            }
             if (name == "INBOUND_DOCUMENT")
             {
                 text.Append("VPS_PARAM_INBOUND_DOCUMENT_FILE=$(mktemp /tmp/may-inbound-document.XXXXXXXXXX)\nchmod 0600 \"$VPS_PARAM_INBOUND_DOCUMENT_FILE\"\nexport VPS_PARAM_INBOUND_DOCUMENT_FILE\ntrap 'rm -f -- \"$VPS_PARAM_INBOUND_DOCUMENT_FILE\"' EXIT\nbase64 -d > \"$VPS_PARAM_INBOUND_DOCUMENT_FILE\" <<'MAY_INBOUND_DOCUMENT_B64'\n").Append(encoded).Append("\nMAY_INBOUND_DOCUMENT_B64\n");
@@ -30,11 +35,19 @@ public sealed class RemoteAssets(AppPaths paths)
             var program = string.Join("\n", sources.Select(source => File.ReadAllText(paths.Resolve(source)).Replace("\r\n", "\n")));
             // Pin the UDP worker inside the recovery program as well as the
             // managed file; old snapshots must not depend on the current app.
+            if (variable == "VPS_TCP_FORWARD_PROGRAM") program = "TCP_PROXY_WORKER_SOURCE = " + System.Text.Json.JsonSerializer.Serialize(File.ReadAllText(paths.Resolve("scripts/tcp-proxy-worker.py")).Replace("\r\n", "\n")) + "\n" + program;
             if (variable == "VPS_UDP_FORWARD_PROGRAM") program = "UDP_WORKER_SOURCE = " + System.Text.Json.JsonSerializer.Serialize(File.ReadAllText(paths.Resolve("scripts/udp-forward-worker.py")).Replace("\r\n", "\n")) + "\n" + program;
             if (variable == "VPS_WIREGUARD_PROGRAM")
             {
-                var runtime = File.ReadAllText(paths.Resolve("scripts/wireguard-runtime.py")).Replace("\r\n", "\n");
+                var slot = parameters.TryGetValue("WIREGUARD_SLOT", out var selectedSlot) ? selectedSlot : "0";
+                if (slot is not ("0" or "1")) throw new OperationException("隧道槽位无效。");
+                var runtime = "WG_SLOT = " + slot + "\n" + File.ReadAllText(paths.Resolve("scripts/wireguard-runtime.py")).Replace("\r\n", "\n");
                 program = "WIREGUARD_RUNTIME_SOURCE = " + System.Text.Json.JsonSerializer.Serialize(runtime) + "\nexec(WIREGUARD_RUNTIME_SOURCE.split(\"\\nif __name__ ==\", 1)[0])\n" + program;
+            }
+            if (variable == "VPS_INBOUND_POLICY_PROGRAM")
+            {
+                var host = File.ReadAllText(paths.Resolve("scripts/inbound-host.py")).Replace("\r\n", "\n");
+                program = "INBOUND_HOST_SOURCE = " + System.Text.Json.JsonSerializer.Serialize(host) + "\nexec(INBOUND_HOST_SOURCE.split(\"\\nif __name__==\", 1)[0])\n" + program;
             }
             var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(program));
             text.Append("export ").Append(variable).Append("=\"$(printf '%s' '").Append(encoded).Append("' | base64 -d)\"\n");
@@ -46,6 +59,8 @@ public sealed class RemoteAssets(AppPaths paths)
             Program("VPS_KERNEL_PROGRAM", "scripts/kernel-runtime.py", "scripts/kernel-engine.py");
         }
         if (asset == "component-release-latest.sh") Program("VPS_COMPONENT_RELEASE_PROGRAM", "scripts/component-releases.py");
+        if (asset == "resource-certificates-read.sh") Program("VPS_RESOURCE_CERTIFICATES_PROGRAM", "scripts/resource-certificates.py");
+        if (asset == "inbound-policy-probe.sh") Program("VPS_INBOUND_POLICY_PROGRAM", "scripts/inbound-policy-probe.py");
         if (asset == "may-monitor-lifecycle.sh") Program("VPS_MAY_MONITOR_PROGRAM", "scripts/may-monitor-lifecycle.py");
         if (asset is "inbound-read.sh" or "inbound-apply.sh" || asset == "protocol-migration-arm-rollback.sh" && parameters.TryGetValue("COMPONENTS", out var inboundScopes) && inboundScopes.Split(',').Contains("Inbounds")) Program("VPS_INBOUND_PROGRAM", "scripts/inbound-host.py");
         if (asset is "tcp-forward-read.sh" or "tcp-forward-apply.sh" || asset == "protocol-migration-arm-rollback.sh" && parameters.TryGetValue("COMPONENTS", out var scopes) && scopes.Split(',').Contains("TcpForwarding")) Program("VPS_TCP_FORWARD_PROGRAM", "scripts/forwarding-host.py", "scripts/tcp-forwarding.py");

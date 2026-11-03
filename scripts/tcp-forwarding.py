@@ -16,6 +16,9 @@ ACL = '/etc/may-tcp-forward/whitelist.nft'
 ACL_UNIT = 'may-tcp-forward-firewall.service'
 TABLE = 'may_tcp_forward'
 HEADER = '# Managed by May VPS Deploy TCP forwarding.\n'
+WORKER = '/etc/may-tcp-forward/proxy-worker.py'
+if 'TCP_PROXY_WORKER_SOURCE' not in globals():
+    TCP_PROXY_WORKER_SOURCE = Path(__file__).with_name('tcp-proxy-worker.py').read_text(encoding='utf-8')
 
 
 def digest(value):
@@ -32,7 +35,7 @@ def normalize(value):
     ids, ports, result = set(), set(), []
     for rule in value['Rules']:
         fields = {'Id', 'Name', 'Enabled', 'ListenFamily', 'ListenPort', 'TargetAddress', 'TargetPort', 'AllowedSources', 'Validation'}
-        if not isinstance(rule, dict) or set(rule) != fields:
+        if not isinstance(rule, dict) or set(rule) - {'ProxyProtocol'} != fields:
             raise ValueError('Unsupported TCP forwarding rule.')
         if not re.fullmatch('[a-f0-9]{32}', rule['Id']) or rule['Id'] in ids:
             raise ValueError('Invalid or duplicate forwarding identity.')
@@ -76,6 +79,8 @@ def normalize(value):
                 raise ValueError('Invalid cross-instance TCP owner.')
         else:
             raise ValueError('Application-level validation is required.')
+        if 'ProxyProtocol' in rule and (rule['ProxyProtocol'] not in ('v1', 'v2') or kind != 'Tls'):
+            raise ValueError('Explicit PROXY output requires TLS certificate acceptance; an SSH banner is insufficient.')
         result.append(dict(rule, TargetAddress=str(target), AllowedSources=sorted(set(networks))))
     return {'Version': 1, 'Rules': result}
 
@@ -97,6 +102,7 @@ def listeners(rule):
 
 def material(config, proxy):
     files = {CONFIG: encoded(config) + '\n'}
+    if any('ProxyProtocol' in rule for rule in config['Rules']): files[WORKER] = TCP_PROXY_WORKER_SOURCE
     lines = [HEADER.rstrip(), 'table inet ' + TABLE + ' {}', 'flush table inet ' + TABLE,
              'table inet ' + TABLE + ' {', ' chain input {', '  type filter hook input priority -10; policy accept;', '  iifname "lo" accept']
     for rule in config['Rules']:
@@ -106,6 +112,8 @@ def material(config, proxy):
         # the Debian-supported resolver and would become part of the hostname.
         target = rule['TargetAddress']
         files[unit_path(unit_name(rule, 'service'))] = HEADER + '[Unit]\nDescription=May TCP forward worker\nBindsTo=' + name + '\nAfter=' + name + '\n\n[Service]\nType=notify\nExecStart=' + proxy + ' --connections-max=256 --exit-idle-time=60s ' + target + ':' + str(rule['TargetPort']) + '\nDynamicUser=yes\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=yes\nRestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX\nCapabilityBoundingSet=\nTimeoutStopSec=10s\n'
+        if 'ProxyProtocol' in rule:
+            files[unit_path(unit_name(rule, 'service'))] = HEADER + '[Unit]\nDescription=May bounded TCP PROXY worker\nBindsTo=' + name + '\nAfter=' + name + '\n\n[Service]\nType=simple\nExecStart=/usr/bin/python3 -I ' + WORKER + ' --target ' + target + ' --port ' + str(rule['TargetPort']) + ' --proxy-protocol ' + rule['ProxyProtocol'] + '\nDynamicUser=yes\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=yes\nRestrictAddressFamilies=AF_INET AF_INET6\nCapabilityBoundingSet=\nMemoryMax=96M\nLimitNOFILE=1024\nTimeoutStopSec=10s\n'
         if not rule['Enabled']:
             continue
         for version, family in ((4, 'ip'), (6, 'ip6')):
@@ -143,8 +151,8 @@ class Host(ForwardHost):
     JOURNAL = 'tcp-forward-state.json'
     DIRECTORY = '/etc/may-tcp-forward'
     CONFIG, ACL, ACL_UNIT, TABLE = CONFIG, ACL, ACL_UNIT, TABLE
-    EXTRA_FILES = ()
-    ARCHIVED_PROGRAMS = ()
+    EXTRA_FILES = (WORKER,)
+    ARCHIVED_PROGRAMS = (WORKER,)
     SOCKET_TYPE = socket.SOCK_STREAM
     normalize, material = staticmethod(normalize), staticmethod(material)
     unit_name, unit_path = staticmethod(unit_name), staticmethod(unit_path)

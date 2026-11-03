@@ -239,7 +239,7 @@ class XhttpOwnership(unittest.TestCase):
         else:
             item['Options']['Reality']={'HandshakeServer':'target.example.test','HandshakePort':443,'PublicKey':'A'*43,'ShortId':'abcd1234'}
             stream['realitySettings']={'show':False,'target':'target.example.test:443','xver':0,'serverNames':['xhttp.example.test'],'privateKey':'A'*43,'shortIds':['abcd1234']}
-        config={'log':{'loglevel':'warning'},'inbounds':[{'tag':A,'protocol':'vless','listen':binding['Address'],'port':binding['Port'],'settings':{'clients':[{'id':'00000001-0002-0003-0004-000000000005','email':'c'*32}],'decryption':'none'},'streamSettings':stream}],'outbounds':[{'protocol':'freedom'}],'routing':{'rules':[]}}
+        config={'log':{'loglevel':'warning'},'inbounds':[{'tag':A,'protocol':'vless','listen':binding['Address'],'port':binding['Port'],'settings':{'clients':[{'id':'00000001-0002-0003-0004-000000000005','email':'c'*32}],'decryption':'none'},'streamSettings':stream}],'outbounds':[{'tag':'egress','protocol':'freedom'}],'routing':{'rules':[]}}
         data=M.encoded(config).encode();value['Configurations'][A]=base64.b64encode(data).decode();binding['Sha256']=M.digest(data);binding['Udp']=False
         value['Core']['Reality']={'Engine':'xray','Version':'26.3.27','Artifact':'Xray-linux-64.zip','Sha256':'f'*64}
         return value
