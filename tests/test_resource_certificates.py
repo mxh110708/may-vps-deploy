@@ -25,7 +25,11 @@ class CertificateResourceTests(unittest.TestCase):
         cls.openssl = shutil.which('openssl')
         if not cls.openssl:
             raise unittest.SkipTest('OpenSSL is required for actual public-certificate checks.')
-        cls.temporary = tempfile.TemporaryDirectory(prefix='resource31-', dir=ROOT / '.tmp')
+        scratch = ROOT / '.tmp'
+        scratch.mkdir(exist_ok=True)
+        if scratch.is_symlink():
+            raise RuntimeError('Fixture scratch directory must not be linked.')
+        cls.temporary = tempfile.TemporaryDirectory(prefix='resource31-', dir=scratch)
         cls.root = Path(cls.temporary.name)
         cls.certificate = cls.root / 'public.pem'
         key = cls.root / 'synthetic-key.pem'

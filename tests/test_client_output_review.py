@@ -13,6 +13,12 @@ review = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(review)
 
 
+def temporary():
+    # macOS commonly exposes /var through a system symlink. Resolve the trusted
+    # temporary root, then keep testing rejection of links inside the fixture.
+    return tempfile.TemporaryDirectory(dir=Path(tempfile.gettempdir()).resolve())
+
+
 class OutputReview(unittest.TestCase):
     def test_safe_diff_counts(self):
         before = {"proxies": [{"name": "A", "password": "PRIVATE-OLD"}, {"name": "B"}], "proxy-groups": [{"name": "G", "proxies": ["A"]}], "dns": {"enable": True}, "rules": ["MATCH,G"]}
@@ -33,7 +39,7 @@ class OutputReview(unittest.TestCase):
         self.assertTrue(result["SettingsChanged"] and result["ListenersChanged"])
 
     def test_duplicate_cycle_depth_and_type(self):
-        with tempfile.TemporaryDirectory() as root:
+        with temporary() as root:
             path = Path(root) / "test.yaml"
             for text in ("proxies: []\nproxies: []\n", "a: &a [*a]\n", "? [x,y]\n: z\n", "a: !!timestamp 2026-01-01\n"):
                 path.write_text(text, encoding="utf-8")
@@ -46,7 +52,7 @@ class OutputReview(unittest.TestCase):
                     review.load(path, "SingBox")
 
     def test_read_only_hash_missing_and_link(self):
-        with tempfile.TemporaryDirectory() as root:
+        with temporary() as root:
             path = Path(root) / "nodes.json"; text = '{"outbounds":[]}'; path.write_text(text, encoding="utf-8")
             obj, digest = review.load(path, "SingBox")
             self.assertEqual(digest, review.hashlib.sha256(text.encode()).hexdigest())
@@ -65,7 +71,7 @@ class OutputReview(unittest.TestCase):
         result = subprocess.run([sys.executable, str(SCRIPT), "fragment", "--format", "Clash"], input=json.dumps(content).encode(), capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(review.YAML(typ="safe").load(result.stdout.decode("utf-8")), content)
-        with tempfile.TemporaryDirectory() as root:
+        with temporary() as root:
             bad = Path(root) / "bad.yaml"; bad.write_text("password: [PRIVATE-SECRET", encoding="utf-8")
             result = subprocess.run([sys.executable, str(SCRIPT), "review", "--format", "Clash", "--before", str(bad), "--after", str(bad)], capture_output=True, timeout=10)
             self.assertNotEqual(result.returncode, 0)
@@ -78,7 +84,7 @@ class OutputReview(unittest.TestCase):
             leaf = [leaf, leaf]
         with self.assertRaises(ValueError):
             review.bounded(leaf)
-        with tempfile.TemporaryDirectory() as root:
+        with temporary() as root:
             path = Path(root) / "large.json"; path.write_bytes(b" " * (review.LIMIT + 1))
             with self.assertRaises(ValueError):
                 review.load(path, "SingBox")
