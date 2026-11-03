@@ -36,7 +36,12 @@ public static class ClientNodeBatch
                     if (node.Text("kind") != required) { errors.Add("所选用途不符：" + node.Text("name")); continue; }
                     if (action == "Transit" && new[] { "sing_box.detour", "clash.dialer-proxy" }.Any(k => node.Text(k) != "" && node.Text(k) != node.Text(field))) { errors.Add("节点保留了额外上游，不能用地区组覆盖：" + node.Text("name")); continue; }
                     if (node.Text(field) == value) continue;
-                    changes.Add(new(node.Text("name"), node.Text(field), value)); node[field] = value;
+                    var previous = node.Text(field);
+                    changes.Add(new(node.Text("name"), previous, value));
+                    if (action == "Transit")
+                        foreach (var (client, upstream) in new[] { ("clash", "dialer-proxy"), ("sing_box", "detour") })
+                            if (node[client] is JsonObject config && (config.Text(upstream) == "" || config.Text(upstream) == previous)) config[upstream] = value;
+                    node[field] = value;
                 }
                 break;
             case "Remove":

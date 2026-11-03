@@ -43,6 +43,11 @@ internal sealed partial class BoundaryTests
         var frag = ClientNodeFragments.Preview(scheme, "SingBox", [ids[2]]); var native = ClientNodeFragments.Build(scheme, frag);
         Check(frag.Ready && frag.Rows.Count == 3 && frag.Rows.Count(r => r.Dependency) == 2 && frag.Groups.SequenceEqual(new[] { "US-West-LA Entry" }), "landing fragment did not disclose full region closure");
         Check(native["outbounds"]!.AsArray().Count == 4 && native["outbounds"]![2]!.Text("detour") == "US-West-LA Entry", "fragment dropped group or landing detour");
+        var transit = scheme.DeepClone().AsObject(); var extra = transit["Nodes"]![1]!.DeepClone().AsObject(); extra["Id"] = Guid.NewGuid().ToString("N"); extra["name"] = "EuropeEntry"; extra["region_group"] = "Europe Entry"; extra["clash"]!["name"] = "EuropeEntry"; extra["sing_box"]!["tag"] = "EuropeEntry"; extra["clash"]!["port"] = 445; extra["sing_box"]!["server_port"] = 445; transit["Nodes"]!.AsArray().Add(extra);
+        var transitLanding = transit["Nodes"]![2]!; transitLanding["clash"]!["dialer-proxy"] = "US-West-LA Entry"; transitLanding["sing_box"]!["detour"] = "US-West-LA Entry";
+        var changeTransit = ClientNodeBatch.Preview(transit, "Transit", [ids[2]], "Europe Entry"); Check(changeTransit.Ready, "valid batch upstream change refused"); ClientNodeBatch.Apply(transit, changeTransit);
+        Check(transit["Nodes"]![2]!.Text("clash.dialer-proxy") == "Europe Entry" && transit["Nodes"]![2]!.Text("sing_box.detour") == "Europe Entry", "batch upstream metadata diverged from native fields");
+        Check(new[] { "Clash", "SingBox" }.All(format => { var p = ClientNodeFragments.Preview(transit, format, [ids[2]]); return p.Ready && p.Rows.Count == 2 && p.Groups.SequenceEqual(new[] { "Europe Entry" }); }), "batch transit change cannot export either native dependency closure");
         scheme["Nodes"]![1]!["sing_box"]!["detour"] = "EntryA"; scheme["Nodes"]![0]!["sing_box"]!["detour"] = "EntryB";
         Check(!ClientNodeFragments.Preview(scheme, "SingBox", [ids[0]]).Ready, "cyclic fragment accepted");
         scheme["Nodes"]![0]!["sing_box"]!["detour"] = "Unknown policy"; Check(!ClientNodeFragments.Preview(scheme, "SingBox", [ids[0]]).Ready, "unknown policy flattened in fragment");
