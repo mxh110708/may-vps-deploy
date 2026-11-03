@@ -13,6 +13,7 @@ $ProjectRoot=[IO.Path]::GetFullPath($ProjectRoot)
 $invoke = Join-Path $ProjectRoot 'scripts/Invoke-VpsBackgroundTest.ps1'
 $started = & (Join-Path $ProjectRoot 'scripts/Start-VpsBackgroundTest.ps1') -ApplicationDirectory $ApplicationDirectory -FixtureRoot $FixtureRoot -PublicAssetRoot $ProjectRoot -SyntheticFixture
 $session = $started.SessionManifest; $cases = [Collections.Generic.List[object]]::new()
+$ownedProcess = Get-Process -Id $started.ProcessId
 function Send([string]$command,[hashtable]$arguments=@{}) {
     try { & $invoke -SessionManifest $session -Command $command -Arguments $arguments }
     catch { throw ('Native command failed ('+$command+'): '+$_.Exception.Message) }
@@ -102,10 +103,10 @@ try {
     Send 'window.close' | Out-Null; $null=Wait-Ui {param($ui) $ui.dialog -eq '保存方案修改？'}
     Click '继续编辑'; $null=Wait-Ui {param($ui) -not $ui.dialog}
     Check ((Control '拖动排序 synthetic-entry' 'NodeReorderHandle').enabled) 'direct close asks about unsaved scheme and cancel preserves editor'
-    $nodeScroll=@((Read-Ui).elements | Where-Object kind -eq 'ScrollViewer')
+    $nodeScroll=@((Read-Ui).elements | Where-Object { $_.kind -eq 'ScrollViewer' -and $_.scope -eq 'page' })
     Check ($nodeScroll.Count -eq 1) 'node list has one actual scroll viewport'
     Send 'ui.scroll' @{id=$nodeScroll[0].id;offset=100000} | Out-Null
-    $null=Wait-Ui {param($ui) $scroll=@($ui.elements|Where-Object kind -eq 'ScrollViewer');$scroll.Count -eq 1 -and [Math]::Abs($scroll[0].offset-$scroll[0].extent) -lt 2}
+    $null=Wait-Ui {param($ui) $scroll=@($ui.elements|Where-Object { $_.kind -eq 'ScrollViewer' -and $_.scope -eq 'page' });$scroll.Count -eq 1 -and [Math]::Abs($scroll[0].offset-$scroll[0].extent) -lt 2}
     $startedDrag=Send 'ui.drag' @{id=(Control '拖动排序 synthetic-entry' 'NodeReorderHandle').id;phase='begin'}
     $movingDrag=Send 'ui.drag' @{phase='move';insertion=0}
     Send 'ui.capture' @{name='native-drag-preview.png'} | Out-Null
@@ -191,9 +192,11 @@ try {
     Send 'ui.capture' @{name='native-google-kernel-review.png'} | Out-Null
     Click '返回'; $null=Wait-Ui {param($ui) -not $ui.dialog}; Choose 'BBR 版本' 'Current'
     Send 'suite.run' | Out-Null
-    $until=[DateTimeOffset]::UtcNow.AddSeconds(75)
+    # The aggregate now includes the policy, resource and native-output suites.
+    # Keep a finite three-minute budget and report the active phase on failure.
+    $until=[DateTimeOffset]::UtcNow.AddSeconds(180)
     do { $suite=Send 'suite.status'; if($suite.state -ne 'running'){break};Start-Sleep -Milliseconds 200 } while([DateTimeOffset]::UtcNow -lt $until)
-    Check ($suite.state -eq 'passed') 'deployment maintenance additions native regression suites'
+    Check ($suite.state -eq 'passed') ('deployment maintenance additions native regression suites ('+$suite.state+' / '+$suite.phase+')')
     $ui=Read-Ui
     Check ($ui.window.window_activations -eq 0 -and $ui.window.foreground_samples -eq 0 -and $ui.window.offscreen -and -not $ui.window.shown_in_switchers) 'test instance never activated or appeared in switcher'
     $audit=Get-Content -Raw -LiteralPath (Join-Path $export 'commands.jsonl')
@@ -205,4 +208,9 @@ try {
     try { Send 'ui.capture' @{name='failure.png'} | Out-Null } catch { }
     @{schema_version=1;state='failed';safe_error=$_.Exception.Message;cases=$cases;process_alive=[bool](Get-Process -Id $started.ProcessId -ErrorAction SilentlyContinue)} | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $FixtureRoot 'test-artifacts/native-flow.json') -Encoding utf8
     throw
-} finally { try { Send 'session.stop' | Out-Null } catch { } }
+} finally {
+    try { Send 'session.stop' | Out-Null } catch { }
+    try {
+        if(-not $ownedProcess.WaitForExit(10000)){$ownedProcess.Kill($true);$ownedProcess.WaitForExit()}
+    } finally { $ownedProcess.Dispose() }
+}

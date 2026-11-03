@@ -270,6 +270,12 @@ public sealed partial class MainWindow
     }
     private JsonObject ReadTestUi()
     {
+        string ScrollScope(DependencyObject element)
+        {
+            for (DependencyObject? current = element; current != null; current = VisualTreeHelper.GetParent(current))
+                if (ReferenceEquals(current, mainScroll)) return "page";
+            return "other";
+        }
         var elements = new JsonArray();
         var live = TestElements().ToArray(); foreach (var old in testIds.Keys.Except(live).ToArray()) testIds.Remove(old);
         foreach (var element in live.Take(1200))
@@ -286,7 +292,7 @@ public sealed partial class MainWindow
                     item["wheel_selection_blocked"] = choice is SelectionComboBox;
                     item["value"] = (choice.SelectedItem as ComboBoxItem)?.Tag as string;
                     item["choices"] = new JsonArray(choice.Items.OfType<ComboBoxItem>().Select(i => (JsonNode?)new JsonObject { ["value"] = i.Tag as string, ["label"] = i.Content as string }).ToArray()); break;
-                case ScrollViewer scroll: item["offset"] = scroll.VerticalOffset; item["extent"] = scroll.ScrollableHeight; break;
+                case ScrollViewer scroll: item["scope"] = ScrollScope(scroll); item["offset"] = scroll.VerticalOffset; item["extent"] = scroll.ScrollableHeight; break;
             }
             elements.Add(item);
         }
