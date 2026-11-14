@@ -55,6 +55,8 @@ foreach ($group in $groups) {
 
 先构建测试项目。需要真实本机协议用例时设置 `MAY_TEST_PYTHON` 与固定 Xray 的 `MAY_TEST_XRAY`；SSH/SFTP 专项使用 `MAY_TEST_SSH_PYTHON`。后台运行器须给各组独立超时并关闭自己的子进程，不能将超时、缺失本机依赖或仅模型通过记为真实协议通过。原生 WinUI 使用已有后台测试接口，禁止弹出测试窗口。
 
+CI将 `server-stream` 组等价拆为 `--server-stream-only` 与 `--server-xhttp-only` 两步。Windows在后者之前下载固定Xray 26.3.27，分别核对归档和可执行文件摘要再设置 `MAY_TEST_XRAY`；不会从latest获取或在缺少依赖时把真实XHTTP检查记为通过。其他主机保留各专项中明确声明的Windows核心限制。
+
 PowerShell 主入口的完整离线回归：
 
 ```powershell

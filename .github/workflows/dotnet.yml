@@ -66,7 +66,28 @@ jobs:
         timeout-minutes: 8
         env:
           MAY_TEST_PYTHON: python
-        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --group server-stream
+        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --server-stream-only
+      - name: Prepare fixed Windows Xray for XHTTP runtime
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $directory = Join-Path $env:RUNNER_TEMP 'may-xray-26.3.27'
+          New-Item -ItemType Directory -Path $directory | Out-Null
+          $archive = Join-Path $directory 'Xray-windows-64.zip'
+          Invoke-WebRequest -Uri 'https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-windows-64.zip' -OutFile $archive -TimeoutSec 120
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'd004c39288ce9ada487c6f398c7c545f7d749e44bdfdd59dbc9f865afba4e1ad') { throw 'Fixed Xray archive digest mismatch.' }
+          $coreDirectory = Join-Path $directory 'core'
+          Expand-Archive -LiteralPath $archive -DestinationPath $coreDirectory
+          $executable = Join-Path $coreDirectory 'xray.exe'
+          if ((Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash -ne '15c2d007954ac53ba69b80ec91242786b3c0b71d52649165b4ca1d5cc96ef8f1') { throw 'Fixed Xray executable digest mismatch.' }
+          "MAY_TEST_XRAY=$executable" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: XHTTP next-hop parameters, actual paths and recovery
+        timeout-minutes: 8
+        env:
+          MAY_TEST_PYTHON: python
+        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --server-xhttp-only
       - name: Monitoring, maintenance, recovery and transports
         timeout-minutes: 6
         run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --group operations
