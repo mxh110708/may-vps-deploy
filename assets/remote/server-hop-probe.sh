@@ -166,6 +166,9 @@ def quic_parameters(native, xray):
 
 
 def stream_parameters(native, xray=False):
+    if xray and native.get("streamSettings", {}).get("network") == "xhttp":
+        exec(os.environ["VPS_APPLICATION_UDP_PROGRAM"], globals())
+        return validate_xray_xhttp(native)
     fingerprints = ('chrome','firefox','edge','safari','ios','android','random')
     def text(value, field, fallback=''):
         result = value.get(field, fallback)
@@ -270,18 +273,37 @@ def stream_parameters(native, xray=False):
 
 
 def validate(probes, role):
-    if role not in ('RealityEntry', 'AnyTlsEntry') or not isinstance(probes, list) or not 1 <= len(probes) <= 7:
+    if role not in ('RealityEntry', 'AnyTlsEntry') or not isinstance(probes, list) or not 1 <= len(probes) <= 9:
         raise ValueError('Invalid probe scope')
     seen = set()
     methods = {'aes-128-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305', '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305'}
     for item in probes:
-        if not isinstance(item, dict) or set(item) != {'Id', 'ExpectedAddress', 'Outbound'} or not isinstance(item['Id'], str) or not re.fullmatch('[a-f0-9]{16}', item['Id']) or item['Id'] in seen:
+        if not isinstance(item, dict) or not {'Id', 'ExpectedAddress', 'Outbound'} <= set(item) or set(item)-{'Id','ExpectedAddress','Outbound','UdpRequired','Family'} or not isinstance(item['Id'], str) or not (re.fullmatch('[a-f0-9]{16}', item['Id']) or item['Id'] in ('default','direct') and item.get('UdpRequired') is True) or item['Id'] in seen:
             raise ValueError('Invalid probe reference')
         seen.add(item['Id'])
-        ipaddress.ip_address(item['ExpectedAddress'])
+        if 'UdpRequired' in item and item['UdpRequired'] is not True:
+            raise ValueError('Invalid UDP proof requirement')
+        if item['Id'] == 'direct':
+            if item['ExpectedAddress'] != '' or item.get('Family') not in ('IPv4','IPv6'):
+                raise ValueError('Invalid server-direct probe family')
+        else:
+            ipaddress.ip_address(item['ExpectedAddress'])
+            if 'Family' in item: raise ValueError('Unexpected probe family override')
         native = item['Outbound']
         if not isinstance(native, dict):
             raise ValueError('Invalid outbound')
+        if item['Id'] == 'direct':
+            if native.get('tag') != 'direct' or native.get('protocol' if role=='RealityEntry' else 'type') != ('freedom' if role=='RealityEntry' else 'direct') or set(native) - ({'tag','protocol','settings'} if role=='RealityEntry' else {'tag','type','domain_resolver','domain_strategy'}):
+                raise ValueError('Unowned server-direct probe')
+            if role=='RealityEntry' and (set(native.get('settings',{}))-{'domainStrategy'} or native.get('settings',{}).get('domainStrategy','AsIs') not in ('AsIs','UseIP','UseIPv4','UseIPv6','ForceIP','ForceIPv4','ForceIPv6')):
+                raise ValueError('Unexpected server-direct settings')
+            if role=='AnyTlsEntry':
+                resolver = native.get('domain_resolver')
+                if resolver is not None and (not isinstance(resolver,dict) or set(resolver) != {'server','strategy'} or resolver['server'] != 'local' or resolver['strategy'] not in ('ipv4_only','ipv6_only','prefer_ipv4','prefer_ipv6')):
+                    raise ValueError('Unexpected server-direct resolver')
+                if native.get('domain_strategy','prefer_ipv4') not in ('ipv4_only','ipv6_only','prefer_ipv4','prefer_ipv6'):
+                    raise ValueError('Unexpected server-direct domain strategy')
+            continue
         if role == 'RealityEntry':
             if native.get('protocol') in ('vless','trojan'):
                 host, port = stream_parameters(native, True)
@@ -313,12 +335,15 @@ def validate(probes, role):
             raise ValueError('Invalid server port')
         if server is not None and (server['method'] not in methods or not isinstance(server['password'], str) or not 1 <= len(server['password']) <= 4096):
             raise ValueError('Invalid Shadowsocks authentication')
-        if native['tag'] != 'may-hop-' + item['Id']:
+        if native['tag'] != ('may-fixed-next-hop' if item['Id']=='default' else 'may-hop-' + item['Id']):
             raise ValueError('Unowned outbound tag')
 
 
 def run_probe(binary, role, item):
-    deadline = time.monotonic() + 20
+    if item['Outbound'].get('streamSettings', {}).get('network') == 'xhttp':
+        exec(os.environ['VPS_APPLICATION_UDP_PROGRAM'], globals())
+        require_xhttp_binary(binary)
+    deadline = time.monotonic() + (30 if item.get('UdpRequired') else 20)
     with tempfile.TemporaryDirectory(prefix='may-hop-probe-') as directory:
         with socket.socket() as reserve:
             reserve.bind(('127.0.0.1', 0))
@@ -326,9 +351,9 @@ def run_probe(binary, role, item):
         outbound = copy.deepcopy(item['Outbound'])
         outbound['tag'] = 'probe-out'
         if role == 'RealityEntry':
-            configuration = {'log': {'loglevel': 'none'}, 'inbounds': [{'listen': '127.0.0.1', 'port': port, 'protocol': 'socks', 'settings': {'auth': 'noauth', 'udp': False}}], 'outbounds': [outbound], 'routing': {'domainStrategy':'AsIs','rules':[{'type':'field','network':'tcp','outboundTag':'probe-out'}]}}
+            configuration = {'log': {'loglevel': 'none'}, 'inbounds': [{'listen': '127.0.0.1', 'port': port, 'protocol': 'socks', 'settings': {'auth': 'noauth', 'udp': item.get('UdpRequired',False)}}], 'outbounds': [outbound], 'routing': {'domainStrategy':'AsIs','rules':[{'type':'field','network':'tcp,udp' if item.get('UdpRequired') else 'tcp','outboundTag':'probe-out'}]}}
         else:
-            configuration = {'log': {'level': 'error'}, 'inbounds': [{'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': port}], 'outbounds': [outbound], 'route': {'final': 'probe-out'}}
+            configuration = {'log': {'level': 'error'}, 'dns': {'servers':[{'type':'local','tag':'local'}]}, 'inbounds': [{'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': port}], 'outbounds': [outbound], 'route': {'final': 'probe-out'}}
         path = Path(directory) / 'probe.json'
         path.write_text(json.dumps(configuration), encoding='utf-8')
         command = [binary, 'run', '-config' if role == 'RealityEntry' else '-c', str(path)]
@@ -342,12 +367,19 @@ def run_probe(binary, role, item):
                         break
                 except OSError:
                     time.sleep(0.05)
-            expected = ipaddress.ip_address(item['ExpectedAddress'])
-            actual = query(port, PROBE_HOST_V6 if expected.version == 6 else PROBE_HOST_V4, min(10, deadline - time.monotonic()))
-            if actual != str(expected):
+            family = item.get('Family') or ('IPv6' if ipaddress.ip_address(item['ExpectedAddress']).version==6 else 'IPv4')
+            actual = query(port, PROBE_HOST_V6 if family=='IPv6' else PROBE_HOST_V4, min(10, deadline - time.monotonic()))
+            if item['ExpectedAddress'] and actual != str(ipaddress.ip_address(item['ExpectedAddress'])) or ipaddress.ip_address(actual).version != (6 if family=='IPv6' else 4):
                 raise ValueError('Egress mismatch')
             protocol = ('hysteria2' if outbound.get('protocol') == 'hysteria' else outbound['protocol']) if role == 'RealityEntry' else outbound['type']
-            return {'Id': item['Id'], 'Status': 'Passed', 'Egress': actual, 'From': 'EntryServer', 'Network': 'TCP', 'Transport': 'QUIC' if protocol in ('hysteria2', 'tuic') else 'TCP', 'ValidatedProtocol': protocol}
+            result = {'Id': item['Id'], 'Status': 'Passed', 'Egress': actual, 'From': 'EntryServer', 'Network': 'TCP', 'Transport': 'QUIC' if protocol in ('hysteria2', 'tuic') else 'TCP', 'ValidatedProtocol': protocol}
+            if role == 'RealityEntry' and outbound.get('streamSettings', {}).get('network') == 'xhttp':
+                exec(os.environ['VPS_APPLICATION_UDP_PROGRAM'], globals())
+                result.update(xhttp_proof(outbound))
+            if item.get('UdpRequired'):
+                exec(os.environ['VPS_APPLICATION_UDP_PROGRAM'], globals())
+                result['UdpValidation'] = application_udp_probe(port, family)
+            return result
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -380,6 +412,6 @@ if __name__ == '__main__':
     try:
         main()
     except Exception:
-        print('Server TCP next-hop verification failed; no service configuration was changed by this probe.', file=sys.stderr)
+        print('Server native path verification failed; no service configuration was changed by this probe.', file=sys.stderr)
         sys.exit(1)
 PY

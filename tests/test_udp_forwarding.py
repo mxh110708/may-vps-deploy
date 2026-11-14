@@ -140,7 +140,7 @@ class Ownership(unittest.TestCase):
             UDP.UDP_WORKER_SOURCE = old_source
 
     def test_recovery_bundle_does_not_depend_on_repository_files(self):
-        program = 'UDP_WORKER_SOURCE = ' + json.dumps(UDP.UDP_WORKER_SOURCE) + '\n' + (ROOT / 'scripts/forwarding-host.py').read_text() + '\n' + (ROOT / 'scripts/udp-forwarding.py').read_text()
+        program = ''.join(name + ' = ' + json.dumps(getattr(UDP, name)) + '\n' for name in ['UDP_WORKER_SOURCE', 'TCP_PROXY_WORKER_SOURCE', 'FORWARD_GROUP_SOURCE', 'FORWARD_GROUP_WORKER_SOURCE']) + (ROOT / 'scripts/forwarding-host.py').read_text() + '\n' + (ROOT / 'scripts/udp-forwarding.py').read_text()
         namespace = {'__name__': 'synthetic_pinned_program'}
         exec(compile(program, 'pinned-udp-program', 'exec'), namespace)
         self.assertEqual(namespace['material'](config(), '/usr/bin/python3')[UDP.WORKER], UDP.UDP_WORKER_SOURCE)

@@ -40,7 +40,8 @@ public static partial class ServerOutboundRouting
         }
         else
         {
-            var native = NextHop(node); var endpoint = Address(native.Text("server")); var egress = Address(expectedAddress);
+            var native = NextHop(node); RejectOwnNextHop(plan, native); var endpoint = Address(native.Text("server")); var egress = Address(expectedAddress);
+            if (IsXhttp(native) || (additionalHops ?? []).Any(h => IsXhttp(h.Node["sing_box"]))) RequireXhttpVersion(plan.Text("Reality.XrayVersion"));
             if (new[] { plan.Text("Server.IPv4"), plan.Text("Server.IPv6") }.Any(s => IPAddress.TryParse(s, out var address) && address.Equals(endpoint))) throw new OperationException("服务器下一跳不能指回当前实例的地址。");
             var next = ToOutbound("RealityEntry", native, Tag);
             var family = egress.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4";
@@ -50,7 +51,7 @@ public static partial class ServerOutboundRouting
             for (var i = added.Count - 1; i >= 0; i--) rules.Insert(0, added[i]!.DeepClone());
             metadata = new JsonObject { ["Version"] = 1, ["Name"] = node.Text("name"), ["Endpoint"] = new IPEndPoint(endpoint, native.Number("server_port")).ToString(), ["ExpectedAddress"] = egress.ToString(), ["EgressFamily"] = family, ["OutboundFingerprint"] = ArchiveStore.Fingerprint(next), ["RulesFingerprint"] = ArchiveStore.Fingerprint(added), ["SchemeId"] = source?.Text("SchemeId"), ["NodeId"] = source?.Text("NodeId"), ["NodeFingerprint"] = ArchiveStore.Fingerprint(node) };
             if (IsStream(native)) metadata["Connection"] = ConnectionSummary(native);
-            if (policy.Count > 0) { metadata["DestinationRules"] = policy; metadata["DestinationRulesNetwork"] = "tcp"; }
+            if (policy.Count > 0) { metadata["DestinationRules"] = policy; metadata["DestinationRulesNetwork"] = ServerDestinationRules.HasUdp(policy) ? "tcp,udp" : "tcp"; }
             if (named.Count > 0) metadata["AdditionalHops"] = named;
         }
         RequireBoundedConfiguration(result);

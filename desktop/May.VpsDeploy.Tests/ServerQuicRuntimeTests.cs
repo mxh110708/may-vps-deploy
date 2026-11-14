@@ -16,7 +16,7 @@ internal sealed partial class BoundaryTests
         var directory = f.Paths.Resolve("private/server-quic-runtime"); Directory.CreateDirectory(directory); var assets = new ValidationAssets(new AppPaths(repository), "windows-amd64"); var tools = new ExternalToolRunner();
         using var key = RSA.Create(2048); var csr = new CertificateRequest("CN=next.example.test", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1); var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("next.example.test"); san.AddIpAddress(IPAddress.Loopback); csr.CertificateExtensions.Add(san.Build()); csr.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true)); using var certificate = csr.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(2));
         await using var origin = await HysteriaHttpsTarget.Start(repository, f, certificate, key, ct); await using var dns = new TuicDnsTarget();
-        var measurements = new JsonArray(); var processes = new List<int>();
+        var measurements = new JsonArray(); var processes = new List<QuicOwnedProcess>();
         foreach (var scenario in new[] { "hysteria2", "hysteria2-advanced", "tuic-native", "tuic-quic" })
         {
             var protocol = scenario.StartsWith("hysteria2", StringComparison.Ordinal) ? "Hysteria2" : "TuicV5"; var advanced = scenario == "hysteria2-advanced";
@@ -25,7 +25,7 @@ internal sealed partial class BoundaryTests
             if (protocol == "TuicV5") landing["Options"]!["UdpRelayMode"] = scenario == "tuic-quic" ? "quic" : "native";
             if (advanced) { landing["Options"]!["ObfsEnabled"] = true; landing["Options"]!["UploadMbps"] = 20; landing["Options"]!["DownloadMbps"] = 40; }
             var landingConfig = InboundRendering.Configuration(f.Store, plan, model, secrets, landing); landingConfig["inbounds"]![0]!["listen"] = "127.0.0.1";
-            await using var server = await HysteriaCore.Start(assets.ResolveCore("sing-box"), tools, landingConfig, directory, "landing-" + scenario, ct); processes.Add(server.Process.Id);
+            await using var server = await HysteriaCore.Start(assets.ResolveCore("sing-box"), tools, landingConfig, directory, "landing-" + scenario, ct); processes.Add(QuicOwnedProcess.Capture(server.Process));
             await using var relay = new HysteriaUdpRelay(landing.Number("Listener.Port"));
             var node = InboundRendering.Nodes(f.Store, f.Relative(plan), plan, model, secrets).First(); node.Remove("InboundOrigin"); node["sing_box"]!["server"] = "192.0.2.20"; node["sing_box"]!["server_port"] = relay.Port; node["sing_box"]!["tls"]!["certificate"] = new JsonArray(certificate.ExportCertificatePem());
             if (advanced) { node["sing_box"]!["server_ports"] = new JsonArray(relay.Port.ToString()); node["sing_box"]!["hop_interval"] = "5s"; }
@@ -37,10 +37,10 @@ internal sealed partial class BoundaryTests
             var target = "https://127.0.0.1:" + origin.Port;
             await using (var running = await ServerQuicProcess.Start(assets.ResolveCore("sing-box"), rendered, directory, false, entry.Number("Listener.Port"), ct))
             {
-                processes.Add(running.Process.Id);
+                processes.Add(QuicOwnedProcess.Capture(running.Process));
                 foreach (var clientName in new[] { "sing-box", "mihomo" })
                 {
-                    await using var client = await Round15Client.Start(clientName, assets.ResolveCore(clientName), entryNode, certificate, directory, ct); processes.Add(client.Process.Id); using var http = TuicHttp(client.Port, certificate);
+                    await using var client = await Round15Client.Start(clientName, assets.ResolveCore(clientName), entryNode, certificate, directory, ct); processes.Add(QuicOwnedProcess.Capture(client.Process)); using var http = TuicHttp(client.Port, certificate);
                     var datagrams = relay.Forwarded; var queries = dns.Packets;
                     Check(await http.GetStringAsync(target, ct) == "198.51.100.22" && (await ClientProxyUdp.ProbeAsync(client.Port, new(IPAddress.Loopback, dns.Port), ct)).Flag("ResponseMatched") && relay.Forwarded > datagrams && dns.Packets > queries, clientName + " did not traverse AnyTLS -> " + scenario + " for HTTPS and application UDP");
                     if (clientName == "sing-box")
@@ -67,16 +67,16 @@ internal sealed partial class BoundaryTests
             {
                 var converted = ServerOutboundRouting.XrayNextHop(node["sing_box"]!.AsObject()); converted["settings"]!["address"] = "127.0.0.1"; var mixed = TcpPort();
                 var config = new JsonObject { ["log"] = new JsonObject { ["loglevel"] = "warning" }, ["inbounds"] = new JsonArray(new JsonObject { ["listen"] = "127.0.0.1", ["port"] = mixed, ["protocol"] = "socks", ["settings"] = new JsonObject { ["auth"] = "noauth", ["udp"] = true } }), ["outbounds"] = new JsonArray(converted) };
-                await using var running = await ServerQuicProcess.Start(xray, config, directory, true, mixed, ct); processes.Add(running.Process.Id); using var http = TuicHttp(mixed, certificate);
+                await using var running = await ServerQuicProcess.Start(xray, config, directory, true, mixed, ct); processes.Add(QuicOwnedProcess.Capture(running.Process)); using var http = TuicHttp(mixed, certificate);
                 Check(await http.GetStringAsync(target, ct) == "198.51.100.22" && (await ClientProxyUdp.ProbeAsync(mixed, new(IPAddress.Loopback, dns.Port), ct)).Flag("ResponseMatched"), "Fixed Xray -> " + scenario + " did not carry HTTPS/application UDP");
             }
             await ServerQuicRemoteProbe(node, certificate, origin.Port, assets, directory, processes, ct);
             Console.WriteLine("Round 17 native: AnyTLS -> " + scenario + ", dual clients, HTTPS/UDP, interruption/recovery passed."); secrets.Clear(); entrySecrets.Clear();
         }
-        Check(processes.All(id => { try { using var process = Process.GetProcessById(id); return process.HasExited; } catch (ArgumentException) { return true; } }), "Round 17 left an owned core running");
+        Check(processes.All(identity => identity.Exited), "Round 17 left an owned core running");
         if (Environment.GetEnvironmentVariable("MAY_R17_EVIDENCE") is {} output) ArchiveStore.WriteJson(Path.GetFullPath(output), new JsonObject { ["SyntheticOnly"] = true, ["Scope"] = "Short loopback request workload; not a performance comparison or long-run measurement", ["Measurements"] = measurements, ["CoresStopped"] = true });
     }
-    private async Task ServerQuicRemoteProbe(JsonObject node, X509Certificate2 certificate, int targetPort, ValidationAssets assets, string directory, List<int> processes, CancellationToken ct)
+    private async Task ServerQuicRemoteProbe(JsonObject node, X509Certificate2 certificate, int targetPort, ValidationAssets assets, string directory, List<QuicOwnedProcess> processes, CancellationToken ct)
     {
         var asset = File.ReadAllText(Path.Combine(repository, "assets/remote/server-hop-probe.sh")).Replace("\r\n", "\n"); var script = asset.Split("<<'PY'\n", StringSplitOptions.None)[1]; script = script[..script.LastIndexOf("\nPY", StringComparison.Ordinal)]; script = script.Replace("PROBE_HOST_V4 = 'api.ipify.org'", "PROBE_HOST_V4 = '127.0.0.1'").Replace("PROBE_PORT = 443", "PROBE_PORT = " + targetPort);
         foreach (var role in ServerOutboundRouting.Roles.Where(r => ServerOutboundRouting.SupportedNode(node, r)))
@@ -86,9 +86,22 @@ internal sealed partial class BoundaryTests
             var native = ServerOutboundRouting.NextHop(node); var outbound = role == "RealityEntry" ? ServerOutboundRouting.XrayNextHop(native) : native; outbound["tag"] = ServerOutboundRouting.HopTag(HopA); if (role == "RealityEntry") outbound["settings"]!["address"] = "127.0.0.1"; else outbound["server"] = "127.0.0.1";
             var items = new JsonArray(new JsonObject { ["Id"] = HopA, ["ExpectedAddress"] = "198.51.100.22", ["Outbound"] = outbound });
             var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("MAY_TEST_PYTHON")!) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true }; foreach (var argument in new[] { file, binary, role }) start.ArgumentList.Add(argument); start.Environment["SSL_CERT_FILE"] = pem; SetHopProbeInput(start, work, items); start.Environment["TMPDIR"] = work; start.Environment["TEMP"] = work; start.Environment["TMP"] = work;
-            using var process = Process.Start(start)!; processes.Add(process.Id); var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+            using var process = Process.Start(start)!; processes.Add(QuicOwnedProcess.Capture(process)); var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
             try { await process.WaitForExitAsync(ct); var output = await stdout; var error = await stderr; Check(process.ExitCode == 0 && !output.Contains(node.Text("sing_box.password")) && !error.Contains(node.Text("sing_box.password")), "Remote next-hop probe rejected " + role + " / " + node.Text("sing_box.type") + ": " + error); var result = JsonNode.Parse(RemoteAssets.Marker(output, "HOP_VALIDATION"))!.AsObject(); ServerOutboundRouting.RequireHopValidation(items, result); Check(Directory.GetDirectories(work, "may-hop-probe-*").Length == 0, "Remote QUIC probe left temporary credentials"); }
             finally { if (!process.HasExited) { process.Kill(true); await process.WaitForExitAsync(); } }
+        }
+    }
+    private sealed record QuicOwnedProcess(int Id, DateTime StartedUtc)
+    {
+        public static QuicOwnedProcess Capture(Process process) => new(process.Id, process.StartTime.ToUniversalTime());
+        public bool Exited
+        {
+            get
+            {
+                try { using var process = Process.GetProcessById(Id); return process.HasExited || process.StartTime.ToUniversalTime() != StartedUtc; }
+                catch (ArgumentException) { return true; }
+                catch (InvalidOperationException) { return true; }
+            }
         }
     }
     private sealed class ServerQuicProcess(Process process, Task<string> output, Task<string> error) : IAsyncDisposable

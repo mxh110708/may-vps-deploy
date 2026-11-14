@@ -70,6 +70,7 @@ public static class ClientSchemes
     {
         var effective = ClientOutputRules.RequireReady(scheme);
         var spec = SpecificationRaw(effective); spec["processing_fingerprint"] = ClientOutputRules.Fingerprint(scheme);
+        if(scheme["TemplateReference"]!=null)spec["template_reference"]=scheme["TemplateReference"]!.DeepClone();
         spec["group_sources"] = scheme["GroupReferences"]?.DeepClone() ?? new JsonArray();
         spec["strict_removed_defaults"] = scheme.Flag("OutputRules.Enabled") || scheme["NodeSources"] is JsonArray { Count: > 0 } || scheme["GroupReferences"] is JsonArray { Count: > 0 }; return spec;
     }

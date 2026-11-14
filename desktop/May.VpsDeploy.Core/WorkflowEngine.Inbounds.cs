@@ -4,6 +4,17 @@ namespace May.VpsDeploy.Core;
 
 public sealed partial class WorkflowEngine
 {
+    private async Task ValidateInboundPolicies(Context c, JsonObject model, JsonObject credentials, string[] ids, JsonObject result)
+    {
+        foreach (var inbound in InboundCatalog.Items(model, "Inbounds").Where(i => ids.Contains(i.Text("Id")) && i.Flag("Enabled") && InboundRoutingPolicy.NeedsProbe(store, c.Plan, model, i)))
+        {
+            var request = InboundRoutingPolicy.ProbeRequest(store, c.Plan, model, credentials, inbound);
+            var reply = await c.Run("inbound-policy-probe.sh", new() { ["INBOUND_DOCUMENT"] = request.ToJsonString() }, timeout: 180, marker: "INBOUND_POLICY_PASSED");
+            var proof = JsonNode.Parse(RemoteAssets.Marker(reply.Output, "INBOUND_POLICY_RESULT"))!.AsObject();
+            InboundRoutingPolicy.RequirePaths(request, proof);
+            foreach (var item in (result["Items"] as JsonArray ?? []).OfType<JsonObject>().Where(i => i.Text("InboundId") == inbound.Text("Id"))) item["PolicyValidation"] = proof.DeepClone();
+        }
+    }
     private async Task ConfigureInbounds(Context c)
     {
         var preview = InboundCatalog.Prepare(store, c.Request); c.InboundsPreview = preview;
@@ -48,14 +59,7 @@ public sealed partial class WorkflowEngine
                     if (mismatch) throw new OperationException("本次启用的入站未全部正常运行，恢复本次范围。");
                     if (inboundValidation == null && running.Length > 0) throw new OperationException("通用入站实际验收适配器不可用。");
                     result = running.Length == 0 ? new JsonObject { ["Status"] = "Passed", ["Items"] = new JsonArray() } : await inboundValidation!.ValidateAsync(c.Plan, preview.Model, preview.Credentials, ids, c.File("inbound-validation/" + c.Id), new InlineProgress<string>(m => c.Report("入站代理 HTTPS 验收", m)), c.Cancellation);
-                    foreach (var inbound in running.Where(i => InboundRoutingPolicy.Rules(i).Count > 0))
-                    {
-                        var request = InboundRoutingPolicy.ProbeRequest(store, c.Plan, preview.Model, preview.Credentials, inbound);
-                        var reply = await c.Run("inbound-policy-probe.sh", new() { ["INBOUND_DOCUMENT"] = request.ToJsonString() }, timeout: 180, marker: "INBOUND_POLICY_PASSED");
-                        var proof = JsonNode.Parse(RemoteAssets.Marker(reply.Output, "INBOUND_POLICY_RESULT"))!.AsObject();
-                        InboundRoutingPolicy.RequirePaths(request, proof);
-                        foreach (var item in (result["Items"] as JsonArray ?? []).OfType<JsonObject>().Where(i => i.Text("InboundId") == inbound.Text("Id"))) item["PolicyValidation"] = proof.DeepClone();
-                    }
+                    await ValidateInboundPolicies(c, preview.Model, preview.Credentials, ids, result);
                     InboundSources.RequireValidation(store, c.Plan, preview.Model, preview.Credentials, ids, result);
                 }
                 var after = await Read(); if (after.Text("Hash") != observed.Text("Hash")) throw new OperationException("验收期间入站资源发生变化，未提交。");

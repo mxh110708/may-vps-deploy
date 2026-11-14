@@ -1,10 +1,8 @@
 # May VPS Deploy 文档
 
-v0.9.41 汇总第二十八至三十二轮：[双段 WireGuard／转发映射与 PROXY](FORWARDING-WIREGUARD-ROUND-30-2026-11-02.zh-CN.md)，以及[节点批量、原生片段与导出差异](CLIENT-BATCH-OUTPUT-ROUND-32-2026-11-03.zh-CN.md)。范围与汇总检查见[发行验证](TESTING-0.9.41.zh-CN.md)。
+当前教程基线：**v0.9.42**，Windows WinUI 3 → Debian 12／13 amd64。中文为主，[English overview](../README.en.md) 和 [English walkthrough](USER-GUIDE.en.md) 提供英文说明。
 
-本版[第三十一轮证书与运维资源总览](OPERATIONS-RESOURCES-ROUND-31-2026-11-03.zh-CN.md)提供到期、共享使用者、变更影响和现有维护入口；没有扩大签发或生产写入权限。
-
-当前教程基线：v0.9.41，Windows WinUI 3 → Debian 12／13 amd64。中文为主，[English overview](../README.en.md) 和 [English walkthrough](USER-GUIDE.en.md) 提供英文说明。
+本版汇总主线第33至38轮；使用入口、参数、依赖和恢复范围见下方专项教程，汇总验证见[发行记录](TESTING-0.9.42.zh-CN.md)。历史各轮的真实回环、Debian 整机和公网证据分别保留，不因发行而扩大。
 
 ## 推荐阅读顺序
 
@@ -17,6 +15,12 @@ v0.9.41 汇总第二十八至三十二轮：[双段 WireGuard／转发映射与 
 
 | 主题 | 文档 |
 | --- | --- |
+| 模板版本与恢复 | [第38轮：参数、基础配置、依赖、应用差异与恢复](CLIENT-TEMPLATES-ROUND-38-2026-11-14.zh-CN.md) |
+| 线路诊断 | [第37轮：分段、协议、出口、旁证与质量历史](ROUTE-DIAGNOSTICS-ROUND-37-2026-11-14.zh-CN.md) |
+| 转发主备 | [第36轮：显式顺序、健康确认与稳定恢复](FORWARD-TARGET-GROUPS-ROUND-36-2026-11-13.zh-CN.md) |
+| XHTTP 下一跳 | [第35轮：固定 Xray 投影、上下行身份与验收](SERVER-XHTTP-ROUND-35-2026-11-13.zh-CN.md) |
+| 应用 UDP 分类 | [第34轮：协议范围、缺失域名、实际回程与恢复](APPLICATION-UDP-ROUND-34-2026-11-13.zh-CN.md) |
+| 托管证书 | [第33轮：申请、续期、共享部署与恢复](CERTIFICATES-ROUND-33-2026-11-12.zh-CN.md) |
 | 节点批量与输出 | [第三十二轮：批量操作、原生片段、完整配置差异](CLIENT-BATCH-OUTPUT-ROUND-32-2026-11-03.zh-CN.md) |
 | 下一跳扩展 | [第二十九轮：常用协议、核心矩阵与参数审阅](SERVER-STREAM-NEXT-HOPS-ROUND-29-2026-11-02.zh-CN.md)。 |
 | 独立入站分类 | [第二十八轮：独立入站分类与多出站策略](INBOUND-POLICY-ROUND-28-2026-11-02.zh-CN.md)，纳入 v0.9.41。 |

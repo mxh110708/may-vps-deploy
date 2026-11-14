@@ -33,6 +33,7 @@ public sealed class TcpForwardValidation(ArchiveStore store, ClientRouteDiagnost
                 if (kind == "Proxy")
                 {
                     var node = TcpForwarding.ProxyNode(store, rule, plan.Text("Provider") + "/" + plan.Text("Instance") + "/May-VPS-Deploy");
+                    if (rule["TargetGroup"] is JsonObject && node["Egress"] is JsonObject egress) egress.Remove("ExpectedAddress");
                     node["sing_box"]!["server"] = host; node["sing_box"]!["server_port"] = rule.Number("ListenPort");
                     var scheme = new JsonObject { ["Nodes"] = new JsonArray(node), ["Layout"] = new JsonObject { ["region_groups"] = new JsonArray("Forward validation") } };
                     var route = ClientTopology.DiagnosticRoute(scheme, node.Text("name"));

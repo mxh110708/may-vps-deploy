@@ -73,6 +73,7 @@ public static class ForwardedNodeSources
         node["name"] = plan.Text("NodeName") + " → " + rule.Text("Name") + " · " + family;
         node["kind"] = "entry"; node["region_group"] = region; node["transit_group"] = region;
         var clash = node["clash"]!.AsObject(); var sing = node["sing_box"]!.AsObject();
+        if (rule["TargetGroup"] is JsonObject && node["Egress"] is JsonObject egress) egress.Remove("ExpectedAddress");
         // Preserve the original effective TLS identity when the original config relied on its server address.
         if (sing.At("tls") is JsonObject tls && tls.Flag("enabled") && tls.Text("server_name") == "") tls["server_name"] = originalSing.Text("server");
         if (originalClash.Text("type") == "anytls" && clash.Text("sni") == "") clash["sni"] = originalClash.Text("server");
@@ -82,7 +83,7 @@ public static class ForwardedNodeSources
         JsonObject? udp = null;
         if (sing.Text("type") == "shadowsocks")
         {
-            if (originalSing.Text("network") != "tcp" && originalClash.Flag("udp", true) && udpRuleId != "" && plan["UdpForwarding"] is JsonObject udpConfig)
+            if (rule["TargetGroup"] == null && originalSing.Text("network") != "tcp" && originalClash.Flag("udp", true) && udpRuleId != "" && plan["UdpForwarding"] is JsonObject udpConfig)
             {
                 var normalized = UdpForwarding.Normalize(udpConfig);
                 var matches = UdpForwarding.Rules(normalized).Where(r => (udpRuleId == null || r.Text("Id") == udpRuleId)

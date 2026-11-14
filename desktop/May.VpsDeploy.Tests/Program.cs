@@ -4,7 +4,15 @@ using May.VpsDeploy.Core;
 using May.VpsDeploy.Infrastructure;
 
 var repository = Path.GetFullPath(args.Length == 0 ? Path.Combine(AppContext.BaseDirectory, "../../../../../") : args[0]);
-if (args.Contains("--fonts-only")) new BoundaryTests(repository).RunFontTests();
+if (args.Contains("--client-templates-only")) await new BoundaryTests(repository).RunClientTemplate38Tests();
+else if (args.Contains("--diagnostics-only")) await new BoundaryTests(repository).RunRouteDiagnostic37Tests();
+else if (args.Contains("--server-xhttp-only")) await new BoundaryTests(repository).RunServerXhttp35Tests();
+else if (args.Contains("--server-xhttp-split-only")) await new BoundaryTests(repository).RunServerXhttp35SplitTests();
+else if (args.Contains("--server-xhttp-model-only")) await new BoundaryTests(repository).RunServerXhttp35Tests(true);
+else if (args.Contains("--application-udp-only")) await new BoundaryTests(repository).RunApplicationUdp34Tests();
+else if (args.Contains("--application-udp-model-only")) await new BoundaryTests(repository).RunApplicationUdp34Tests(true);
+else if (args.Contains("--certificates-only")) await new BoundaryTests(repository).RunCertificate33Tests();
+else if (args.Contains("--fonts-only")) new BoundaryTests(repository).RunFontTests();
 else if (args.Contains("--resources-only")) await new BoundaryTests(repository).RunResource31Tests();
 else if (args.Contains("--deployment-only")) await new BoundaryTests(repository).RunDeploymentTests();
 else if (args.Contains("--background-only")) await new BoundaryTests(repository).RunBackgroundTests();
@@ -37,6 +45,7 @@ else if (args.Contains("--xhttp-runtime-only")) await new BoundaryTests(reposito
 else if (args.Contains("--xhttp-only")) await new BoundaryTests(repository).RunXhttpTests();
 else if (args.Contains("--xhttp-model-only")) await new BoundaryTests(repository).RunXhttpTests(modelOnly: true);
 else if (args.Contains("--xhttp-vm")) await new BoundaryTests(repository).RunXhttpVmTests(args[Array.IndexOf(args, "--xhttp-vm") + 1]);
+else if (args.Contains("--forward-targets-only")) await new BoundaryTests(repository).RunForwardTarget36Tests();
 else if (args.Contains("--tcp-forward-only")) await new BoundaryTests(repository).RunTcpForwardTests();
 else if (args.Contains("--tcp-chain-only")) await new BoundaryTests(repository).RunTcpChainTests();
 else if (args.Contains("--shared-chains-only")) await new BoundaryTests(repository).RunSharedChainTests();
@@ -105,6 +114,9 @@ internal sealed partial class BoundaryTests(string repository)
         }
         if (Includes("clients"))
         {
+            using (var templates = new Fixture(repository)) await ClientTemplate38Experience(templates);
+            using (var diagnostic = new Fixture(repository)) { await RouteDiagnostic37Model(diagnostic); await RouteDiagnostic37Segments(diagnostic); await RouteDiagnostic37Profiles(diagnostic); }
+            await RouteDiagnostic37ChainPlan();
             using (var batch = new Fixture(repository)) { ClientBatch32Model(batch); await ClientBatch32Runtime(batch); }
             await SourceSyncExperience();
             await SourceSyncDownloadExperience();
@@ -132,6 +144,7 @@ internal sealed partial class BoundaryTests(string repository)
         }
         if (Includes("chains"))
         {
+            await ForwardTarget36Model(); await ForwardTarget36Workflows();
             await Chain30Coverage();
             using (var forwardedNodes = new Fixture(repository)) await ForwardedNodeExperience(forwardedNodes);
             using (var forwarding = new Fixture(repository)) { await TcpForwardExperience(forwarding); await TcpForwardValidationLoopback(forwarding); }
@@ -157,6 +170,9 @@ internal sealed partial class BoundaryTests(string repository)
         }
         if (Includes("udp"))
         {
+            await ApplicationUdp34Model();
+            await InboundPolicy28Runtime(applicationUdp: true);
+            await InboundPolicy28ProbeRuntime(applicationUdp: true);
             await ServerQuicModel();
             await ServerQuicRuntime();
             using (var udpForwarding = new Fixture(repository)) { await UdpForwardExperience(udpForwarding); await UdpForwardLoopback(udpForwarding); await UdpProxySourceExperience(udpForwarding); await UdpProxyWorkflow(udpForwarding); await UdpProxyRuntime(udpForwarding); }
@@ -165,10 +181,14 @@ internal sealed partial class BoundaryTests(string repository)
         {
             await ServerStream29Model();
             await ServerStream29Runtime();
+            await ServerXhttp35Model();
+            await ServerStream29Runtime(xhttp: true);
+            await Xhttp35SplitRuntime();
         }
         if (Includes("operations"))
         {
             await Resource31Coverage();
+            await Certificate33Coverage();
             await MonitoringArchiveExperience(f);
             using (var monitorRead = new Fixture(repository)) await MonitorReadExperience(monitorRead);
             using (var mayMonitor = new Fixture(repository)) await MayMonitorExperience(mayMonitor);

@@ -34,13 +34,13 @@ public sealed partial class ClientRouteDiagnostics(IValidationAssets assets, IEx
         var token = deadline.Token; var stages = new JsonArray();
         var protocol = route.Entry.Text("sing_box.type"); var quic = protocol is "hysteria2" or "tuic" || xhttp && VlessXhttp.Version(route.Entry["sing_box"]!.AsObject())=="3";
         var applicationUdp = protocol == "tuic" || xhttp || route.RequiresApplicationUdp;
-        var report = new JsonObject { ["Fingerprint"] = route.Fingerprint, ["At"] = DateTimeOffset.UtcNow.ToString("O"), ["Path"] = route.Label, ["Status"] = "Incomplete", ["Stages"] = stages,
+        var report = new JsonObject { ["Fingerprint"] = route.Fingerprint, ["At"] = DateTimeOffset.UtcNow.ToString("O"), ["Path"] = route.Label, ["Status"] = "Incomplete", ["Stages"] = stages, ["Profile"] = Profile(targets, xhttp ? "may-core" : "sing-box", applicationUdp),
             ["Scope"] = applicationUdp ? "本机经所选入口检查 HTTPS 与有限 UDP DNS 回程，可选落地另查 HTTPS；不代表客户端当前选择，不测吞吐、任意 UDP 应用或纯远端 RTT。" : "本机经所选入口及可选落地的短连接检查；不代表客户端当前选择，不测吞吐、UDP 或纯远端 RTT。" };
         string? work = null; Process? process = null; Task? stdout = null; Task? stderr = null;
-        var clock = Stopwatch.StartNew();
+        var clock = Stopwatch.StartNew(); var activeStage = "Core";
         async Task<bool> Stage(string id, string label, Func<CancellationToken, Task> action)
         {
-            progress.Report(label); var watch = Stopwatch.StartNew();
+            activeStage = id; progress.Report(label); var watch = Stopwatch.StartNew();
             using var limit = CancellationTokenSource.CreateLinkedTokenSource(token); limit.CancelAfter(TimeSpan.FromSeconds(12));
             try { await action(limit.Token); stages.Add(new JsonObject { ["Id"] = id, ["Label"] = label, ["Status"] = "Passed", ["Milliseconds"] = watch.ElapsedMilliseconds }); return true; }
             catch (Exception error) when (error is SocketException or HttpRequestException or IOException or OperationException || error is OperationCanceledException && !cancellationToken.IsCancellationRequested)
@@ -60,6 +60,7 @@ public sealed partial class ClientRouteDiagnostics(IValidationAssets assets, IEx
                 using var tcp = new TcpClient(); await tcp.ConnectAsync(addresses, route.Entry.Number("sing_box.server_port"), t);
                 report["ConnectedFamily"] = tcp.Client.RemoteEndPoint is IPEndPoint remote && remote.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4";
             })) return report;
+            activeStage = "Core"; var coreWatch = Stopwatch.StartNew();
             progress.Report("准备隔离诊断核心");
             var coreName=xhttp?"may-core":"sing-box";
             if(xhttp&&!assets.Supports(coreName,"vless-xhttp-round20"))throw new OperationException("缺少来源与摘要可核对的配套 May Core；上游 sing-box 不能验证 XHTTP。");
@@ -88,6 +89,7 @@ public sealed partial class ClientRouteDiagnostics(IValidationAssets assets, IEx
                 catch (SocketException) { await Task.Delay(100, token); }
             }
             if (!ready) throw new OperationException("隔离诊断核心未就绪。");
+            stages.Add(new JsonObject { ["Id"] = "Core", ["Label"] = "固定核心版本、配置校验与隔离启动", ["Status"] = "Passed", ["Milliseconds"] = coreWatch.ElapsedMilliseconds });
             if (!await Stage("EntryHttps", "入口协议握手与 HTTPS 出口", async t => report["EntryEgress"] = await Egress(entryPort, route.Entry, targets, t))) return report;
             report["ValidatedProtocol"] = route.Entry.Text("sing_box.type");
             if(xhttp){report["Transport"]="xhttp";report["TransportSecurity"]=VlessXhttp.Security(route.Entry);report["TransportAlpn"]=VlessXhttp.Alpn(VlessXhttp.Version(route.Entry["sing_box"]!.AsObject()));report["ClientCore"]="may-core";}
@@ -100,7 +102,16 @@ public sealed partial class ClientRouteDiagnostics(IValidationAssets assets, IEx
             report["Status"] = "Reachable";
             return report;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && route.PreservePartialOnCancel)
+        { stages.Add(new JsonObject { ["Id"] = activeStage, ["Status"] = "Cancelled", ["Label"] = "已取消的阶段" }); report["Status"] = "Cancelled"; return report; }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { report["Status"] = "TimedOut"; return report; }
+        catch (Exception error) when (error is OperationException or IOException or SocketException)
+        {
+            // Configuration/version/startup errors belong to a named stage as
+            // well; never persist raw core output or collapse them into success.
+            stages.Add(new JsonObject { ["Id"] = "Core", ["Label"] = "隔离核心准备", ["Status"] = "Failed", ["Detail"] = "固定核心、配置或隔离监听未就绪。" });
+            report["Status"] = "Failed"; return report;
+        }
         finally
         {
             report["ElapsedMilliseconds"] = clock.ElapsedMilliseconds;
@@ -116,6 +127,13 @@ public sealed partial class ClientRouteDiagnostics(IValidationAssets assets, IEx
             finally { if (work != null) { SafePath.CheckTree(work); Directory.Delete(work, true); } }
         }
     }
+
+    private string Profile(ClientDiagnosticEndpoints targets, string core, bool udp) => ArchiveStore.Fingerprint(new JsonObject
+    {
+        ["Schema"] = "route-diagnostic-37.1", ["Core"] = core, ["Version"] = assets.ExpectedVersion(core), ["ArtifactIdentity"] = assets.DiagnosticIdentity(core), ["ApplicationUdp"] = udp,
+        ["Ipv4"] = targets.Ipv4.AbsoluteUri, ["Ipv6"] = targets.Ipv6.AbsoluteUri, ["Any"] = targets.Any.AbsoluteUri,
+        ["Udp4"] = targets.Udp4.ToString(), ["Udp6"] = targets.Udp6.ToString()
+    });
 
     private static async Task Drain(StreamReader stream)
     {

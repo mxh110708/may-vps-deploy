@@ -90,6 +90,7 @@ public sealed partial class MainWindow
         var plan = instance.Plan;
         switch (item.Maintenance)
         {
+            case "Certificates" when InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Certificates").Any(c => c.Text("Id") == item.Target && ManagedCertificates.Managed(c)): await CertificatesSheet(selectedInstance, plan, item.Target); break;
             case "Certificates": case "Users": case "Outbounds": case "Inbounds": await InboundsSheet(selectedInstance, plan, item.Maintenance, item.Target); break;
             case "InboundCore": await InboundsSheet(selectedInstance, plan, initialAction: item.Target); break;
             case "Protocol": await OperationSheet(OperationKind.ProtocolState, plan, item.Target); break;

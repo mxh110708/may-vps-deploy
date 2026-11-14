@@ -47,10 +47,16 @@ public sealed partial class WorkflowEngine
                 if (observed["Configuration"] == null || ArchiveStore.Fingerprint(observed["Configuration"]!) != ArchiveStore.Fingerprint(preview.Configuration)) throw new OperationException("实际 UDP 转发配置与审阅不符。");
                 if (udpForwarding == null) throw new OperationException("UDP 应用验收适配器不可用，未提交变更。");
                 var result = await udpForwarding.ValidateAsync(c.Plan, preview.Configuration, c.File("udp-forward-validation/" + c.Id), new InlineProgress<string>(m => c.Report("实际 UDP 转发验收", m)), c.Cancellation);
+                if (UdpForwarding.Rules(preview.Configuration).Any(r => r.Flag("Enabled") && r["TargetGroup"] is JsonObject))
+                {
+                    var probe = await c.Run("udp-forward-read.sh", new() { ["PROBE_GROUPS"] = "true", ["EXPECTED_HASH"] = observed.Text("Hash") }, false, 180, "UDP_FORWARD_READ");
+                    ForwardTargetGroups.AttachProof(preview.Configuration, result, JsonNode.Parse(RemoteAssets.Marker(probe.Output, "FORWARD_GROUP_PROBE"))!.AsObject(), observed.Text("Hash"), action == "Apply");
+                }
                 UdpForwarding.RequireValidation(c.Plan, preview.Configuration, result);
                 foreach (var rule in UdpForwarding.Rules(preview.Configuration).Where(r => r.Flag("Enabled") && r.Text("Validation.Type") == "Shadowsocks")) _ = UdpForwarding.ProxyNode(store, rule, c.Request.InstanceRelativePath);
-                if ((await Read()).Text("Hash") != observed.Text("Hash")) throw new OperationException("UDP 验收期间配置发生变化，未提交。");
-                c.State["UdpForwarding"] = new JsonObject { ["RemoteHash"] = observed.Text("Hash"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(preview.Configuration), ["TemplateCurrent"] = observed.Flag("TemplateCurrent", true), ["WorkerHash"] = observed["Files"]?["/etc/may-udp-forward/worker.py"]?.DeepClone(), ["Validation"] = result.DeepClone(), ["At"] = DateTimeOffset.UtcNow };
+                var after = await Read();
+                if (after.Text("Hash") != observed.Text("Hash")) throw new OperationException("UDP 验收期间配置发生变化，未提交。");
+                c.State["UdpForwarding"] = new JsonObject { ["RemoteHash"] = observed.Text("Hash"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(preview.Configuration), ["TemplateCurrent"] = observed.Flag("TemplateCurrent", true), ["TargetGroups"] = after["TargetGroups"]?.DeepClone(), ["WorkerHash"] = observed["Files"]?["/etc/may-udp-forward/worker.py"]?.DeepClone(), ["Validation"] = result.DeepClone(), ["At"] = DateTimeOffset.UtcNow };
                 if (!observed.Flag("TemplateCurrent", true)) { c.Warnings = true; c.Report("UDP 转发需要更新", "旧单元已按归档核对并保持原样，请重新审阅保存转发规则以应用当前启动依赖。"); }
             }
             await VerifyManagement(c); c.Save();

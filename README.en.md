@@ -1,5 +1,9 @@
 # May VPS Deploy
 
+v0.9.42 includes rounds 33–38: managed certificates, application UDP routing, XHTTP server next hops, forwarding primary/standby groups, route diagnostics and a versioned client template library. The [release verification record](docs/TESTING-0.9.42.zh-CN.md) preserves the acceptance limits of each round. Updating the desktop app does not modify deployed services.
+
+[Round 38 templates](docs/CLIENT-TEMPLATES-ROUND-38-2026-11-14.zh-CN.md) pin Mihomo/May Route base configurations and core identities. Edit parameters, DNS/rules and group layouts, review changes before applying, and restore only the previous base configuration. Existing schemes keep their nodes, subscriptions and export destinations; new revisions never upgrade them automatically.
+
 A Windows desktop tool for deploying and maintaining Debian VPS instances, proxy services, client configurations and May Monitor. Changes follow a review, verification, private archive and recovery workflow.
 
 [简体中文](README.md) · [Releases](https://github.com/mxh110708/may-vps-deploy/releases/latest) · [English quick start](docs/USER-GUIDE.en.md) · [Documentation](docs/README.md)
@@ -8,7 +12,7 @@ A Windows desktop tool for deploying and maintaining Debian VPS instances, proxy
 
 The supported desktop target is Windows 10 2004 or later / Windows 11 amd64. Remote lifecycle acceptance targets Debian 12/13 amd64. The packaged application bundles .NET, WinUI and its configuration helper; PowerShell, Python and a development SDK are not required for normal desktop use.
 
-This documentation baseline is **v0.9.41**. A repository branch is not proof of the version installed on your computer.
+This documentation baseline is **v0.9.42**. A repository branch is not proof of the version installed on your computer.
 
 Included [round 28](docs/INBOUND-POLICY-ROUND-28-2026-11-02.zh-CN.md) adds ordered TCP categories and multiple referenced outbounds to independent inbounds, with pinned snapshots, dependency checks, path acceptance and scoped recovery. Application UDP keeps the default outbound. Updating the desktop application does not automatically change deployed services.
 
@@ -30,12 +34,12 @@ This release includes [round 15 Hysteria2 sharing and port hopping](docs/HYSTERI
 
 This release also includes [round 22 WireGuard host-to-host channels](docs/WIREGUARD-ROUND-22-2026-10-30.zh-CN.md): kernel WireGuard, IPv4/IPv6 outer endpoints, private IPv4 peer routes, two-host review and compensation, bidirectional TCP/UDP acceptance and reboot verification. It does not replace existing chains or configure a default-route VPN.
 
-| Area | v0.9.41 capabilities |
+| Area | v0.9.42 capabilities |
 | --- | --- |
 | Instances | New deployment, adoption of recognized layouts, SSH identity checks, health inspection, maintenance and retirement. |
 | Inbounds | Reality, AnyTLS, SS2022, Hysteria2, TUIC v5 and supported XHTTP combinations, with separate listener, user, certificate, outbound and recovery identities. |
 | Server paths | TCP/UDP forwarding, real Shadowsocks/SS2022 UDP checks, bounded dual-family TCP / QUIC UDP chains, and WireGuard host-to-host channels. |
-| Client profiles | Clash/Mihomo and sing-box generation, source validation, regional groups, routing categories, review and export. |
+| Client profiles | Clash/Mihomo and sing-box generation, source validation, regional groups, routing categories, versioned templates, review and export. |
 | Monitoring | Separate May Server/Agent maintenance, HTTPS origin checks, scoped read access and reviewed static theme updates. |
 | Recovery | Component-scoped snapshots and reconciliation of uncertain acknowledgements, without blindly replaying writes. |
 

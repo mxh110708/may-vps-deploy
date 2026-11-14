@@ -25,7 +25,7 @@ public static partial class ServerOutboundRouting
     private static bool OwnedRulesMatch(string role, JsonObject[] actual, JsonObject previous, string[] tags, JsonObject plan)
     {
         var policy = ServerDestinationRules.Normalize(previous["DestinationRules"]);
-        if (policy.Count > 0 && previous.Text("DestinationRulesNetwork") != "tcp") return false;
+        if (policy.Count > 0 && previous.Text("DestinationRulesNetwork") != (ServerDestinationRules.HasUdp(policy) ? "tcp,udp" : "tcp")) return false;
         var expected = AddedRules(role, policy, tags, previous.Text("EgressFamily"), plan, MetadataHops(previous));
         return actual.Length == expected.Count && ArchiveStore.Fingerprint(expected) == previous.Text("RulesFingerprint") && ArchiveStore.Fingerprint(new JsonArray(actual.Select(r => (JsonNode?)r.DeepClone()).ToArray())) == previous.Text("RulesFingerprint");
     }

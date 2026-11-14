@@ -21,12 +21,12 @@ internal sealed partial class BoundaryTests
         second["UserIds"] = first["UserIds"]!.DeepClone();
         return (model, secrets);
     }
-    private static (string Certificate, string Key) InboundCertificate(string name)
+    private static (string Certificate, string Key) InboundCertificate(string name, bool expired = false)
     {
         using var key = RSA.Create(2048);
         var request = new CertificateRequest("CN=" + name, key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         var names = new SubjectAlternativeNameBuilder(); names.AddDnsName(name); request.CertificateExtensions.Add(names.Build());
-        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(60));
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(expired ? -90 : -1), DateTimeOffset.UtcNow.AddDays(expired ? -1 : 60));
         return (certificate.ExportCertificatePem(), key.ExportPkcs8PrivateKeyPem());
     }
     private async Task InboundExperience()

@@ -31,6 +31,7 @@ public static class InboundCatalog
     public static void ServerName(string name) => DeploymentPlans.Domain(name);
     public static void ReplaceCertificate(JsonObject certificate, JsonObject credentials, string certificatePem, string keyPem)
     {
+        if (ManagedCertificates.Managed(certificate)) throw new OperationException("托管证书请通过证书自动化维护，不覆盖为手动材料。");
         try
         {
             using var cert = X509Certificate2.CreateFromPem(certificatePem, keyPem);
@@ -85,7 +86,12 @@ public static class InboundCatalog
         }
         foreach (var certificate in Items(m, "Certificates"))
         {
-            Fields(certificate, "Id", "Name", "Sha256", "NotAfter");
+            if (certificate.ContainsKey("Managed"))
+            {
+                Fields(certificate, "Id", "Name", "Sha256", "NotAfter", "Managed");
+                ManagedCertificates.ValidatePolicy(certificate["Managed"] as JsonObject ?? throw new OperationException("托管证书策略无效。"));
+            }
+            else Fields(certificate, "Id", "Name", "Sha256", "NotAfter");
             var secret = credentials["Certificates"]?[certificate.Text("Id")] as JsonObject ?? throw new OperationException("证书材料缺失。"); Fields(secret, "CertificatePem", "PrivateKeyPem");
             try
             {
@@ -161,7 +167,9 @@ public static class InboundCatalog
                 var cert = Items(m, "Certificates").SingleOrDefault(c => c.Text("Id") == inbound.Text("CertificateId")) ?? throw new OperationException("TLS 入站须引用独立证书。");
                 var material = credentials["Certificates"]![cert.Text("Id")]!;
                 using var x509 = X509Certificate2.CreateFromPem(material.Text("CertificatePem"));
-                if (!x509.MatchesHostname(options.Text("ServerName")) || inbound.Flag("Enabled") && (x509.NotBefore.ToUniversalTime() > DateTime.UtcNow || x509.NotAfter.ToUniversalTime() <= DateTime.UtcNow.AddHours(1))) throw new OperationException("证书尚未生效、即将过期或不能覆盖所填 SNI。");
+                // Managed material renews on the VPS. Its initial archive remains an
+                // identity snapshot; live TLS validation checks the deployed lifetime.
+                if (!x509.MatchesHostname(options.Text("ServerName")) || !ManagedCertificates.Managed(cert) && inbound.Flag("Enabled") && (x509.NotBefore.ToUniversalTime() > DateTime.UtcNow || x509.NotAfter.ToUniversalTime() <= DateTime.UtcNow.AddHours(1))) throw new OperationException("证书尚未生效、即将过期或不能覆盖所填 SNI。");
                 if (options.Flag("EchEnabled") && (credentials.Text("Inbounds." + inbound.Text("Id") + ".EchKey") == "" || credentials.Text("Inbounds." + inbound.Text("Id") + ".EchConfig") == "")) throw new OperationException("启用 ECH 时须同时提供服务端密钥和客户端配置。");
             }
             else
@@ -213,6 +221,7 @@ public static class InboundCatalog
     public static void RemoveEntity(JsonObject model, JsonObject credentials, string group, string id)
     {
         _ = Id(id); if (group is not ("Inbounds" or "Users" or "Certificates" or "Outbounds")) throw new OperationException("资源类别不受支持。");
+        if (group == "Certificates" && Items(model, group).Any(c => c.Text("Id") == id && ManagedCertificates.Managed(c))) throw new OperationException("托管证书请从证书自动化入口移除，以清理续期任务和私人材料。");
         if (group != "Inbounds" && Items(model, "Inbounds").Any(i => group == "Users" ? i.Strings("UserIds").Contains(id) : group == "Outbounds" ? InboundRoutingPolicy.References(i).Contains(id) : i.Text("CertificateId") == id)) throw new OperationException("该资源仍被入站引用，请先解绑或替换，不能级联删除。");
         var item = Items(model, group).SingleOrDefault(e => e.Text("Id") == id) ?? throw new OperationException("资源已不存在。"); model[group]!.AsArray().Remove(item); if (group != "Outbounds") credentials[group]!.AsObject().Remove(id);
     }

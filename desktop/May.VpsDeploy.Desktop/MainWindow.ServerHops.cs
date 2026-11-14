@@ -21,7 +21,7 @@ public sealed partial class MainWindow
             for (var i = 0; i < hops.Count; i++)
             {
                 var index = i; var hop = hops[i]!.AsObject();
-                var choice = Choice("附加 TCP 落地 " + (i + 1), hop, "Selection", candidates.Select(c => (c.Scheme.Text("Id") + ":" + c.Node.Text("Id"), c.Scheme.Text("Name") + " / " + c.Node.Text("name"))), true);
+                var choice = Choice("附加落地 " + (i + 1), hop, "Selection", candidates.Select(c => (c.Scheme.Text("Id") + ":" + c.Node.Text("Id"), c.Scheme.Text("Name") + " / " + c.Node.Text("name"))), true);
                 choice.PlaceholderText = "请选择有效的落地来源"; choice.Tag = "ServerHops.Selection." + i;
                 var address = Field("此落地的预期网站出口 IP", hop, "ExpectedAddress"); address.Tag = "ServerHops.Address." + i; inputs.Add((hop, address));
                 choice.SelectionChanged += (_, _) =>
@@ -38,13 +38,13 @@ public sealed partial class MainWindow
             }
             if (add != null) add.IsEnabled = hops.Count < ServerOutboundRouting.MaximumAdditionalHops;
         }
-        add = Action("添加 TCP 落地", () =>
+        add = Action("添加落地", () =>
         {
             CaptureHopAddresses(inputs); var used = hops.OfType<JsonObject>().Select(h => h.Text("Selection")).Append(defaultSelection).ToHashSet(StringComparer.Ordinal);
             var candidate = candidates.FirstOrDefault(c => !used.Contains(c.Scheme.Text("Id") + ":" + c.Node.Text("Id")));
             hops.Add(new JsonObject { ["Id"] = Guid.NewGuid().ToString("N")[..16], ["Selection"] = candidate.Node == null ? "" : candidate.Scheme.Text("Id") + ":" + candidate.Node.Text("Id"), ["ExpectedAddress"] = candidate.Node?.Text("Egress.ExpectedAddress") ?? "" });
             inputs.Clear(); Refresh(); changed(); message.Text = ""; return Task.CompletedTask;
         }); add.Tag = "ServerHops.Add";
-        Refresh(); return Column(Text("附加 TCP 落地", 16), Text("最多 7 个，每个落地需被分流规则使用。未命中规则和 UDP 仍走默认落地。", 13, true), rows, add, message);
+        Refresh(); return Column(Text("附加落地", 16), Text("最多 7 个，每个落地需被分流规则引用。未命中使用默认落地；UDP 仅匹配显式选择 UDP 或 TCP + UDP 的规则。", 13, true), rows, add, message);
     }
 }

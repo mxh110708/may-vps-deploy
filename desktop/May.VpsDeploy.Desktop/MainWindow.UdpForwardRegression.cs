@@ -42,6 +42,8 @@ public sealed partial class MainWindow
             await Press(form, "PrimaryButton"); await Rejected(form, "", "非法转发未保留表单。");
             await Fill(Input(form, "UdpForward.Port.0"), "55001"); await Fill(Input(form, "UdpForward.Target.0"), "192.0.2.20"); await Fill(Input(form, "UdpForward.TargetPort.0"), "53"); await Fill(Input(form, "UdpForward.Sources.0"), "198.51.100.88/24"); await Fill(Input(form, "UdpForward.Query.0"), "example.test");
             Require(Input(form, "UdpForward.Timeout.0").Text == "120" && Input(form, "UdpForward.Maximum.0").Text == "256", "UDP 会话限制未正确回填。");
+            Find<CheckBox>(form).Single(c => c.Tag as string == "UdpForward.Group.0").IsChecked = true; await Task.Delay(50);
+            await Fill(Input(form, "UdpForward.BackupAddress.0"), "192.0.2.21"); await Fill(Input(form, "UdpForward.BackupPort.0"), "53");
             await Fill(Input(form, "UdpForward.Timeout.0"), "5"); await Press(form, "PrimaryButton"); await Rejected(form, "会话", "非法会话限制未保留表单。"); await Fill(Input(form, "UdpForward.Timeout.0"), "120");
             await Invoke(form, "UdpForward.Add"); await Task.Delay(50); Require(Find<Button>(form).Count(b => (b.Tag as string)?.StartsWith("UdpForward.Remove.") == true) == 2, "规则没有竖向增加。");
             await Invoke(form, "UdpForward.Remove.1"); await Task.Delay(50); Require(Input(form, "UdpForward.Port.0").Text == "55001", "移除另一规则丢失已有草稿。");
@@ -50,6 +52,7 @@ public sealed partial class MainWindow
             await Press(form, "PrimaryButton"); var review = await Dialog(form);
             ArchiveStore.WriteJson(SafePath.Resolve(output, "udp-forward-review.json"), new JsonObject { ["Title"] = review.Title?.ToString(), ["Text"] = new JsonArray(Find<TextBlock>(review).Select(t => (JsonNode?)JsonValue.Create(t.Text)).ToArray()) });
             Require(Find<TextBlock>(review).Any(t => t.Text == "审阅 UDP 转发变更") && Find<TextBlock>(review).Any(t => t.Text.Contains("198.51.100.0/24") && t.Text.Contains("55001") && t.Text.Contains("清空原会话")), "最终审阅缺少规范来源或中断范围。");
+            Require(Find<TextBlock>(review).Any(t => t.Text.Contains("主备组") && t.Text.Contains("健康 Dns") && t.Text.Contains("192.0.2.21")), "UDP 主备审阅未明确实际数据报健康。");
             await Press(review, "CloseButton"); await pending; Require(ClientSchemes.SourceFingerprint(file) == initial && new TaskHistory(store).Read().Count == history, "取消审阅仍启动转发任务。");
             pending = UdpForwardSheet(relative, plan); form = await Dialog(); await RegressionSelect(Find<ComboBox>(form).Single(c => c.Tag as string == "UdpForward.Action"), 1); await Press(form, "PrimaryButton"); await Task.Delay(80);
             Require(activeTestDialog == form && Find<TextBlock>(form).Any(t => t.Text.Contains("尚未配置")), "空实例检查未明确阻止。"); await Press(form, "CloseButton"); await pending;

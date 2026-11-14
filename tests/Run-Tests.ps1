@@ -1759,10 +1759,20 @@ if($pythonCommandForClient){
     if($LASTEXITCODE -ne 0){throw 'Academic classification and campus access policy tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_health_audit.py')
     if($LASTEXITCODE -ne 0){throw 'Health audit behavior tests failed.'}
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_managed_certificates.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Managed certificate lifecycle regressions failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_application_udp.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Application UDP routing regressions failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_server_xhttp.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Server XHTTP next-hop regressions failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_forward_target_groups.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Explicit forwarding target group regressions failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_resource_certificates.py')
     if($LASTEXITCODE -ne 0){throw 'Read-only public certificate resource checks failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_client_output_review.py')
     if($LASTEXITCODE -ne 0){throw 'Client output difference and native fragment checks failed.'}
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_client_template_library.py')
+    if($LASTEXITCODE -ne 0){throw 'Client template version/parameter/dependency tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_network_runtime.py')
     if ($LASTEXITCODE -ne 0) { throw 'Network runtime tests failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_network_audit.py')

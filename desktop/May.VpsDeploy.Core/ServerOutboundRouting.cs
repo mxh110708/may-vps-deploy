@@ -85,7 +85,8 @@ public static partial class ServerOutboundRouting
     {
         if (node["ForwardedOrigin"] != null && !allowForwarded) throw new OperationException("本轮服务器落地须选择原始代理节点，不能引用转发节点。");
         if (node["sing_box"] is not JsonObject native) throw new OperationException("下一跳缺少完整 sing-box 原生参数。");
-        if (IsQuic(native)) QuicParameters(native);
+        if (IsXhttp(native)) { XhttpParameters(native); if (node["clash"] is JsonObject) _ = VlessXhttp.RequireNative(node); }
+        else if (IsQuic(native)) QuicParameters(native);
         else if (IsStream(native)) StreamParameters(native);
         else if (native.Text("type") != "shadowsocks" || native.Any(p => !new[] { "type", "tag", "server", "server_port", "method", "password" }.Contains(p.Key)) || !Methods.Contains(native.Text("method"))) throw new OperationException("下一跳不在当前核心支持范围，或含有插件、客户端 detour 等未知参数；不会删除字段后继续应用。");
         if (native.Number("server_port") is < 1 or > 65535 || native.Text("type") != "vless" && (native.Text("password").Length is < 1 or > 4096 || native.Text("password").Any(char.IsControl))) throw new OperationException("下一跳的端口或鉴权参数无效。");
@@ -122,7 +123,7 @@ public static partial class ServerOutboundRouting
         }
         else
         {
-            var next = NextHop(node); var endpoint = Address(next.Text("server")); var expected = Address(expectedAddress);
+            var next = NextHop(node); RequireNativeEngine(next, false); RejectOwnNextHop(plan, next); var endpoint = Address(next.Text("server")); var expected = Address(expectedAddress);
             if (new[] { plan.Text("Server.IPv4"), plan.Text("Server.IPv6") }.Any(s => IPAddress.TryParse(s, out var address) && address.Equals(endpoint))) throw new OperationException("服务器下一跳不能指回当前实例的地址。");
             var family = expected.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4";
             var policy = ServerDestinationRules.Normalize(destinationRules);
@@ -131,7 +132,7 @@ public static partial class ServerOutboundRouting
             for (var i = added.Count - 1; i >= 0; i--) rules.Insert(0, added[i]!.DeepClone());
             metadata = new JsonObject { ["Version"] = 1, ["Name"] = node.Text("name"), ["Endpoint"] = new IPEndPoint(endpoint, next.Number("server_port")).ToString(), ["ExpectedAddress"] = expected.ToString(), ["EgressFamily"] = family, ["OutboundFingerprint"] = ArchiveStore.Fingerprint(next), ["RulesFingerprint"] = ArchiveStore.Fingerprint(added), ["SchemeId"] = source?.Text("SchemeId"), ["NodeId"] = source?.Text("NodeId"), ["NodeFingerprint"] = ArchiveStore.Fingerprint(node) };
             if (IsStream(next)) metadata["Connection"] = ConnectionSummary(next);
-            if (policy.Count > 0) { metadata["DestinationRules"] = policy; metadata["DestinationRulesNetwork"] = "tcp"; }
+            if (policy.Count > 0) { metadata["DestinationRules"] = policy; metadata["DestinationRulesNetwork"] = ServerDestinationRules.HasUdp(policy) ? "tcp,udp" : "tcp"; }
             if (named.Count > 0) metadata["AdditionalHops"] = named;
         }
         RequireBoundedConfiguration(result);
@@ -149,7 +150,7 @@ public static partial class ServerOutboundRouting
         "入站：" + Label(role) + " / " + inbounds + "（全部用户，TCP 与 UDP）\n" + (previous == null ? "原策略：此入站原有出口策略。\n" : "原下一跳：" + previous.Text("Name") + " · " + previous.Text("Endpoint") + "\n") + (metadata?.Text("Connection") is { Length: > 0 } connection ? "下一跳连接：" + connection + "\n" : "") +
         (metadata == null ? "操作：移除受管固定下一跳、附加落地及分流例外，恢复原 " + (role == "RealityEntry" ? "Reality" : "AnyTLS") + " 出口策略。" : "默认下一跳：" + metadata.Text("Name") + " · " + metadata.Text("Endpoint") + "\n预期网站出口（默认落地）：" + metadata.Text("ExpectedAddress") + "（" + metadata.Text("EgressFamily") + "）\nIP 网段按对应落地的预期出口地址族核对；域名出口由落地处理。落地失败不会回退直连或其他落地。\n" + NamedHopsSummary(metadata) + "\n" + RulesSummary(metadata)) +
         (previous?["DestinationRules"] == null ? "" : "\n\n原分流例外：\n" + NamedHopsSummary(previous) + "\n" + RulesSummary(previous)) +
-        "\n\n只重启当前 " + Label(role) + " 服务，现有连接会短暂断开。保留监听、入站凭据、Reality / TLS / ECH、防火墙、SSH、其他协议与监控。\n先核对实际配置摘要和服务状态，建立该组件专用恢复点，再应用并独立验证默认入口的 HTTPS、出口地址及 UDP。附加 TCP 落地从入口机逐一核验 TLS 与预期出口；业务规则命中仍需实际业务核对。验收不完整、失败或取消均恢复本次范围；回复不明先核对事务，不重放写入。\n下一跳凭据按本次审阅快照配置；方案后续刷新不会自动修改服务器。";
+        "\n\n只重启当前 " + Label(role) + " 服务，现有连接会短暂断开。保留监听、入站凭据、Reality / TLS / ECH、防火墙、SSH、其他协议与监控。\n先核对实际配置摘要和服务状态，建立该组件专用恢复点，再应用并独立验证默认入口的 HTTPS、出口地址及 UDP。附加落地从入口机逐一核验 TLS 与预期出口，UDP 规则涉及的去向另验收匹配 DNS 数据报；该检查不测 UDP 出口 IP，业务分类命中仍需实际业务核对。验收不完整、失败或取消均恢复本次范围；回复不明先核对事务，不重放写入。\n下一跳凭据按本次审阅快照配置；方案后续刷新不会自动修改服务器。";
     private static IPAddress Address(string text)
     {
         if (!IPAddress.TryParse(text, out var address) || address.IsIPv4MappedToIPv6 || IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any) || address.IsIPv6LinkLocal || address.IsIPv6Multicast || text.Contains('%') || address.AddressFamily == AddressFamily.InterNetwork && (address.GetAddressBytes()[0] is 0 or >= 224 || address.GetAddressBytes()[0] == 169 && address.GetAddressBytes()[1] == 254)) throw new OperationException("本轮需要明确的非回环、非链路本地 IP 地址；域名下一跳后续补充。");

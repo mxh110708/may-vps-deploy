@@ -49,6 +49,7 @@ public static class UdpForwarding
             }
             else if (validation.Text("Type") != "Echo" || validation.Count != 1) throw new OperationException("UDP 验收支持 DNS、原样回显或 Shadowsocks／SS2022；目标须提供所选服务。");
             if (!extras.TryAdd(rule.Text("Id"), new JsonObject { ["SessionTimeoutSeconds"] = rule["SessionTimeoutSeconds"]!.DeepClone(), ["MaximumSessions"] = rule["MaximumSessions"]!.DeepClone(), ["Validation"] = validation.DeepClone() })) throw new OperationException("UDP 规则身份重复。");
+            if (rule.ContainsKey("TargetGroup")) { extras[rule.Text("Id")]["TargetGroup"] = ForwardTargetGroups.Normalize(rule, "UDP"); rule.Remove("TargetGroup"); }
             rule.Remove("SessionTimeoutSeconds"); rule.Remove("MaximumSessions"); rule["Validation"] = new JsonObject { ["Type"] = "Ssh" };
         }
         var normalized = TcpForwarding.Normalize(common);
@@ -106,6 +107,7 @@ public static class UdpForwarding
         }
         var summary = action == "Remove" ? "移除全部受管 UDP 转发、独立白名单和相关 UDP 端口放行。" : action == "Check" ? "只读核对已保存配置、UDP 监听、白名单及实际往返响应。" : string.Join("\n", Rules(config).Select(r => r.Text("Name") + " · " + (r.Flag("Enabled") ? "启用" : "停用") + " · " + r.Text("ListenFamily") + ":" + r.Number("ListenPort") + " → " + new IPEndPoint(IPAddress.Parse(r.Text("TargetAddress")), r.Number("TargetPort")) + "\n允许来源：" + string.Join("，", r.Strings("AllowedSources")) + "；会话超时 " + r.Number("SessionTimeoutSeconds") + " 秒，上限 " + r.Number("MaximumSessions") + "；验收 " + r.Text("Validation.Type")));
         summary += "\n\n仅 UDP；各来源 IP／端口独立会话，不传递原客户端 IP。超时回收会话，达到上限丢弃新会话数据报，保留已有会话；无会话 60 秒后工作进程退出，监听仍可用。";
+        summary += string.Concat(Rules(config).Select(ForwardTargetGroups.Summary));
         foreach (var rule in Rules(config).Where(r => r.Flag("Enabled") && r.Text("Validation.Type") == "Shadowsocks"))
             summary += "\n代理验收：" + ProxyNode(store, rule, request.InstanceRelativePath).Text("name") + "；经转发后的 Shadowsocks UDP 向 " + rule.Text("Validation.ResolverAddress") + ":" + rule.Number("Validation.ResolverPort") + " 查询 " + rule.Text("Validation.QueryName") + " / " + rule.Text("Validation.QueryType") + "。不使用 TCP 或直连回退，不核验出口 IP，也不代表 QUIC 或其他业务已验收。";
         if (action != "Check") summary += "\n保存会重启当前 UDP 转发并清空原会话，可能丢包；目标变化不复用旧会话。不改 TCP 转发、代理、SSH 或监控。" + (plan.Text("Firewall.Mode") == "PreserveExisting" ? "保留既有防火墙，UDP 端口须事先放行。" : "同步受管防火墙 UDP 端口。") + "失败或取消恢复本组件及本次防火墙范围。";
@@ -113,6 +115,7 @@ public static class UdpForwarding
     }
     public static void ValidateCandidate(JsonObject plan, JsonObject config)
     {
+        ForwardTargetGroups.ValidateLoops(plan, config);
         var ports = Rules(config).Select(r => r.Number("ListenPort")).ToHashSet();
         foreach (var rule in Rules(config))
         {
@@ -131,6 +134,7 @@ public static class UdpForwarding
         foreach (var rule in rules)
         {
             var matches = items.Where(i => i.Text("Id") == rule.Text("Id")).ToArray();
+            if (matches.Length == 1) ForwardTargetGroups.RequireProof(rule, matches[0]);
             if (rule.Text("Validation.Type") == "TcpChain")
             {
                 if (matches.Length != 1 || matches[0].Text("Status") != "Passed" || matches[0].Text("From") != "Controller" || matches[0].Text("Scope") != "TcpChainEndToEnd" || matches[0]["Checks"] is not JsonArray { Count: 1 } chainChecks || chainChecks[0].Text("Address") != TcpForwarding.ProbeAddress(plan, rule) || chainChecks[0].Text("ChainId") != rule.Text("Validation.ChainId") || chainChecks[0].Text("Result.Status") != "Passed" || !chainChecks[0].Flag("Result.Result.UdpValidation.ResponseMatched") || chainChecks[0].Text("Result.Result.UdpValidation.Transport") != "UDP") throw new OperationException("UDP 规则缺少当前整链应用回程证据。");

@@ -150,15 +150,19 @@ public sealed partial class MainWindow
             }
             else if(category=="Certificates")
             {
+                if (ManagedCertificates.Managed(current)) rows.Children.Add(Text("Cloudflare 托管证书；域名：" + string.Join("，", current["Managed"]!.Strings("Domains")) + "。申请时的材料仅作加密归档快照；续期使用固定文件引用。请从实例的「证书自动化」检查、续期、停用或替换授权。",14,true));
+                else
+                {
                 var material=credentials["Certificates"]![current.Text("Id")]!.AsObject();var draft=material.DeepClone().AsObject();var pem=Field("替换证书链 PEM",draft,"CertificatePem");pem.AcceptsReturn=true;pem.MinHeight=70;var key=Secret("替换私钥 PEM",draft,"PrivateKeyPem","Inbounds.ReplaceKey");rows.Children.Add(Text("SHA-256："+current.Text("Sha256")+"\n有效期至："+current.Text("NotAfter"),13,true));rows.Children.Add(pem);rows.Children.Add(key);rows.Children.Add(Action("核对并替换此证书材料",()=>{Edit(()=>{InboundCatalog.ReplaceCertificate(current,credentials,draft.Text("CertificatePem"),draft.Text("PrivateKeyPem"));Refresh();});return Task.CompletedTask;}));
+                }
             }
             else
             {
-                rows.Children.Add(Text("引用此去向的入站（含 TCP 例外）：" + string.Join("，", InboundCatalog.Items(model,"Inbounds").Where(i=>InboundRoutingPolicy.References(i).Contains(current.Text("Id"))).Select(i=>i.Text("Name"))),14,true));
+                rows.Children.Add(Text("引用此去向的入站（含分流例外）：" + string.Join("，", InboundCatalog.Items(model,"Inbounds").Where(i=>InboundRoutingPolicy.References(i).Contains(current.Text("Id"))).Select(i=>i.Text("Name"))),14,true));
                 var type=Choice("出站类型",current,"Kind",[("Direct","直连"),("Proxy","已保存代理节点")]);type.Tag="Inbounds.OutboundKind";type.SelectionChanged+=(_,_)=>{if(current.Text("Kind")=="Direct")current["Source"]=new JsonObject();Refresh();};rows.Children.Add(type);rows.Children.Add(Choice("出口地址族",current,"Family",[("IPv4","IPv4"),("IPv6","IPv6"),("Auto","自动")]));rows.Children.Add(Field("预期出口 IP（可留空，只观测地址族）",current,"ExpectedAddress"));
                 if(current.Text("Kind")=="Proxy")
                 {
-                    rows.Children.Add(Text(ServerOutboundRouting.CapabilitySummary + "默认路径验收 HTTPS 与必要应用 UDP；分类例外只验收对应 TCP 去向。来源变化需重新选择并审阅。",13,true));
+                    rows.Children.Add(Text(ServerOutboundRouting.CapabilitySummary + "默认路径验收 HTTPS 与必要应用 UDP；分类例外逐去向验收 HTTPS，UDP 规则另检查实际数据报回程。来源变化需重新选择并审阅。",13,true));
                     var proxyModel=new JsonObject{["Source"]=current.Text("Source.SchemeId")+":"+current.Text("Source.NodeId")};var source=Choice("代理来源",proxyModel,"Source",sources.Select(s=>(s.Scheme.Text("Id")+":"+s.Node.Text("Id"),s.Scheme.Text("Name")+" / "+s.Node.Text("name")+" · "+ServerOutboundRouting.ConnectionLabel(s.Node["sing_box"]!.AsObject()))),true);source.Tag="Inbounds.ProxySource";
                     source.SelectionChanged+=(_,_)=>{var chosen=sources.FirstOrDefault(s=>s.Scheme.Text("Id")+":"+s.Node.Text("Id")==proxyModel.Text("Source"));if(chosen.Node!=null)current["Source"]=new JsonObject{["SchemeId"]=chosen.Scheme.Text("Id"),["NodeId"]=chosen.Node.Text("Id"),["Fingerprint"]=ArchiveStore.Fingerprint(chosen.Node)};};rows.Children.Add(source);
                 }
@@ -166,7 +170,7 @@ public sealed partial class MainWindow
             var remove=Action("移除此资源",()=>{Edit(()=>{InboundCatalog.RemoveEntity(model,credentials,category,current.Text("Id"));selectedIds.Remove(category);Refresh();});return Task.CompletedTask;});remove.Tag="Inbounds.Remove";rows.Children.Add(remove);
         }
         group.SelectionChanged+=(_,_)=>Refresh();action.SelectionChanged+=(_,_)=>Refresh();Refresh();
-        var existing=InboundSources.ExistingRoles(plan);var panel=Column(Text("每个入站使用独立身份和运行配置；用户、证书与出站通过引用管理。证书需自行申请并导入，程序不静默重建现有协议或更改服务商设置。",14,true));
+        var existing=InboundSources.ExistingRoles(plan);var panel=Column(Text("每个入站使用独立身份和运行配置；用户、证书与出站通过引用管理。证书可手动导入，也可从实例的「证书自动化」申请后选择引用；托管证书在对应入口维护。",14,true));
         if(existing.Count>0)panel.Children.Add(Text("现有组件（继续使用原维护入口）："+string.Join("，",existing.Select(i=>i!.Text("Name"))),14,true));
         panel.Children.Add(action);panel.Children.Add(group);panel.Children.Add(rows);panel.Children.Add(error);
         var dialog=OperationDialog("通用多入站资源",DialogScroll(panel),"审阅");JsonObject? options=null;

@@ -74,6 +74,12 @@ public sealed partial class MainWindow
         page.Children.Add(Details("业务 → 默认出口", business));
         var run = Action("轻量链路诊断", DiagnoseClientRoute); run.Tag = "ClientDiagnostics.Start"; run.IsEnabled = regions.Count != 0;
         page.Children.Add(Card(Column(SectionHeading("按需诊断", Symbol.Find, "选择具体入口和可选落地，检查短连接与真实出口。任务可取消，不持续监测，不进行吞吐测试。"), run)));
+        var workspace = Action("打开线路诊断工作台", () =>
+        {
+            if (SchemeChanged) throw new OperationException("请先保存方案，再打开工作台检查已保存的路径。");
+            diagnosticSelection["Scheme"] = selected.Text("Id"); Navigate("diagnostics"); return Task.CompletedTask;
+        }); workspace.Tag = "Diagnostics.Open";
+        page.Children.Add(Card(Column(Text("分段诊断与历史质量", 17), Text("工作台集中保存分段、协议、出口与监测旁证，不更改方案及已生成的输出。", 13, true), workspace)));
         if (selected["Diagnostics"] is JsonArray reports)
             foreach (var report in reports.OfType<JsonObject>().Reverse()) page.Children.Add(ClientDiagnosticCard(selected, report));
     }

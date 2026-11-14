@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace May.VpsDeploy.Core;
 
 // Portable, bounded snapshots of supported primitives. They are expanded into
-// native TCP rules; servers never download mutable rules or execute processors.
+// native application-network rules; no mutable downloads or processors.
 public static class ServerRuleSets
 {
     public const int MaximumItems=2048;
@@ -40,7 +40,7 @@ public static class ServerRuleSets
             foreach(var term in terms)
             {
                 if(++count>MaximumExpandedRules)throw new OperationException("分类展开超过 4096 个匹配项，请缩小规则集。");
-                var item=term.DeepClone().AsObject();item["Action"]=rule.Text("Action");if(rule.Text("Target")!="")item["Target"]=rule.Text("Target");yield return item;
+                var item=term.DeepClone().AsObject();item["Action"]=rule.Text("Action");if(rule.Text("Target")!="")item["Target"]=rule.Text("Target");if(rule.ContainsKey("Network"))item["Network"]=rule["Network"]!.DeepClone();yield return item;
             }
         }
     }

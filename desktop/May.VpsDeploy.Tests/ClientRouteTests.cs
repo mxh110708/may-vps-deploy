@@ -94,7 +94,7 @@ internal sealed partial class BoundaryTests
         var check = await tools.RunAsync(executable, ["check", "-c", serverFile], null, TimeSpan.FromSeconds(15), CancellationToken.None); check.RequireSuccess("Loopback fixture core refused configuration.");
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true }; foreach (var arg in new[] { "run", "-c", serverFile }) start.ArgumentList.Add(arg);
         entrySocket.Stop(); landingSocket.Stop(); using var process = Process.Start(start)!; var errors = process.StandardError.ReadToEndAsync(); var output = process.StandardOutput.ReadToEndAsync();
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         using var web = new TcpListener(IPAddress.Loopback, 0); web.Start(); var webPort = ((IPEndPoint)web.LocalEndpoint).Port;
         var requestArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); var hang = false; var responseBody = "192.0.2.123"; var requests = 0;
         var server = Task.Run(async () =>
@@ -136,10 +136,34 @@ internal sealed partial class BoundaryTests
             Check(report.Text("Status") == "Failed" && requests == 5, "oversized egress response accepted or chain retried");
             responseBody = "192.0.2.124"; report = await diagnostic.RunAsync(route, directory, progress, stop.Token);
             Check(report.Text("Status") == "Failed" && !report.Flag("EntryEgress.Verified"), "wrong egress marked healthy");
+            responseBody = "192.0.2.123";
+            var workPlan = RouteDiagnostics.Plan(f.Store, scheme, "LoopEntry", "LoopLanding");
+            var history = new RouteDiagnosticHistory(f.Store); var sourceBefore = ArchiveStore.Fingerprint(scheme); var priorRequests = requests;
+            try
+            {
+                var full = await new RouteDiagnosticWorkbench(f.Store, diagnostic, networkContext: () => new string('e', 64)).RunAsync(workPlan, false, false, progress, stop.Token);
+                history.Append(workPlan.SchemeId, full);
+                Check(full.Text("Status") == "Reachable" && full.Text("Profile").Length == 64 && full.Flag("ChainEgress.Verified") && requests == priorRequests + 2, "workbench did not traverse both actual loopback proxies and verify egress");
+                Check(full["Stages"]!.AsArray().Any(s => s!.Text("Id") == "Core" && s.Text("Status") == "Passed") && full["Stages"]!.AsArray().Any(s => s!.Text("Id") == "RemoteLeg" && s.Text("Kind") == "NotMeasured"), "workbench lost core phase or fabricated remote evidence");
+                Check(history.Read(workPlan.SchemeId).Single().Text("Id") == full.Text("Id") && ArchiveStore.Fingerprint(scheme) == sourceBefore, "actual diagnostic history failed to persist or changed scheme");
+                Check(!Directory.EnumerateDirectories(f.Paths.Resolve("private/client-diagnostics"), "client-diagnostic-*").Any(), "workbench left plaintext credential directory");
+            }
+            finally { workPlan.Clear(); }
             hang = true; requestArrived = new(TaskCreationOptions.RunContinuationsAsynchronously); using var cancel = new CancellationTokenSource();
             var pending = diagnostic.RunAsync(route, directory, progress, cancel.Token); await requestArrived.Task.WaitAsync(TimeSpan.FromSeconds(15)); var watch = Stopwatch.StartNew(); cancel.Cancel(); var cancelled = false;
             try { await pending; } catch (OperationCanceledException) { cancelled = true; }
             Check(cancelled && watch.Elapsed < TimeSpan.FromSeconds(5) && !Directory.EnumerateDirectories(directory, "client-diagnostic-*").Any(), "cancel did not terminate owned child and remove credential file promptly");
+            var cancelledPlan = RouteDiagnostics.Plan(f.Store, scheme, "LoopEntry"); using var abort = new CancellationTokenSource();
+            var stageStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                var partial = new RouteDiagnosticWorkbench(f.Store, diagnostic, networkContext: () => new string('e', 64)).RunAsync(cancelledPlan, false, false, new InlineProgress<string>(m => { if (m == "入口协议握手与 HTTPS 出口") stageStarted.TrySetResult(); }), abort.Token);
+                await stageStarted.Task.WaitAsync(TimeSpan.FromSeconds(15)); abort.Cancel(); var partialReport = await partial;
+                Check(partialReport.Text("Status") == "Cancelled" && partialReport.Text("FailureStage") == "EntryHttps" && partialReport["Stages"]!.AsArray().Any(s => s!.Text("Id") == "Tcp" && s.Text("Status") == "Passed"), "workbench cancellation dropped already completed actual stages");
+                Check(!Directory.EnumerateDirectories(f.Paths.Resolve("private/client-diagnostics"), "client-diagnostic-*").Any(), "cancelled workbench retained credential/core directory");
+                history.Append(cancelledPlan.SchemeId, partialReport);
+            }
+            finally { abort.Cancel(); cancelledPlan.Clear(); }
         }
         finally { stop.Cancel(); web.Stop(); if (!process.HasExited) process.Kill(entireProcessTree: true); await process.WaitForExitAsync(); await Task.WhenAll(output, errors, server); }
     }

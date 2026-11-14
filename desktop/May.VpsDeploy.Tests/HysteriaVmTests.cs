@@ -103,11 +103,13 @@ internal sealed partial class BoundaryTests
     // alongside the UDP fixture socket instead of binding a WSL-reserved port.
     private sealed class HysteriaVmTcpBridge : IAsyncDisposable
     {
+        private int connections;
+        public int Connections => Volatile.Read(ref connections);
         private readonly TcpListener listener; private readonly CancellationTokenSource stop = new(); private readonly List<Task> clients = new(); private readonly Task worker;
         public HysteriaVmTcpBridge(int port, int target)
         {
             listener = new(IPAddress.Loopback, port); listener.Start();
-            worker = Task.Run(async () => { try { while (!stop.IsCancellationRequested) { var client = await listener.AcceptTcpClientAsync(stop.Token); clients.Add(Forward(client, target)); } } catch (Exception error) when (error is OperationCanceledException or SocketException or ObjectDisposedException) { } });
+            worker = Task.Run(async () => { try { while (!stop.IsCancellationRequested) { var client = await listener.AcceptTcpClientAsync(stop.Token); Interlocked.Increment(ref connections); clients.Add(Forward(client, target)); } } catch (Exception error) when (error is OperationCanceledException or SocketException or ObjectDisposedException) { } });
         }
         private async Task Forward(TcpClient client, int target)
         {

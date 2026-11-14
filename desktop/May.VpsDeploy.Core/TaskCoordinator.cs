@@ -29,6 +29,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         if (snapshot.Kind == OperationKind.MayMonitorAccess) summary = MayMonitorAccess.Summary(store, snapshot);
         if (snapshot.Kind == OperationKind.WireGuardTunnel) summary = WireGuardTunnels.Prepare(store, snapshot).Summary;
         if (snapshot.Kind == OperationKind.TcpChain) summary = TcpChains.Prepare(store, snapshot).Summary;
+        if (snapshot.Kind == OperationKind.ManagedCertificate) summary = ManagedCertificates.Prepare(store, snapshot);
         if (snapshot.Kind == OperationKind.Inbounds) { var preview = InboundCatalog.Prepare(store, snapshot); summary = preview.Summary; preview.Credentials.Clear(); preview.Payload["Configurations"]!.AsObject().Clear(); }
         return new(snapshot, Fingerprint(snapshot), planHash, summary);
     }
@@ -39,10 +40,18 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
     private string ArchiveFingerprint(OperationRequest request)
     {
         var directory = store.Paths.Instance(request.InstanceRelativePath); var files = new JsonObject();
-        if (request.Kind is OperationKind.TcpForward or OperationKind.TcpChain) files["scripts/tcp-proxy-worker.py"] = ClientSchemes.SourceFingerprint(store.Paths.Resolve("scripts/tcp-proxy-worker.py"));
+        var pendingForward = SafePath.Resolve(directory, "operation-pending.dotnet.json");
+        var forwardRecovery = request.Kind == OperationKind.Recover && File.Exists(pendingForward) && ArchiveStore.ReadJson(pendingForward).Strings("Components").Any(c => c is "TcpForwarding" or "UdpForwarding");
+        if (request.Kind is OperationKind.TcpForward or OperationKind.TcpChain or OperationKind.UdpForward || forwardRecovery)
+            foreach (var name in new[] { "scripts/tcp-proxy-worker.py", "scripts/udp-forward-worker.py", "scripts/forward-target-groups.py", "scripts/forward-group-worker.py" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
+        if (request.Kind == OperationKind.ManagedCertificate)
+        {
+            foreach (var asset in new[] { "scripts/managed-certificates.py", "scripts/server-xhttp.py", "scripts/inbound-host.py", "scripts/inbound-policy-probe.py", "scripts/application-udp-probe.py", "assets/remote/inbound-policy-probe.sh", "assets/remote/managed-certificate-read.sh", "assets/remote/managed-certificate-apply.sh", "assets/remote/managed-certificate-prepare.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/maintenance-mutation-guard.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(asset));
+            if (request.Options.Text("TokenFile") != "") files["CertificateTokenFile"] = ClientSchemes.SourceFingerprint(request.Options.Text("TokenFile"));
+        }
         if (request.Kind == OperationKind.Inbounds)
         {
-            foreach (var asset in new[] { "config/versions.json", "scripts/inbound-host.py", "assets/remote/inbound-read.sh", "assets/remote/inbound-apply.sh", "assets/remote/audit.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/protocol-migration-trigger-rollback.sh", "assets/remote/maintenance-transaction-status.sh", "assets/remote/maintenance-transaction-commit.sh", "assets/remote/maintenance-mutation-guard.sh", "assets/remote/nftables-apply.sh", "assets/remote/firewall-tools.sh", "assets/remote/firewall-preflight.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(asset));
+            foreach (var asset in new[] { "config/versions.json", "scripts/server-xhttp.py", "scripts/inbound-host.py", "scripts/inbound-policy-probe.py", "scripts/application-udp-probe.py", "assets/remote/inbound-policy-probe.sh", "assets/remote/inbound-read.sh", "assets/remote/inbound-apply.sh", "assets/remote/audit.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/protocol-migration-trigger-rollback.sh", "assets/remote/maintenance-transaction-status.sh", "assets/remote/maintenance-transaction-commit.sh", "assets/remote/maintenance-mutation-guard.sh", "assets/remote/nftables-apply.sh", "assets/remote/firewall-tools.sh", "assets/remote/firewall-preflight.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(asset));
             foreach (var outbound in InboundCatalog.Items(request.Options["Model"]!.AsObject(), "Outbounds").Where(o => o.Text("Kind") == "Proxy")) files["InboundSource:" + outbound.Text("Id")] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, outbound.Text("Source.SchemeId")));
         }
         if (request.Kind == OperationKind.WireGuardTunnel)
@@ -76,7 +85,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
                 foreach (var reference in TcpChainUnderlay.References(config)) files["ChainWireGuard:" + reference.Text("Id")] = ClientSchemes.SourceFingerprint(WireGuardTunnels.FileName(store.Paths, reference.Text("Id")));
                 foreach (var name in new[] { "scripts/wireguard-host.py", "scripts/wireguard-runtime.py", "assets/remote/wireguard-read.sh", "assets/remote/wireguard-proof.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
             }
-            foreach (var name in new[] { "scripts/udp-forwarding.py", "scripts/udp-forward-worker.py", "scripts/inbound-host.py", "assets/remote/udp-forward-read.sh", "assets/remote/udp-forward-apply.sh", "assets/remote/inbound-read.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
+            foreach (var name in new[] { "scripts/udp-forwarding.py", "scripts/udp-forward-worker.py", "scripts/server-xhttp.py", "scripts/inbound-host.py", "assets/remote/udp-forward-read.sh", "assets/remote/udp-forward-apply.sh", "assets/remote/inbound-read.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
             foreach (var name in new[] { "scripts/forwarding-host.py", "scripts/tcp-forwarding.py", "assets/remote/audit.sh", "assets/remote/tcp-chain-probe.sh", "assets/remote/tcp-chain-rollback.sh", "assets/remote/tcp-forward-read.sh", "assets/remote/tcp-forward-apply.sh", "assets/remote/protocol-migration-arm-rollback.sh", "assets/remote/protocol-migration-trigger-rollback.sh", "assets/remote/maintenance-transaction-commit.sh", "assets/remote/maintenance-transaction-status.sh", "assets/remote/maintenance-mutation-guard.sh", "assets/remote/nftables-apply.sh", "assets/remote/firewall-preflight.sh", "assets/remote/firewall-tools.sh" }) files[name] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(name));
         }
         foreach (var name in new[] { "deployment-plan.json", "deployment-state.json", "secrets.dotnet.private.json", "deployment-secrets.private.json", "operation-pending.dotnet.json" })
@@ -118,6 +127,8 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
             files["ServerOutboundConfig"] = ClientSchemes.SourceFingerprint(SafePath.Resolve(directory, ServerOutboundRouting.ConfigRelative(request.Options.Text("Protocol"))));
             if (request.Options.Text("Action") == "Apply") files["ServerOutboundSource"] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, request.Options.Text("SchemeId")));
             foreach (var hop in ServerOutboundRouting.HopReferences(request.Options["AdditionalHops"]).OfType<JsonObject>()) files["ServerOutboundSource:" + hop.Text("Id")] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, hop.Text("SchemeId")));
+            files["scripts/server-xhttp.py"] = ClientSchemes.SourceFingerprint(store.Paths.Resolve("scripts/server-xhttp.py"));
+            files["scripts/application-udp-probe.py"] = ClientSchemes.SourceFingerprint(store.Paths.Resolve("scripts/application-udp-probe.py"));
             foreach (var asset in new[] { "server-outbound-read.sh", "server-outbound-apply.sh", "server-hop-probe.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve("assets/remote/" + asset));
         }
         if (request.Kind == OperationKind.BbrKernel)
@@ -195,6 +206,7 @@ public static class OperationPolicy
         if (!Enum.IsDefined(request.Kind)) throw new OperationException("未知任务类型。");
         if (request.Kind == OperationKind.WireGuardTunnel) WireGuardTunnels.Validate(request);
         if (request.Kind == OperationKind.TcpChain) TcpChains.Validate(request);
+        if (request.Kind == OperationKind.ManagedCertificate) ManagedCertificates.Validate(request);
         if (request.Kind == OperationKind.Inbounds) InboundCatalog.ValidateOptions(request.Options);
         if (request.Kind == OperationKind.ServerOutbound) ServerOutboundRouting.ValidateOptions(request.Options);
         if (request.Kind == OperationKind.TcpForward) TcpForwarding.ValidateOptions(request.Options);

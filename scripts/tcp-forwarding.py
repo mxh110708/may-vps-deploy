@@ -17,8 +17,13 @@ ACL_UNIT = 'may-tcp-forward-firewall.service'
 TABLE = 'may_tcp_forward'
 HEADER = '# Managed by May VPS Deploy TCP forwarding.\n'
 WORKER = '/etc/may-tcp-forward/proxy-worker.py'
+GROUP_WORKER = '/etc/may-tcp-forward/group-worker.py'
 if 'TCP_PROXY_WORKER_SOURCE' not in globals():
     TCP_PROXY_WORKER_SOURCE = Path(__file__).with_name('tcp-proxy-worker.py').read_text(encoding='utf-8')
+if 'UDP_WORKER_SOURCE' not in globals(): UDP_WORKER_SOURCE = Path(__file__).with_name('udp-forward-worker.py').read_text(encoding='utf-8')
+if 'FORWARD_GROUP_SOURCE' not in globals(): FORWARD_GROUP_SOURCE = Path(__file__).with_name('forward-target-groups.py').read_text(encoding='utf-8')
+if 'FORWARD_GROUP_WORKER_SOURCE' not in globals(): FORWARD_GROUP_WORKER_SOURCE = Path(__file__).with_name('forward-group-worker.py').read_text(encoding='utf-8')
+exec(compile(FORWARD_GROUP_SOURCE, 'forward-target-groups.py', 'exec'))
 
 
 def digest(value):
@@ -35,7 +40,7 @@ def normalize(value):
     ids, ports, result = set(), set(), []
     for rule in value['Rules']:
         fields = {'Id', 'Name', 'Enabled', 'ListenFamily', 'ListenPort', 'TargetAddress', 'TargetPort', 'AllowedSources', 'Validation'}
-        if not isinstance(rule, dict) or set(rule) - {'ProxyProtocol'} != fields:
+        if not isinstance(rule, dict) or set(rule) - {'ProxyProtocol', 'TargetGroup'} != fields:
             raise ValueError('Unsupported TCP forwarding rule.')
         if not re.fullmatch('[a-f0-9]{32}', rule['Id']) or rule['Id'] in ids:
             raise ValueError('Invalid or duplicate forwarding identity.')
@@ -81,7 +86,9 @@ def normalize(value):
             raise ValueError('Application-level validation is required.')
         if 'ProxyProtocol' in rule and (rule['ProxyProtocol'] not in ('v1', 'v2') or kind != 'Tls'):
             raise ValueError('Explicit PROXY output requires TLS certificate acceptance; an SSH banner is insufficient.')
-        result.append(dict(rule, TargetAddress=str(target), AllowedSources=sorted(set(networks))))
+        normalized = dict(rule, TargetAddress=str(target), AllowedSources=sorted(set(networks)))
+        if 'TargetGroup' in rule: normalized['TargetGroup'] = normalize_group(normalized)
+        result.append(normalized)
     return {'Version': 1, 'Rules': result}
 
 
@@ -103,6 +110,7 @@ def listeners(rule):
 def material(config, proxy):
     files = {CONFIG: encoded(config) + '\n'}
     if any('ProxyProtocol' in rule for rule in config['Rules']): files[WORKER] = TCP_PROXY_WORKER_SOURCE
+    if any('TargetGroup' in rule for rule in config['Rules']): files[GROUP_WORKER] = target_group_program()
     lines = [HEADER.rstrip(), 'table inet ' + TABLE + ' {}', 'flush table inet ' + TABLE,
              'table inet ' + TABLE + ' {', ' chain input {', '  type filter hook input priority -10; policy accept;', '  iifname "lo" accept']
     for rule in config['Rules']:
@@ -114,6 +122,7 @@ def material(config, proxy):
         files[unit_path(unit_name(rule, 'service'))] = HEADER + '[Unit]\nDescription=May TCP forward worker\nBindsTo=' + name + '\nAfter=' + name + '\n\n[Service]\nType=notify\nExecStart=' + proxy + ' --connections-max=256 --exit-idle-time=60s ' + target + ':' + str(rule['TargetPort']) + '\nDynamicUser=yes\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=yes\nRestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX\nCapabilityBoundingSet=\nTimeoutStopSec=10s\n'
         if 'ProxyProtocol' in rule:
             files[unit_path(unit_name(rule, 'service'))] = HEADER + '[Unit]\nDescription=May bounded TCP PROXY worker\nBindsTo=' + name + '\nAfter=' + name + '\n\n[Service]\nType=simple\nExecStart=/usr/bin/python3 -I ' + WORKER + ' --target ' + target + ' --port ' + str(rule['TargetPort']) + ' --proxy-protocol ' + rule['ProxyProtocol'] + '\nDynamicUser=yes\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=yes\nRestrictAddressFamilies=AF_INET AF_INET6\nCapabilityBoundingSet=\nMemoryMax=96M\nLimitNOFILE=1024\nTimeoutStopSec=10s\n'
+        if 'TargetGroup' in rule: files[unit_path(unit_name(rule, 'service'))] = target_group_service(rule, CONFIG, 'TCP')
         if not rule['Enabled']:
             continue
         for version, family in ((4, 'ip'), (6, 'ip6')):
@@ -151,12 +160,21 @@ class Host(ForwardHost):
     JOURNAL = 'tcp-forward-state.json'
     DIRECTORY = '/etc/may-tcp-forward'
     CONFIG, ACL, ACL_UNIT, TABLE = CONFIG, ACL, ACL_UNIT, TABLE
-    EXTRA_FILES = (WORKER,)
-    ARCHIVED_PROGRAMS = (WORKER,)
+    EXTRA_FILES = (WORKER, GROUP_WORKER)
+    ARCHIVED_PROGRAMS = (WORKER, GROUP_WORKER)
     SOCKET_TYPE = socket.SOCK_STREAM
     normalize, material = staticmethod(normalize), staticmethod(material)
     unit_name, unit_path = staticmethod(unit_name), staticmethod(unit_path)
     canonical_table, listeners = staticmethod(canonical_table), staticmethod(listeners)
+
+    def read(self):
+        result = super().read()
+        result['TargetGroups'] = [group_status(r, self.path('/run/may-tcp-forward-' + r['Id'] + '/group-status.json')) for r in (result.get('Configuration') or {}).get('Rules', []) if 'TargetGroup' in r and r['Enabled']]
+        return result
+
+    @staticmethod
+    def target_endpoints(rule):
+        return group_targets(rule) if 'TargetGroup' in rule else [(rule['TargetAddress'], rule['TargetPort'])]
 
     def proxy(self):
         for candidate in ('/usr/lib/systemd/systemd-socket-proxyd', '/lib/systemd/systemd-socket-proxyd'):
@@ -174,6 +192,13 @@ def main():
             host.preflight(normalize(json.loads(os.environ['VPS_PARAM_CANDIDATE_JSON'])))
         import base64
         print('VPSDEPLOY_TCP_FORWARD_STATE_B64=' + base64.b64encode(encoded(value).encode()).decode())
+    elif action == 'probe-groups':
+        import base64
+        scope = {'__name__': 'owned_proxy_header'}
+        exec(compile(TCP_PROXY_WORKER_SOURCE, 'tcp-proxy-worker.py', 'exec'), scope)
+        before = host.read()
+        if before['Hash'] != os.environ['VPS_PARAM_EXPECTED_HASH']: raise ValueError('Group probe source drift.')
+        print('VPSDEPLOY_FORWARD_GROUP_PROBE_B64=' + base64.b64encode(encoded(probe_groups(host, 'TCP', scope['header'])).encode()).decode())
     elif action == 'snapshot':
         host.snapshot(Path(sys.argv[2]), os.environ['VPS_PARAM_TCP_FORWARD_EXPECTED_HASH'])
     elif action == 'verify':

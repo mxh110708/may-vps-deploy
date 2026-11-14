@@ -11,7 +11,7 @@ using May.VpsDeploy.Infrastructure;
 
 internal sealed partial class BoundaryTests
 {
-    private async Task InboundPolicy28Runtime()
+    private async Task InboundPolicy28Runtime(bool applicationUdp = false)
     {
         if (!OperatingSystem.IsWindows()) { Console.WriteLine("SKIP: round28 real protocol fixture uses fixed Windows cores; portable policy/recovery checks still run."); return; }
         using var f = new Fixture(repository); using var budget = new CancellationTokenSource(TimeSpan.FromMinutes(5)); var ct = budget.Token;
@@ -20,12 +20,18 @@ internal sealed partial class BoundaryTests
         var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("inbound.example.com"); san.AddDnsName("www.example.com"); san.AddIpAddress(IPAddress.Loopback); request.CertificateExtensions.Add(san.Build()); request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
         using var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(1));
         await using var https = await HysteriaHttpsTarget.Start(repository, f, cert, key, ct); await using var origin = new Policy28HttpTarget(ct); await using var exceptionOrigin = new Policy28HttpTarget(ct, IPAddress.Parse("127.0.0.3")); await using var denied = new DestinationHttpTarget(ct); await using var dns = new TuicDnsTarget(IPAddress.Parse("127.0.0.2"));
+        await using var udpDefault = applicationUdp ? new Policy34UdpTarget("127.0.0.1") : null;
+        await using var udpCategory = applicationUdp ? new Policy34UdpTarget("127.0.0.3") : null;
+        await using var udpDenied = applicationUdp ? new Policy34UdpTarget("127.0.0.2") : null;
+        await using var udpDirect = applicationUdp ? new Policy34UdpTarget("127.0.0.4") : null;
+        await using var udp6 = applicationUdp && Socket.OSSupportsIPv6 ? new Policy34UdpTarget("::1") : null;
         var children = new List<TestProcessIdentity>(); var cases = new JsonArray(); var xray = Environment.GetEnvironmentVariable("MAY_TEST_XRAY");
         var camouflagePort = MixedPort();
         var tlsTarget = new JsonObject { ["inbounds"] = new JsonArray(new JsonObject { ["type"] = "anytls", ["listen"] = "127.0.0.1", ["listen_port"] = camouflagePort, ["users"] = new JsonArray(new JsonObject { ["password"] = "synthetic-target-only" }), ["tls"] = new JsonObject { ["enabled"] = true, ["server_name"] = "www.example.com", ["min_version"] = "1.3", ["alpn"] = new JsonArray("h2"), ["certificate"] = new JsonArray(cert.ExportCertificatePem()), ["key"] = new JsonArray(key.ExportPkcs8PrivateKeyPem()) } }), ["outbounds"] = new JsonArray(new JsonObject { ["type"] = "direct" }) };
         await using var camouflage = await Policy28Core.Start(assets.ResolveCore("sing-box"), tlsTarget, directory, false, camouflagePort, false, ct); children.Add(new TestProcessIdentity(camouflage.Process));
         foreach (var variant in new[] { "Shadowsocks2022", "AnyTLS", "Hysteria2", "TuicV5", "Reality", "XhttpTLS", "XhttpReality", "XhttpH3" })
         {
+            if (applicationUdp && Environment.GetEnvironmentVariable("MAY_R34_VARIANT") is { Length: > 0 } selectedVariant && variant != selectedVariant) continue;
             var isXray = variant is "Reality" or "XhttpTLS" or "XhttpReality" or "XhttpH3";
             if (isXray && string.IsNullOrEmpty(xray)) { Console.WriteLine("SKIP: round28 " + variant + " requires MAY_TEST_XRAY."); continue; }
             var plan = f.Plan("Runtime28-" + variant); var model = InboundCatalog.Empty(); var secrets = InboundCatalog.EmptyCredentials(); var protocol = variant.StartsWith("Xhttp", StringComparison.Ordinal) ? "VLESS" : variant;
@@ -43,7 +49,16 @@ internal sealed partial class BoundaryTests
             if (protocol == "VLESS") { options["Transport"]!["Host"] = "front.example.test"; options["Transport"]!["Path"] = "/round28/"; options["Transport"]!["Mode"] = "auto"; options["Transport"]!["HTTPVersion"] = variant == "XhttpH3" ? "3" : "2"; }
             var defaultPort = MixedPort(); var extraPort = MixedPort(); var original = Policy28Exit(f, model, "default-" + variant, "192.0.2.28", defaultPort); var extra = Policy28Exit(f, model, "extra-" + variant, "192.0.2.29", extraPort); inbound["OutboundId"] = original.Resource.Text("Id");
             JsonObject Landing(JsonObject node, string bind) => new() { ["log"] = new JsonObject { ["disabled"] = true }, ["inbounds"] = new JsonArray(new JsonObject { ["type"] = "shadowsocks", ["tag"] = "ss", ["listen"] = "127.0.0.1", ["listen_port"] = node.Number("sing_box.server_port"), ["method"] = node.Text("sing_box.method"), ["password"] = node.Text("sing_box.password") }), ["outbounds"] = new JsonArray(new JsonObject { ["type"] = "direct", ["tag"] = "direct", ["inet4_bind_address"] = bind }), ["route"] = new JsonObject { ["final"] = "direct" } };
-            var policy = new JsonArray(new JsonObject { ["Kind"] = "Domain", ["Value"] = "localhost", ["Action"] = "NextHop", ["Target"] = extra.Resource.Text("Id") }, new JsonObject { ["Kind"] = "Cidr", ["Value"] = "127.0.0.3/32", ["Action"] = "NextHop", ["Target"] = extra.Resource.Text("Id") }, DestinationRule("Cidr", "127.0.0.2/32", "Reject")); InboundRoutingPolicy.Set(inbound, LoopbackRuleSets(policy, 1, InboundCatalog.Id)); _ = InboundCatalog.Normalize(model, secrets);
+            var policy = new JsonArray(new JsonObject { ["Kind"] = "Domain", ["Value"] = "localhost", ["Action"] = "NextHop", ["Target"] = extra.Resource.Text("Id") }, new JsonObject { ["Kind"] = "Cidr", ["Value"] = "127.0.0.3/32", ["Action"] = "NextHop", ["Target"] = extra.Resource.Text("Id") }, DestinationRule("Cidr", "127.0.0.2/32", "Reject")); if (applicationUdp)
+            {
+                original.Resource["Family"] = "Auto"; extra.Resource["Family"] = "Auto";
+                policy.Add(Udp34Rule("Domain", "localhost", "NextHop", target: extra.Resource.Text("Id")));
+                policy.Add(Udp34Rule("Cidr", "127.0.0.3/32", "NextHop", target: extra.Resource.Text("Id")));
+                policy.Add(Udp34Rule("Cidr", "127.0.0.2/32", "Reject"));
+                policy.Add(Udp34Rule("Cidr", "127.0.0.4/32", "Direct"));
+                if (udp6 != null) policy.Add(Udp34Rule("Cidr", "::1/128", "NextHop", target: extra.Resource.Text("Id")));
+            }
+            InboundRoutingPolicy.Set(inbound, LoopbackRuleSets(policy, 1, InboundCatalog.Id)); _ = InboundCatalog.Normalize(model, secrets);
             var python = Environment.GetEnvironmentVariable("MAY_TEST_PYTHON");
             if (!string.IsNullOrEmpty(python))
             {
@@ -87,7 +102,22 @@ internal sealed partial class BoundaryTests
                         using var http = TuicHttp(port, cert); Check(await http.GetStringAsync("http://127.0.0.1:" + origin.Port, ct) == "127.0.0.5", variant + "/" + clientName + " default did not traverse its SS exit"); Check(await http.GetStringAsync("http://127.0.0.3:" + exceptionOrigin.Port, ct) == "127.0.0.6", variant + "/" + clientName + " category did not reach its distinct SS exit");
                         var domain = await http.GetStringAsync("http://localhost:" + origin.Port, ct); Check(domain == "127.0.0.6" || clientName == "mihomo" && domain == "127.0.0.5", variant + "/" + clientName + " unexpected original-domain metadata result");
                         Check(await http.GetStringAsync("https://127.0.0.1:" + https.Port, ct) == "198.51.100.22", variant + "/" + clientName + " HTTPS failed"); await CheckDeniedTarget(port, denied, ct);
-                        Check((await ClientProxyUdp.ProbeAsync(port, new(IPAddress.Parse("127.0.0.2"), dns.Port), ct)).Flag("ResponseMatched"), variant + "/" + clientName + " TCP reject changed application UDP");
+                        if (!applicationUdp) Check((await ClientProxyUdp.ProbeAsync(port, new(IPAddress.Parse("127.0.0.2"), dns.Port), ct)).Flag("ResponseMatched"), variant + "/" + clientName + " TCP reject changed application UDP");
+                        else
+                        {
+                            Check(await Udp34Exchange(port, udpDefault!.Endpoint, ct) == "127.0.0.5", variant + "/" + clientName + " default UDP did not traverse its distinct exit");
+                            Check(await Udp34Exchange(port, udpCategory!.Endpoint, ct) == "127.0.0.6", variant + "/" + clientName + " category UDP did not traverse its distinct exit");
+                            if (udp6 != null) Check(await Udp34Exchange(port, udp6.Endpoint, ct) == "::1", variant + "/" + clientName + " IPv6 application UDP category failed");
+                            Check(await Udp34Exchange(port, udpDirect!.Endpoint, ct) == "127.0.0.1", variant + "/" + clientName + " explicit direct UDP used an exit");
+                            var beforeDenied = udpDenied!.Requests;
+                            Check(await Udp34Exchange(port, udpDenied.Endpoint, ct, denied:true) == null && udpDenied.Requests == beforeDenied, variant + "/" + clientName + " rejected UDP reached the target or a fallback");
+                            var observedDomain = await Udp34Exchange(port, udpDefault.Endpoint, ct, domain:"localhost");
+                            // Some clients/transports resolve before the server's
+                            // routing step. Record the real branch instead of
+                            // treating local domain trial output as wire proof.
+                            Check(observedDomain is "127.0.0.6" or "127.0.0.5", variant + "/" + clientName + " unexpected UDP domain result: " + (observedDomain ?? "NoResponse"));
+                            cases.Add(new JsonObject { ["Inbound"] = variant, ["Client"] = clientName, ["Network"] = "UDP", ["DefaultSource"] = "127.0.0.5", ["CategorySource"] = "127.0.0.6", ["DirectSource"] = "127.0.0.1", ["RejectedNoTargetDelivery"] = true, ["DomainSource"] = observedDomain, ["Ipv6Category"] = udp6 != null ? "Passed" : "Unavailable", ["SessionScope"] = "FreshDestinationAssociation" });
+                        }
                         cases.Add(new JsonObject { ["Inbound"] = variant, ["Client"] = clientName, ["DistinctDefaultAndCategory"] = true, ["DomainReachedCategory"] = domain == "127.0.0.6", ["Https"] = true, ["TcpReject"] = true, ["UdpDefault"] = true });
                     }
                     finally { if (native != null) await native.DisposeAsync(); if (mihomo != null) await mihomo.DisposeAsync(); }
@@ -95,18 +125,25 @@ internal sealed partial class BoundaryTests
                 await using var failureClient = await Round15Client.Start("mihomo", assets.ResolveCore("mihomo"), node, cert, directory, ct); children.Add(new TestProcessIdentity(failureClient.Process)); using var web = TuicHttp(failureClient.Port, cert); web.Timeout = TimeSpan.FromSeconds(2); await extraCore.Stop(); var blocked = false;
                 try { await web.GetStringAsync("http://127.0.0.3:" + exceptionOrigin.Port, ct); } catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { blocked = true; }
                 Check(blocked && await web.GetStringAsync("http://127.0.0.1:" + origin.Port, ct) == "127.0.0.5", variant + " failed exception fell back to the live default");
+                if (applicationUdp)
+                {
+                    Check(await Udp34Exchange(failureClient.Port, udpCategory!.Endpoint, ct, denied:true) == null && await Udp34Exchange(failureClient.Port, udpDefault!.Endpoint, ct) == "127.0.0.5", variant + " failed UDP exception fell back or interrupted the default");
+                    if (udp6 != null) Check(await Udp34Exchange(failureClient.Port, udp6.Endpoint, ct, denied:true) == null, variant + " IPv6 UDP category bypassed its failed exit");
+                }
                 await using var restoredExtra = await Policy28Core.Start(assets.ResolveCore("sing-box"), extraConfig, directory, false, extraPort, false, ct); children.Add(new TestProcessIdentity(restoredExtra.Process));
                 await server.DisposeAsync(); var updated = policy.DeepClone().AsArray(); foreach (var rule in updated.OfType<JsonObject>().Where(r=>r.ContainsKey("Target"))) { rule["Action"] = "Direct"; rule.Remove("Target"); } InboundRoutingPolicy.Set(inbound, LoopbackRuleSets(updated, 2, InboundCatalog.Id)); server = await Policy28Core.Start(isXray ? xray! : assets.ResolveCore("sing-box"), Render(), directory, isXray, inbound.Number("Listener.Port"), udp, ct); children.Add(new TestProcessIdentity(server.Process));
-                await using (var after = await Round15Client.Start("mihomo", assets.ResolveCore("mihomo"), node, cert, directory, ct)) { children.Add(new TestProcessIdentity(after.Process)); using var http = TuicHttp(after.Port, cert); Check(await http.GetStringAsync("http://127.0.0.3:" + exceptionOrigin.Port, ct) == "127.0.0.1", variant + " updated category did not use explicit server direct"); }
+                await using (var after = await Round15Client.Start("mihomo", assets.ResolveCore("mihomo"), node, cert, directory, ct)) { children.Add(new TestProcessIdentity(after.Process)); using var http = TuicHttp(after.Port, cert); Check(await http.GetStringAsync("http://127.0.0.3:" + exceptionOrigin.Port, ct) == "127.0.0.1", variant + " updated category did not use explicit server direct"); if (applicationUdp) Check(await Udp34Exchange(after.Port, udpCategory!.Endpoint, ct) == "127.0.0.1", variant + " UDP category update did not select direct"); }
                 await server.DisposeAsync(); InboundRoutingPolicy.Set(inbound, LoopbackRuleSets(policy, 1, InboundCatalog.Id)); server = await Policy28Core.Start(isXray ? xray! : assets.ResolveCore("sing-box"), Render(), directory, isXray, inbound.Number("Listener.Port"), udp, ct); children.Add(new TestProcessIdentity(server.Process));
-                await using (var restored = await Round15Client.Start("mihomo", assets.ResolveCore("mihomo"), node, cert, directory, ct)) { children.Add(new TestProcessIdentity(restored.Process)); using var http = TuicHttp(restored.Port, cert); Check(await http.GetStringAsync("http://127.0.0.3:" + exceptionOrigin.Port, ct) == "127.0.0.6", variant + " old category restore lost its target"); }
-                Console.WriteLine("Round28: " + variant + " dual-client distinct exits, TCP reject, UDP default, failure and category restore passed.");
+                await using (var restored = await Round15Client.Start("mihomo", assets.ResolveCore("mihomo"), node, cert, directory, ct)) { children.Add(new TestProcessIdentity(restored.Process)); using var http = TuicHttp(restored.Port, cert); Check(await http.GetStringAsync("http://127.0.0.3:" + exceptionOrigin.Port, ct) == "127.0.0.6", variant + " old category restore lost its target"); if (applicationUdp) Check(await Udp34Exchange(restored.Port, udpCategory!.Endpoint, ct) == "127.0.0.6", variant + " UDP category restore lost its original exit"); }
+                Console.WriteLine((applicationUdp ? "Round34: " : "Round28: ") + variant + " dual-client distinct exits, TCP/UDP scopes, failure and category restore passed.");
             }
             finally { await server.DisposeAsync(); secrets.Clear(); }
         }
         await camouflage.DisposeAsync();
+        if (applicationUdp && Environment.GetEnvironmentVariable("MAY_R34_VARIANT") == null)
+            Check(cases.OfType<JsonObject>().Any(c => c.Text("Inbound") == "Shadowsocks2022" && c.Text("Client") == "native" && c.Text("Network") == "UDP" && c.Text("DomainSource") == "127.0.0.6"), "No preserved-domain UDP path actually reached its category exit");
         Check(children.All(identity => identity.Exited), "round28 left an owned core running");
-        if (Environment.GetEnvironmentVariable("MAY_R28_EVIDENCE") is {} evidence) ArchiveStore.WriteJson(Path.GetFullPath(evidence), new JsonObject { ["SyntheticOnly"] = true, ["Cases"] = cases, ["OwnedCoresStopped"] = true });
+        if (Environment.GetEnvironmentVariable(applicationUdp ? "MAY_R34_EVIDENCE" : "MAY_R28_EVIDENCE") is {} evidence) ArchiveStore.WriteJson(Path.GetFullPath(evidence), new JsonObject { ["SyntheticOnly"] = true, ["Cases"] = cases, ["OwnedCoresStopped"] = true });
     }
     private sealed class Policy28Core(Process process, Task<string> output, Task<string> error) : IAsyncDisposable
     {

@@ -107,6 +107,7 @@ public sealed partial class WorkflowEngine
         if (components.Contains("TcpForwarding")) parameters["TCP_FORWARD_EXPECTED_HASH"] = c.State.Text("TcpForwarding.RemoteHash", "Absent");
         if (c.Request.Kind == OperationKind.TcpChain) { parameters["TCP_CHAIN_ID"] = c.Request.Options.Text("Configuration.Id"); c.Pending["TcpChainId"] = parameters["TCP_CHAIN_ID"]; c.Save(); }
         if (components.Contains("UdpForwarding")) parameters["UDP_FORWARD_EXPECTED_HASH"] = c.State.Text("UdpForwarding.RemoteHash", "Absent");
+        if (components.Contains("Certificates")) parameters["CERTIFICATE_DOCUMENT"] = c.Request.Options.ToJsonString();
         if (components.Contains("Inbounds"))
         {
             var preview = c.InboundsPreview ?? throw new OperationException("入站变更尚未完成预检。"); parameters["INBOUND_EXPECTED_HASH"] = preview.ExpectedHash;
@@ -232,6 +233,7 @@ public sealed partial class WorkflowEngine
         if (components.Contains("WireGuardTunnel")) { var key = WireGuardTunnels.Component(c.Request.Options["Configuration"]!.AsObject(), c.Request.InstanceRelativePath); Restore(c.Plan, oldPlan, key); Restore(c.State, oldState, key); }
         if (components.Contains("TcpForwarding")) { Restore(c.Plan, oldPlan, "TcpForwarding"); Restore(c.State, oldState, "TcpForwarding"); }
         if (components.Contains("UdpForwarding")) { Restore(c.Plan, oldPlan, "UdpForwarding"); Restore(c.State, oldState, "UdpForwarding"); }
+        if (components.Contains("Certificates")) Restore(c.State, oldState, "Certificates");
         if (components.Contains("Inbounds")) { Restore(c.Plan, oldPlan, "InboundModel"); Restore(c.State, oldState, "Inbounds"); Restore(c.Secrets, oldSecrets, "Inbounds"); }
         if (components.Contains("KomariAgent")) { Restore(c.Plan, oldPlan, "Komari"); Restore(c.Secrets, oldSecrets, "KomariAgent"); Restore(c.State, oldState, "KomariInstalled"); }
         if (components.Contains("KomariController")) Restore(c.State, oldState, "KomariController");

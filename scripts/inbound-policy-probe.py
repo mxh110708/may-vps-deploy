@@ -14,9 +14,9 @@ POLICY_HOSTS = {'IPv4': 'api.ipify.org', 'IPv6': 'api6.ipify.org', 'Auto': 'api6
 POLICY_PORT = 443
 
 
-def policy_paths(model, item):
-    policy = item.get('Routing', {})
-    if not policy.get('Rules'):
+def policy_paths(model, item, configuration=None):
+    policy = item.get('Routing', {'Rules': []})
+    if not policy.get('Rules') and not (configuration and any(o.get("streamSettings",{}).get("network")=="xhttp" for o in configuration["outbounds"])):
         return []
     ids = [item['OutboundId']]
     for rule in policy['Rules']:
@@ -27,10 +27,18 @@ def policy_paths(model, item):
                'Family': targets[i]['Family'], 'ExpectedAddress': targets[i]['ExpectedAddress']} for i in ids]
     if any(r['Action'] == 'Direct' for r in policy['Rules']):
         result.append({'Id': 'Direct', 'Tag': 'policy-direct', 'Family': targets[item['OutboundId']]['Family'], 'ExpectedAddress': ''})
+    udp_rules = [r for r in policy['Rules'] if r.get('Network', 'TCP') in ('UDP', 'Both')]
+    for path in result:
+        source = next((o for o in (configuration or {}).get("outbounds", []) if o.get("tag")==path["Tag"]), {})
+        if source.get("streamSettings", {}).get("network")=="xhttp":
+            path["Xhttp"] = xhttp_proof(source)
+            path["UdpRequired"] = True
+        if udp_rules and (path['Id'] == item['OutboundId'] or any(r['Action']=='Direct' if path['Id']=='Direct' else r['Action']=='NextHop' and r.get('Target')==path['Id'] for r in udp_rules)):
+            path['UdpRequired'] = True
     return result
 
 
-def validate_request(request, state):
+def validate_request(request, state, configuration=None):
     if not isinstance(request, dict) or set(request) != {'InboundId', 'ConfigurationSha256', 'PolicyFingerprint', 'Paths'}:
         raise ValueError('Invalid inbound policy probe request.')
     identifier = identity(request['InboundId'])
@@ -42,12 +50,12 @@ def validate_request(request, state):
     binding = next(b for b in registry['Bindings'] if b['Id'] == identifier)
     if not item['Enabled'] or state['Runtime'][identifier] != {'Active': True, 'Enabled': True} or request['ConfigurationSha256'] != binding['Sha256']:
         raise ValueError('Installed policy is inactive or changed after review.')
-    expected = policy_paths(registry['Model'], item)
+    expected = policy_paths(registry['Model'], item, configuration)
     paths = request['Paths']
     if not expected or len(expected) > 9 or not isinstance(paths, list) or len(paths) != len(expected):
         raise ValueError('Policy probe paths are incomplete.')
     for actual, wanted in zip(paths, expected):
-        if not isinstance(actual, dict) or set(actual) != set(wanted) | {'OutboundFingerprint'} or {k: actual[k] for k in wanted} != wanted or not re.fullmatch('[a-f0-9]{64}', actual['OutboundFingerprint']):
+        if not isinstance(actual, dict) or set(actual) != set(wanted) | {'OutboundFingerprint'} or 'UdpRequired' in actual and actual['UdpRequired'] is not True or {k: actual[k] for k in wanted} != wanted or not re.fullmatch('[a-f0-9]{64}', actual['OutboundFingerprint']):
             raise ValueError('Policy probe differs from installed outbound references.')
     return item, selected_core(registry, identifier)
 
@@ -93,6 +101,8 @@ def policy_query(port, hostname, timeout):
 
 
 def probe_path(binary, xray, source, path):
+    if source.get('streamSettings', {}).get('network') == 'xhttp':
+        require_xhttp_binary(binary)
     # The mixed listener may reserve both transports. Check both without
     # changing any host port reservation or networking setting.
     for attempt in range(100):
@@ -108,10 +118,11 @@ def probe_path(binary, xray, source, path):
             pass
     else:
         raise ValueError('No paired loopback probe port available.')
-    # Only TCP CONNECT is exercised; this does not claim application UDP proof.
+    # Application UDP is an additional datagram exchange, never inferred from
+    # this TCP readiness/HTTPS check or the outbound's QUIC transport.
     if xray:
-        config = {'log': {'loglevel': 'none'}, 'inbounds': [{'listen': '127.0.0.1', 'port': port, 'protocol': 'socks', 'settings': {'auth': 'noauth', 'udp': False}}],
-                  'outbounds': [source], 'routing': {'domainStrategy': 'AsIs', 'rules': [{'type': 'field', 'network': 'tcp', 'outboundTag': source['tag']}]}}
+        config = {'log': {'loglevel': 'none'}, 'inbounds': [{'listen': '127.0.0.1', 'port': port, 'protocol': 'socks', 'settings': {'auth': 'noauth', 'udp': path.get('UdpRequired', False)}}],
+                  'outbounds': [source], 'routing': {'domainStrategy': 'AsIs', 'rules': [{'type': 'field', 'network': 'tcp,udp' if path.get('UdpRequired') else 'tcp', 'outboundTag': source['tag']}]}}
     else:
         config = {'log': {'disabled': True}, 'dns': {'servers': [{'type': 'local', 'tag': 'local'}]},
                   'inbounds': [{'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': port}],
@@ -136,8 +147,12 @@ def probe_path(binary, xray, source, path):
             address = ipaddress.ip_address(policy_query(port, host, 10))
             if path['ExpectedAddress'] and address != ipaddress.ip_address(path['ExpectedAddress']) or path['Family'] != 'Auto' and address.version != (6 if path['Family'] == 'IPv6' else 4):
                 raise ValueError('Native outbound egress or address family differs.')
-            return {'Id': path['Id'], 'OutboundFingerprint': path['OutboundFingerprint'], 'Status': 'Passed', 'From': 'EntryServer',
-                    'Scope': 'NativeOutboundHttps', 'Network': 'TCP', 'Egress': str(address)}
+            result = {'Id': path['Id'], 'OutboundFingerprint': path['OutboundFingerprint'], 'Status': 'Passed', 'From': 'EntryServer',
+                      'Scope': 'NativeOutboundHttps', 'Network': 'TCP', 'Egress': str(address)}
+            if source.get('streamSettings',{}).get('network')=='xhttp': result['Xhttp'] = xhttp_proof(source)
+            if path.get('UdpRequired'):
+                result['UdpValidation'] = application_udp_probe(port, path['Family'] if path['Family'] != 'Auto' else 'IPv6' if address.version == 6 else 'IPv4')
+            return result
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -150,11 +165,12 @@ def probe_path(binary, xray, source, path):
 
 def run_policy(host, request):
     before = host.read()
-    item, core = validate_request(request, before)
-    source_bytes = host.regular(config_path(item['Id'])).read_bytes()
+    identifier = identity(request.get('InboundId'))
+    source_bytes = host.regular(config_path(identifier)).read_bytes()
     if digest(source_bytes) != request['ConfigurationSha256']:
         raise ValueError('Policy configuration changed before probing.')
     configuration = json.loads(source_bytes)
+    item, core = validate_request(request, before, configuration)
     outputs = configuration['outbounds']
     results = []
     started = time.monotonic()

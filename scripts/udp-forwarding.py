@@ -11,10 +11,15 @@ if 'ForwardHost' not in globals():
     exec(compile(Path(__file__).with_name('forwarding-host.py').read_text(), 'forwarding-host.py', 'exec'))
 if 'UDP_WORKER_SOURCE' not in globals():
     UDP_WORKER_SOURCE = Path(__file__).with_name('udp-forward-worker.py').read_text()
+if 'TCP_PROXY_WORKER_SOURCE' not in globals(): TCP_PROXY_WORKER_SOURCE = Path(__file__).with_name('tcp-proxy-worker.py').read_text(encoding='utf-8')
+if 'FORWARD_GROUP_SOURCE' not in globals(): FORWARD_GROUP_SOURCE = Path(__file__).with_name('forward-target-groups.py').read_text(encoding='utf-8')
+if 'FORWARD_GROUP_WORKER_SOURCE' not in globals(): FORWARD_GROUP_WORKER_SOURCE = Path(__file__).with_name('forward-group-worker.py').read_text(encoding='utf-8')
+exec(compile(FORWARD_GROUP_SOURCE, 'forward-target-groups.py', 'exec'))
 
 CONFIG = '/etc/may-udp-forward/config.json'
 ACL = '/etc/may-udp-forward/whitelist.nft'
 WORKER = '/etc/may-udp-forward/worker.py'
+GROUP_WORKER = '/etc/may-udp-forward/group-worker.py'
 ACL_UNIT = 'may-udp-forward-firewall.service'
 TABLE = 'may_udp_forward'
 HEADER = '# Managed by May VPS Deploy UDP forwarding.\n'
@@ -26,7 +31,7 @@ def normalize(value):
     ids, ports, result = set(), set(), []
     for rule in value['Rules']:
         fields = {'Id', 'Name', 'Enabled', 'ListenFamily', 'ListenPort', 'TargetAddress', 'TargetPort', 'AllowedSources', 'Validation', 'SessionTimeoutSeconds', 'MaximumSessions'}
-        if not isinstance(rule, dict) or set(rule) != fields or not re.fullmatch('[a-f0-9]{32}', rule['Id']) or rule['Id'] in ids:
+        if not isinstance(rule, dict) or set(rule) - {'TargetGroup'} != fields or not re.fullmatch('[a-f0-9]{32}', rule['Id']) or rule['Id'] in ids:
             raise ValueError('Invalid or duplicate UDP rule.')
         ids.add(rule['Id'])
         if not isinstance(rule['Name'], str) or not 1 <= len(rule['Name']) <= 80 or any(ord(c) < 32 or ord(c) == 127 for c in rule['Name']):
@@ -77,7 +82,9 @@ def normalize(value):
                 raise ValueError('Invalid UDP DNS validation query.')
         else:
             raise ValueError('Unsupported UDP application validation.')
-        result.append(dict(rule, TargetAddress=str(target), AllowedSources=sorted(set(sources))))
+        normalized = dict(rule, TargetAddress=str(target), AllowedSources=sorted(set(sources)))
+        if 'TargetGroup' in rule: normalized['TargetGroup'] = normalize_group(normalized, 'UDP')
+        result.append(normalized)
     return {'Version': 1, 'Rules': result}
 
 
@@ -98,12 +105,14 @@ def listeners(rule):
 
 def material(config, python):
     files = {CONFIG: encoded(config) + '\n', WORKER: UDP_WORKER_SOURCE}
+    if any('TargetGroup' in rule for rule in config['Rules']): files[GROUP_WORKER] = target_group_program()
     lines = [HEADER.rstrip(), 'table inet ' + TABLE + ' {}', 'flush table inet ' + TABLE,
              'table inet ' + TABLE + ' {', ' chain input {', '  type filter hook input priority -10; policy accept;', '  iifname "lo" accept']
     for rule in config['Rules']:
         name = unit_name(rule, 'socket')
         files[unit_path(name)] = HEADER + '[Unit]\nDescription=May UDP forward socket\nBindsTo=' + ACL_UNIT + '\nAfter=' + ACL_UNIT + '\n\n[Socket]\n' + ''.join('ListenDatagram=' + (address if family == socket.AF_INET else '[' + address + ']') + ':' + str(port) + '\n' for family, address, port in listeners(rule)) + 'BindIPv6Only=ipv6-only\nReceiveBuffer=256K\n\n[Install]\nWantedBy=sockets.target\n'
         files[unit_path(unit_name(rule, 'service'))] = HEADER + '[Unit]\nDescription=May UDP forward worker\nBindsTo=' + name + '\nAfter=' + name + '\n\n[Service]\nType=simple\nExecStart=' + python + ' -I ' + WORKER + ' --target ' + rule['TargetAddress'] + ' --port ' + str(rule['TargetPort']) + ' --timeout ' + str(rule['SessionTimeoutSeconds']) + ' --maximum ' + str(rule['MaximumSessions']) + ' --allowed ' + ','.join(rule['AllowedSources']) + '\nDynamicUser=yes\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=yes\nRestrictAddressFamilies=AF_INET AF_INET6\nCapabilityBoundingSet=\nLimitNOFILE=2048\nRestart=on-failure\nRestartSec=2s\nTimeoutStopSec=10s\n'
+        if 'TargetGroup' in rule: files[unit_path(unit_name(rule, 'service'))] = target_group_service(rule, CONFIG, 'UDP')
         if rule['Enabled']:
             for version, family in ((4, 'ip'), (6, 'ip6')):
                 sources = [s for s in rule['AllowedSources'] if ipaddress.ip_network(s).version == version]
@@ -135,11 +144,20 @@ class Host(ForwardHost):
     PREFIX, DIRECTORY = 'may-udp-forward', '/etc/may-udp-forward'
     JOURNAL = 'udp-forward-state.json'
     CONFIG, ACL, ACL_UNIT, TABLE = CONFIG, ACL, ACL_UNIT, TABLE
-    EXTRA_FILES, SOCKET_TYPE = (WORKER,), socket.SOCK_DGRAM
-    ARCHIVED_PROGRAMS = (WORKER,)
+    EXTRA_FILES, SOCKET_TYPE = (WORKER, GROUP_WORKER), socket.SOCK_DGRAM
+    ARCHIVED_PROGRAMS = (WORKER, GROUP_WORKER)
     normalize, material = staticmethod(normalize), staticmethod(material)
     unit_name, unit_path = staticmethod(unit_name), staticmethod(unit_path)
     canonical_table, listeners = staticmethod(canonical_table), staticmethod(listeners)
+
+    def read(self):
+        result = super().read()
+        result['TargetGroups'] = [group_status(r, self.path('/run/may-udp-forward-' + r['Id'] + '/group-status.json')) for r in (result.get('Configuration') or {}).get('Rules', []) if 'TargetGroup' in r and r['Enabled']]
+        return result
+
+    @staticmethod
+    def target_endpoints(rule):
+        return group_targets(rule) if 'TargetGroup' in rule else [(rule['TargetAddress'], rule['TargetPort'])]
 
     def proxy(self):
         if not self.path('/usr/bin/python3').is_file():
@@ -155,6 +173,10 @@ def main():
             host.preflight(normalize(json.loads(os.environ['VPS_PARAM_CANDIDATE_JSON'])))
         import base64
         print('VPSDEPLOY_UDP_FORWARD_STATE_B64=' + base64.b64encode(encoded(value).encode()).decode())
+    elif action == 'probe-groups':
+        import base64
+        if host.read()['Hash'] != os.environ['VPS_PARAM_EXPECTED_HASH']: raise ValueError('Group probe source drift.')
+        print('VPSDEPLOY_FORWARD_GROUP_PROBE_B64=' + base64.b64encode(encoded(probe_groups(host, 'UDP')).encode()).decode())
     elif action == 'snapshot':
         host.snapshot(Path(sys.argv[2]), os.environ['VPS_PARAM_UDP_FORWARD_EXPECTED_HASH'])
     elif action == 'verify':

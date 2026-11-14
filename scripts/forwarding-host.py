@@ -123,8 +123,10 @@ class ForwardHost:
         addresses = {a['local'] for item in local for a in item.get('addr_info', [])}
         ports = {r['ListenPort'] for r in config['Rules']}
         for rule in config['Rules']:
-            if rule['TargetPort'] in ports and (ipaddress.ip_address(rule['TargetAddress']).is_loopback or rule['TargetAddress'] in addresses):
-                raise ValueError('Forwarding target would form a local loop.')
+            targets = self.target_endpoints(rule) if hasattr(self, 'target_endpoints') else [(rule['TargetAddress'], rule['TargetPort'])]
+            for target_address, target_port in targets:
+                if target_port in ports and (ipaddress.ip_address(target_address).is_loopback or target_address in addresses):
+                    raise ValueError('Forwarding target would form a local loop.')
             if not rule['Enabled']:
                 continue
             for family, address, port in self.listeners(rule):

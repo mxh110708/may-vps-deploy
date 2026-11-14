@@ -52,7 +52,7 @@ public static class TcpForwarding
         foreach (var item in rules)
         {
             if (item is not JsonObject rule) throw new OperationException("转发规则格式无效。");
-            Fields(rule, "Id", "Name", "Enabled", "ListenFamily", "ListenPort", "TargetAddress", "TargetPort", "AllowedSources", "Validation", "ProxyProtocol");
+            Fields(rule, "Id", "Name", "Enabled", "ListenFamily", "ListenPort", "TargetAddress", "TargetPort", "AllowedSources", "Validation", "ProxyProtocol", "TargetGroup");
             if (!Regex.IsMatch(rule.Text("Id"), "^[a-f0-9]{32}$") || !ids.Add(rule.Text("Id"))) throw new OperationException("转发规则身份缺失或重复。");
             var name = rule.Text("Name").Trim();
             if (name.Length is < 1 or > 80 || name.Any(char.IsControl)) throw new OperationException("转发名称应为 1–80 个可打印字符。");
@@ -80,6 +80,8 @@ public static class TcpForwarding
             if (rule.ContainsKey("ProxyProtocol") && (rule["ProxyProtocol"] is not JsonValue pv || !pv.TryGetValue<string>(out var protocol) || protocol is not ("v1" or "v2") || kind != "Tls")) throw new OperationException("PROXY 仅支持显式发送 v1／v2，并以 TLS 证书握手验收；SSH 响应不足以证明目标已接收头部。本轮不接收客户端声明的来源或生成代理节点。");
             var normalizedRule = new JsonObject { ["Id"] = rule.Text("Id"), ["Name"] = name, ["Enabled"] = enabled, ["ListenFamily"] = family, ["ListenPort"] = port, ["TargetAddress"] = Address(rule.Text("TargetAddress")), ["TargetPort"] = Port(rule, "TargetPort"), ["AllowedSources"] = new JsonArray(allowed.Select(s => (JsonNode?)JsonValue.Create(s)).ToArray()), ["Validation"] = check };
             if (rule.ContainsKey("ProxyProtocol")) normalizedRule["ProxyProtocol"] = rule["ProxyProtocol"]!.DeepClone();
+            if (rule.ContainsKey("TargetGroup")) normalizedRule["TargetGroup"] = ForwardTargetGroups.Normalize(normalizedRuleWithGroup());
+            JsonObject normalizedRuleWithGroup() { var copy = normalizedRule.DeepClone().AsObject(); copy["TargetGroup"] = rule["TargetGroup"]?.DeepClone(); return copy; }
             normalized.Add(normalizedRule);
         }
         return new() { ["Version"] = 1, ["Rules"] = normalized };
@@ -149,12 +151,14 @@ public static class TcpForwarding
         foreach (var rule in Rules(config).Where(r => r.Flag("Enabled") && r.Text("Validation.Type") == "Proxy")) _ = ProxyNode(store, rule);
         var action = request.Options.Text("Action");
         var summary = action == "Remove" ? "移除当前实例全部受管 TCP 转发、独立白名单和相关端口放行。" : action == "Check" ? "只读核对实际配置、监听和白名单，并经转发执行已保存的验收。" : string.Join("\n", Rules(config).Select(r => r.Text("Name") + " · " + (r.Flag("Enabled") ? "启用" : "停用") + " · " + r.Text("ListenFamily") + ":" + r.Number("ListenPort") + " → " + new IPEndPoint(IPAddress.Parse(r.Text("TargetAddress")), r.Number("TargetPort")) + "\n允许来源：" + string.Join("，", r.Strings("AllowedSources")) + "；验收：" + r.Text("Validation.Type") + (r.ContainsKey("ProxyProtocol") ? "；发送 PROXY " + r.Text("ProxyProtocol") + "（当前 socket 对端来源；目标只信任本转发服务器）" : "")));
-        summary += "\n\n仅 TCP；默认不传递客户端 IP，显式 PROXY 使用内核 socket 来源且不解析输入头，不改变代理入站、SSH 或监控。转发使用系统自带程序，无连接 60 秒后工作进程退出，监听仍保持可用。";
+        summary += string.Concat(Rules(config).Select(ForwardTargetGroups.Summary));
+        summary += "\n\n仅 TCP；默认不传递客户端 IP，显式 PROXY 使用内核 socket 来源且不解析输入头，不改变代理入站、SSH 或监控。普通映射使用系统程序，PROXY／主备使用有界工作进程；无连接 60 秒后退出，监听仍保持可用。";
         if (action != "Check") summary += "\n本次会重建当前组件的转发监听，已有转发连接中断。" + (plan.Text("Firewall.Mode") == "PreserveExisting" ? "保留既有防火墙，所需端口须已放行。" : "同步受管防火墙的转发端口。") + "失败或取消恢复本组件及本次防火墙范围。";
         return new(config, expected, summary);
     }
     public static void ValidateCandidate(JsonObject plan, JsonObject config, JsonObject? state = null)
     {
+        ForwardTargetGroups.ValidateLoops(plan, config);
         state ??= new JsonObject();
         var reserved = new HashSet<int> { plan.Number("Ports.SshPrimary"), plan.Number("Ports.SshRescue"), plan.Number("Server.BootstrapSshPort") };
         foreach (var port in InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Inbounds").SelectMany(Hysteria2Ports.ListenerPorts)) reserved.Add(port);
@@ -180,6 +184,7 @@ public static class TcpForwarding
         if (result.Text("Status") != "Passed" || items.Length != ids.Length || ids.Any(id => items.Count(i => i.Text("Id") == id && i.Text("Status") == "Passed" && i.Text("From") == "Controller" && i.Text("Scope") == (Rules(configuration).Single(r => r.Text("Id") == id).Text("Validation.Type") == "TcpChain" ? "TcpChainEndToEnd" : "ForwardedApplication")) != 1)) throw new OperationException("实际转发验收未全部通过，不能提交本次变更。", code: "TcpForwardValidationIncomplete");
         foreach (var rule in Rules(configuration).Where(r => r.Flag("Enabled")))
         {
+            ForwardTargetGroups.RequireProof(rule, items.Single(i => i.Text("Id") == rule.Text("Id")));
             var checks = (items.Single(i => i.Text("Id") == rule.Text("Id"))["Checks"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? [];
             if (checks.Length != (rule.Text("ListenFamily") == "DualStack" ? 2 : 1) || checks.Select(i => i.Text("Address")).Distinct().Count() != checks.Length || checks.Any(i => i.Text("Status") != "Passed" || i.Text("Type") != rule.Text("Validation.Type"))) throw new OperationException("转发验收缺少所选地址族或应用协议的结果。", code: "TcpForwardValidationIncomplete");
             if (rule.ContainsKey("ProxyProtocol") && checks.Any(i => i.Text("ProxyProtocol") != rule.Text("ProxyProtocol"))) throw new OperationException("PROXY 转发缺少本次实际应用验收。");

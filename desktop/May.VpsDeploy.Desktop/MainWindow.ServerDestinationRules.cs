@@ -15,15 +15,20 @@ public sealed partial class MainWindow
     {
         var available=AvailableServerRuleSets();
         var rows = new StackPanel { Spacing = 12 }; var message = Text("", 13, true);
-        var destination = new TextBox { Header = "TCP 试算目标（不联网）", PlaceholderText = "域名或 IP", MaxLength = 300, Tag = "ServerRules.TestDestination" };
+        var trial = new JsonObject { ["Network"] = "tcp" };
+        var trialNetwork = Choice("试算应用协议", trial, "Network", [("tcp", "TCP"), ("udp", "UDP")]); trialNetwork.Tag = "ServerRules.TestNetwork";
+        var destination = new TextBox { Header = "试算目标（不联网）", PlaceholderText = "收到的域名或 IP", MaxLength = 300, Tag = "ServerRules.TestDestination" };
         var expander = new Expander { HorizontalAlignment = HorizontalAlignment.Stretch, IsExpanded = rules.Count > 0 };
         Button? add = null;
         void RefreshRules()
         {
-            CaptureDestinationRules(inputs); inputs.Clear(); rows.Children.Clear(); expander.Header = "TCP 分流例外 · " + rules.Count + " 条";
+            CaptureDestinationRules(inputs); inputs.Clear(); rows.Children.Clear(); expander.Header = "应用协议分流例外 · " + rules.Count + " 条";
             for (var i = 0; i < rules.Count; i++)
             {
                 var index = i; var rule = rules[i]!.AsObject();
+                var networkModel = new JsonObject { ["Network"] = ServerDestinationRules.Network(rule) };
+                var network = Choice("应用协议", networkModel, "Network", [("TCP", "TCP（旧规则默认）"), ("UDP", "UDP"), ("Both", "TCP + UDP")]); network.Tag = "ServerRules.Network." + i;
+                network.SelectionChanged += (_, _) => { if (networkModel.Text("Network") == "TCP") rule.Remove("Network"); else rule["Network"] = networkModel["Network"]!.DeepClone(); };
                 var previousKind=rule.Text("Kind");var kind = Choice("匹配类型", rule, "Kind", [("Domain", "完整域名"), ("Suffix", "域名及其子域名"), ("Cidr", "目标 IP 网段"),("RuleSet","分类规则集（固定版本）")]); kind.Tag = "ServerRules.Kind." + i;
                 kind.SelectionChanged+=(_,_)=>{CaptureDestinationRules(inputs);inputs.Clear();if(rule.Text("Kind")=="RuleSet"){var set=available.First();rule["Value"]=set.Text("Id");rule["RuleSet"]=set.DeepClone();}else{rule.Remove("RuleSet");if(previousKind=="RuleSet")rule["Value"]="";}RefreshRules();};
                 FrameworkElement input;
@@ -49,18 +54,18 @@ public sealed partial class MainWindow
                 var up = Action("上移", () => Move(-1)); up.IsEnabled = i > 0; up.Tag = "ServerRules.Up." + i;
                 var down = Action("下移", () => Move(1)); down.IsEnabled = i + 1 < rules.Count; down.Tag = "ServerRules.Down." + i;
                 var remove = Action("移除", () => { CaptureDestinationRules(inputs); rules.RemoveAt(index); inputs.Clear(); RefreshRules(); message.Text = ""; return Task.CompletedTask; }); remove.Tag = "ServerRules.Remove." + i;
-                var row=Column(Text("规则 " + (i + 1), 15), Fields(kind, input, action), Row(up, down, remove));if(snapshotDetails!=null)row.Children.Add(snapshotDetails);rows.Children.Add(row);
+                var row=Column(Text("规则 " + (i + 1), 15), Fields(network, kind, input, action), Row(up, down, remove));if(snapshotDetails!=null)row.Children.Add(snapshotDetails);rows.Children.Add(row);
             }
             if (add != null) add.IsEnabled = rules.Count < ServerDestinationRules.MaximumRules;
         }
         add = Action("添加分流规则", () => { CaptureDestinationRules(inputs); rules.Add(new JsonObject { ["Kind"] = "Domain", ["Value"] = "", ["Action"] = "NextHop" }); inputs.Clear(); RefreshRules(); message.Text = ""; return Task.CompletedTask; }); add.Tag = "ServerRules.Add";
         var test = Action("试算匹配", () =>
         {
-            try { CaptureDestinationRules(inputs); var normalized = ServerDestinationRules.Normalize(rules, independent ? InboundCatalog.Id : null); var decision = ServerDestinationRules.Match(normalized, destination.Text.Trim()); message.Text = "试算去向：" + (independent && decision.Target == "" ? decision.Action switch { "NextHop" => "默认去向", "Direct" => "服务器直连", _ => "阻断" } : ServerDestinationRules.DecisionLabel(decision, hopNames)) + "。仅检查规则匹配，不代表连接成功。"; }
+            try { CaptureDestinationRules(inputs); var normalized = ServerDestinationRules.Normalize(rules, independent ? InboundCatalog.Id : null); var decision = ServerDestinationRules.Match(normalized, destination.Text.Trim(), trial.Text("Network")); message.Text = trial.Text("Network").ToUpperInvariant() + " 试算去向：" + (independent && decision.Target == "" ? decision.Action switch { "NextHop" => "默认去向", "Direct" => "服务器直连", _ => "阻断" } : ServerDestinationRules.DecisionLabel(decision, hopNames)) + "。仅检查规则匹配，不代表连接成功。"; }
             catch (OperationException error) { message.Text = error.Message; }
             return Task.CompletedTask;
         }); test.Tag = "ServerRules.Test";
-        expander.Content = Column(Text(independent ? "TCP 按顺序首条命中，未命中及 UDP 使用本入站默认去向。规则引用现有出站资源与固定分类版本；服务器直连使用 VPS 网络。每个去向分别验收连接，业务分类命中仍需实际业务核对。例外失败不改走默认去向或直连。" : "只对 TCP 按顺序首条命中，未命中使用默认落地。UDP 保持默认落地。网段只匹配 IP 目标，不新增域名解析或嗅探。各落地独立验收，故障不回退到默认落地或直连。", 13, true), rows, add, destination, test, message);
+        expander.Content = Column(Text("按应用协议与显示顺序首条命中，未命中使用默认去向；旧规则仅匹配 TCP。UDP 按核心目标会话选路，不以 QUIC 传输代替应用 UDP。只收到 IP 时按 IP 规则或默认去向，不反查或嗅探。分类固定版本；服务器直连使用 VPS 网络；选中去向失败不改走其他去向。", 13, true), rows, add, trialNetwork, destination, test, message);
         RefreshRules(); return expander;
     }
 }

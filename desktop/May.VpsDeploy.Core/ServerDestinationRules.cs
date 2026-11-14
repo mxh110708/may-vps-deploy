@@ -8,11 +8,15 @@ namespace May.VpsDeploy.Core;
 
 public sealed record ServerDestinationDecision(string Action, string Target);
 
-// Ordered TCP exceptions to one fixed next hop. UDP remains on the fixed path:
-// the supported cores select one route for a packet session, not for each target in it.
+// Ordered application-network rules. An omitted Network remains TCP; UDP is
+// selected explicitly and follows the core's destination/session metadata.
 public static class ServerDestinationRules
 {
     public const int MaximumRules = 32;
+    public static string Network(JsonNode rule) => rule.Text("Network", "TCP") is var value && value is "TCP" or "UDP" or "Both" ? value : throw new OperationException("应用协议须为 TCP、UDP 或 TCP + UDP。");
+    public static bool Applies(JsonNode rule, string network) => Network(rule) == "Both" || Network(rule) == network.ToUpperInvariant();
+    public static bool HasUdp(JsonArray rules) => rules.Any(r => Applies(r!, "udp"));
+    public static string NetworkLabel(JsonNode rule) => Network(rule) == "Both" ? "TCP + UDP" : Network(rule);
     public static string KindLabel(string kind) => kind switch { "Domain" => "完整域名", "Suffix" => "域名及其子域名", "Cidr" => "目标 IP 网段", "RuleSet" => "分类规则集", _ => throw new OperationException("请选择受支持的匹配类型。") };
     public static string ActionLabel(string action) => action switch { "NextHop" => "所选落地", "Direct" => "入口机直连", "Reject" => "阻断", _ => throw new OperationException("请选择受支持的出站动作。") };
     public static JsonArray Normalize(JsonNode? value, Func<string, string>? targetIdentity = null)
@@ -22,7 +26,8 @@ public static class ServerDestinationRules
         var result = new JsonArray(); var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in input)
         {
-            if (item is not JsonObject rule || rule.Count is < 3 or > 5 || rule.Any(p => p.Key is not ("Kind" or "Value" or "Action" or "Target" or "RuleSet") || p.Key!="RuleSet"&&(p.Value is not JsonValue text || !text.TryGetValue<string>(out _)))) throw new OperationException("分流规则字段无效。");
+            if (item is not JsonObject rule || rule.Count is < 3 or > 6 || rule.Any(p => p.Key is not ("Kind" or "Value" or "Action" or "Target" or "RuleSet" or "Network") || p.Key!="RuleSet"&&(p.Value is not JsonValue text || !text.TryGetValue<string>(out _)))) throw new OperationException("分流规则字段无效。");
+            var network = Network(rule);
             var kind = rule.Text("Kind"); var action = rule.Text("Action"); KindLabel(kind); ActionLabel(action);
             var target = rule.Text("Target"); if (target != "") { if (action != "NextHop") throw new OperationException("只有落地动作可以指定附加落地。"); _ = (targetIdentity ?? ServerOutboundRouting.HopId)(target); }
             var raw = rule.Text("Value");
@@ -42,8 +47,10 @@ public static class ServerDestinationRules
                 canonical = new IPAddress(bytes) + "/" + prefix;
             }
             else canonical = Domain(raw);
-            if (!seen.Add(kind + ":" + canonical)) throw new OperationException("存在重复匹配项，请删除重复项或调整范围。");
+            foreach (var transport in network == "Both" ? new[] { "TCP", "UDP" } : new[] { network })
+                if (!seen.Add(kind + ":" + canonical + ":" + transport)) throw new OperationException("同一应用协议存在重复匹配项，请删除重复项或调整范围。");
             var normalized = new JsonObject { ["Kind"] = kind, ["Value"] = canonical, ["Action"] = action }; if (target != "") normalized["Target"] = target;if(kind=="RuleSet")normalized["RuleSet"]=ServerRuleSets.Normalize(rule["RuleSet"]); result.Add(normalized);
+            if (network != "TCP") normalized["Network"] = network;
         }
         _=ServerRuleSets.Expand(result).Count();
         return result;
@@ -59,12 +66,12 @@ public static class ServerDestinationRules
     public static string Decide(JsonArray rules, string destination, string network = "tcp") => Match(rules, destination, network).Action;
     public static ServerDestinationDecision Match(JsonArray rules, string destination, string network = "tcp")
     {
-        if (network == "udp") return new("NextHop", "");
-        if (network != "tcp") throw new OperationException("本轮只试算 TCP；UDP 保持固定落地。");
+        if (network is not ("tcp" or "udp")) throw new OperationException("请选择应用 TCP 或 UDP 进行试算。");
         var isIp = IPAddress.TryParse(destination, out var ip); var host = isIp ? "" : Domain(destination);
         if (ip?.IsIPv4MappedToIPv6 == true) ip = ip.MapToIPv4();
         foreach (var rule in ServerRuleSets.Expand(rules))
         {
+            if (!Applies(rule, network)) continue;
             var value = rule.Text("Value");
             var matches = rule.Text("Kind") switch
             {
@@ -101,6 +108,7 @@ public static class ServerDestinationRules
         var egressHost = family == "IPv6" ? "api64.ipify.org" : "api.ipify.org";
         var acceptance = Match(rules, egressHost);
         if (acceptance.Action != "NextHop" || acceptance.Target != "") throw new OperationException("此规则会使默认落地的出口验收绕过落地／被阻断。本轮请缩小范围，或在前面添加明确的默认落地规则保留验收路径。");
+        ServerUdpRouting.ValidateDefault(rules, family);
     }
     public static JsonArray Render(string role, JsonArray rules, string[] inboundTags)
     {
@@ -114,6 +122,7 @@ public static class ServerDestinationRules
         {
             var kind = item.Text("Kind"); var value = item.Text("Value"); var action = item.Text("Action");
             var rule = new JsonObject { [xray ? "inboundTag" : "inbound"] = new JsonArray(inboundTags.Select(t => (JsonNode?)JsonValue.Create(t)).ToArray()), ["network"] = "tcp" };
+            rule["network"] = Network(item) switch { "UDP" => JsonValue.Create("udp"), "Both" => xray ? JsonValue.Create("tcp,udp") : new JsonArray("tcp", "udp"), _ => JsonValue.Create("tcp") };
             if (xray)
             {
                 rule["type"] = "field"; rule[kind == "Cidr" ? "ip" : "domain"] = new JsonArray(kind == "Cidr" ? value : (kind == "Domain" ? "full:" : "domain:") + value);
@@ -134,6 +143,6 @@ public static class ServerDestinationRules
     public static string Summary(JsonNode? value, IReadOnlyDictionary<string, string>? names = null)
     {
         var rules = Normalize(value);
-        return rules.Count == 0 ? "未设置分流例外，全部按固定落地处理。" : "TCP 分流例外，按顺序首条命中：\n" + string.Join('\n', rules.OfType<JsonObject>().Select((r, i) => $"{i + 1}. {KindLabel(r.Text("Kind"))} {(r.Text("Kind")=="RuleSet"?r.Text("RuleSet.Name")+" v"+r.Text("RuleSet.Revision")+" · "+ServerRuleSets.Digest(r["RuleSet"]!.AsObject())[..8]+" · "+r["RuleSet"]!["Rules"]!.AsArray().Count+" 项":r.Text("Value"))} → {DecisionLabel(new(r.Text("Action"), r.Text("Target")), names)}")) + "\n未命中：所选落地。UDP 不应用这些例外，始终按原固定落地处理。域名按原始目标匹配，IP 网段只匹配 IP 目标，不新增 DNS 解析或嗅探。直连规则明确使用入口机出口；落地故障不会触发直连。规则集采用已审阅的固定版本，不在服务器后台拉取。";
+        return rules.Count == 0 ? "未设置分流例外，全部按固定落地处理。" : "应用协议分流例外，按顺序首条命中：\n" + string.Join('\n', rules.OfType<JsonObject>().Select((r, i) => $"{i + 1}. [{NetworkLabel(r)}] {KindLabel(r.Text("Kind"))} {(r.Text("Kind")=="RuleSet"?r.Text("RuleSet.Name")+" v"+r.Text("RuleSet.Revision")+" · "+ServerRuleSets.Digest(r["RuleSet"]!.AsObject())[..8]+" · "+r["RuleSet"]!["Rules"]!.AsArray().Count+" 项":r.Text("Value"))} → {DecisionLabel(new(r.Text("Action"), r.Text("Target")), names)}")) + "\n未命中：所选落地。未指定应用协议的旧规则仍仅匹配 TCP。UDP 按核心目标会话选路；只收到 IP 时不猜域名，继续匹配 IP 规则或默认去向，不新增反查或嗅探。直连使用入口 VPS 网络，失败不回退到其他去向。分类采用已审阅固定版本。";
     }
 }

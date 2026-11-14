@@ -37,6 +37,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         if (kernelRecovery && otherPending) throw new OperationException("存在其他未完成事务，不能混合内核恢复范围。请先核对其他事务。", true, "PendingTransaction");
         if (request.Kind == OperationKind.BbrKernel && (otherPending || BbrKernels.Pending(state) && request.Options.Text("Action") == "Install")) throw new OperationException("存在未完成事务，请先核对；不能开始另一轮内核安装。", true, "PendingTransaction");
         if (request.Kind != OperationKind.Recover && request.Kind != OperationKind.BbrKernel && context.HasPending()) throw new OperationException("存在未完成事务，请先核对并恢复。", true, "PendingTransaction", "先在实例页核对事务状态，再按明确范围恢复。");
+        if (request.Kind == OperationKind.Decommission && InboundCatalog.Items(plan["InboundModel"] as JsonObject ?? InboundCatalog.Empty(), "Certificates").Any(ManagedCertificates.Managed)) throw new OperationException("请先从证书自动化移除托管证书，清理续期任务及私人材料，再退役实例。");
         if (initial) { context.State["Engine"] = "dotnet-v1"; context.Save(); }
         context.State["LastTask"] = new JsonObject { ["Id"] = taskId, ["Kind"] = request.Kind.ToString(), ["Outcome"] = "Running", ["StartedAt"] = DateTimeOffset.UtcNow };
         context.Save();
@@ -45,6 +46,7 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
             context.StartSteps();
             switch (request.Kind)
             {
+                case OperationKind.ManagedCertificate: await ConfigureCertificate(context); break;
                 case OperationKind.Inbounds: await ConfigureInbounds(context); break;
                 case OperationKind.ConnectExisting: await Import(context); break;
                 case OperationKind.ResumeImport:

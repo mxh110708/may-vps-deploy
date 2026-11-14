@@ -33,7 +33,7 @@ components="${VPS_PARAM_COMPONENTS:-Protocols,Network,Firewall}"
 IFS=',' read -r -a component_list <<<"$components"
 ((${#component_list[@]} > 0))
 for component in "${component_list[@]}"; do
-  case "$component" in Protocols|RealityEntry|AnyTlsEntry|ShadowsocksLanding|TrustedTls|Network|Firewall|KomariAgent|KomariController|Cloudflared|TcpForwarding|UdpForwarding|Inbounds|WireGuardTunnel) ;; *) echo 'Unsupported transaction component.' >&2; exit 1 ;; esac
+  case "$component" in Protocols|RealityEntry|AnyTlsEntry|ShadowsocksLanding|TrustedTls|Network|Firewall|KomariAgent|KomariController|Cloudflared|TcpForwarding|UdpForwarding|Inbounds|WireGuardTunnel|Certificates) ;; *) echo 'Unsupported transaction component.' >&2; exit 1 ;; esac
 done
 scope_has(){ [[ ",$components," == *",$1,"* ]]; }
 if scope_has TcpForwarding; then python3 -c "$VPS_TCP_FORWARD_PROGRAM" verify "${VPS_PARAM_TCP_FORWARD_EXPECTED_HASH:?}"; fi
@@ -80,6 +80,12 @@ if scope_has Inbounds; then
   python3 -c "$VPS_INBOUND_PROGRAM" snapshot "$backup_dir"
   printf '%s' "$VPS_INBOUND_PROGRAM" > "$backup_dir/inbound-host.py"
   (cd "$backup_dir" && sha256sum inbound-host.py > inbound-program.sha256)
+fi
+
+if scope_has Certificates; then
+  python3 -c "$VPS_CERTIFICATE_PROGRAM" snapshot "$backup_dir"
+  printf '%s' "$VPS_CERTIFICATE_PROGRAM" > "$backup_dir/managed-certificates.py"
+  (cd "$backup_dir" && sha256sum managed-certificates.py > certificate-program.sha256)
 fi
 
 service_snapshot() {
@@ -132,6 +138,10 @@ if [[ "$quiesce_controller" == true ]]; then
 fi
 
 candidate_paths=()
+if scope_has Certificates; then
+  certificate_paths="$(python3 -c "$VPS_CERTIFICATE_PROGRAM" paths)"
+  if [[ -n "$certificate_paths" ]]; then mapfile -t certificate_path_list <<<"$certificate_paths"; candidate_paths+=("${certificate_path_list[@]}"); fi
+fi
 if scope_has WireGuardTunnel; then
   wg_paths="$(python3 -c "$VPS_WIREGUARD_PROGRAM" paths)"
   if [[ -n "$wg_paths" ]]; then mapfile -t wg_path_list <<<"$wg_paths"; candidate_paths+=("${wg_path_list[@]}"); fi
@@ -234,6 +244,11 @@ if scope_has WireGuardTunnel; then
   (cd "$backup_dir" && sha256sum -c wireguard-program.sha256 >/dev/null)
   python3 "$backup_dir/wireguard-host.py" rollback-check "$backup_dir"
 fi
+if scope_has Certificates; then
+  [[ -f "$backup_dir/managed-certificates.py" && ! -L "$backup_dir/managed-certificates.py" ]]
+  (cd "$backup_dir" && sha256sum -c certificate-program.sha256 >/dev/null)
+  python3 "$backup_dir/managed-certificates.py" rollback-check "$backup_dir"
+fi
 if scope_has Inbounds; then
   [[ -f "$backup_dir/inbound-host.py" && ! -L "$backup_dir/inbound-host.py" ]]
   (cd "$backup_dir" && sha256sum -c inbound-program.sha256 >/dev/null)
@@ -277,6 +292,7 @@ cleanup_role() {
 
 if scope_has WireGuardTunnel; then python3 "$backup_dir/wireguard-host.py" rollback-prepare "$backup_dir"; fi
 if scope_has Inbounds; then python3 "$backup_dir/inbound-host.py" rollback-prepare "$backup_dir"; fi
+if scope_has Certificates; then python3 "$backup_dir/managed-certificates.py" rollback-prepare "$backup_dir"; fi
 if scope_has TcpForwarding; then
   python3 "$backup_dir/tcp-forwarding.py" rollback-prepare "$backup_dir"
 fi
@@ -428,6 +444,7 @@ if scope_has KomariController; then restore_aux KomariController komari.service;
 if scope_has Cloudflared; then restore_aux Cloudflared cloudflared.service; fi
 if scope_has WireGuardTunnel; then python3 "$backup_dir/wireguard-host.py" rollback-complete "$backup_dir"; fi
 if scope_has Inbounds; then python3 "$backup_dir/inbound-host.py" rollback-complete "$backup_dir"; fi
+if scope_has Certificates; then python3 "$backup_dir/managed-certificates.py" rollback-complete "$backup_dir"; fi
 if scope_has TcpForwarding; then python3 "$backup_dir/tcp-forwarding.py" rollback-complete "$backup_dir"; fi
 if scope_has UdpForwarding; then python3 "$backup_dir/udp-forwarding.py" rollback-complete "$backup_dir"; fi
 date -u +%FT%TZ > "$backup_dir/rollback-executed"

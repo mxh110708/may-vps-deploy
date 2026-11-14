@@ -159,18 +159,24 @@ public sealed partial class MainWindow
             case "suite.server-rule-sets":
             case "suite.server-outbound":
             case "suite.server-stream":
+            case "suite.server-xhttp":
             case "suite.client-share":
             case "suite.client-roundtrip":
             case "suite.tcp-forward":
+            case "suite.forward-targets":
             case "suite.tcp-chain":
             case "suite.wireguard":
             case "suite.inbounds":
             case "suite.inbound-policy":
+            case "suite.application-udp":
             case "suite.hysteria":
             case "suite.tuic":
             case "suite.xhttp":
             case "suite.udp-forward":
             case "suite.resources":
+            case "suite.certificates":
+            case "suite.diagnostics":
+            case "suite.client-templates":
             case "suite.client-batch":
             case "suite.maintenance":
             case "suite.run":
@@ -202,18 +208,21 @@ public sealed partial class MainWindow
                         if (command is "suite.run" or "suite.client-groups") await Run("client_groups", ClientGroupRegression);
                         if (command is "suite.run" or "suite.source-sync") await Run("source_sync", SourceSyncRegression);
                         if (command is "suite.run" or "suite.server-rule-sets") await Run("server_rule_sets", ServerRuleSetRegression);
-                        if (command is "suite.run" or "suite.server-outbound" or "suite.server-stream") await Run("server_outbound", ServerOutboundRegression);
+                        if (command is "suite.run" or "suite.server-outbound" or "suite.server-stream" or "suite.server-xhttp") await Run("server_outbound", ServerOutboundRegression);
                         if (command is "suite.run" or "suite.client-share") await Run("client_share", ClientShareRegression);
                         if (command is "suite.run" or "suite.client-roundtrip") await Run("client_roundtrip", ClientRoundtripRegression);
-                        if (command is "suite.run" or "suite.tcp-forward") await Run("tcp_forward", TcpForwardRegression);
+                        if (command is "suite.run" or "suite.tcp-forward" or "suite.forward-targets") await Run("tcp_forward", TcpForwardRegression);
                         if (command is "suite.run" or "suite.wireguard") await Run("wireguard", WireGuardRegression);
                         if (command is "suite.run" or "suite.tcp-chain") await Run("tcp_chain", TcpChainRegression);
-                        if (command is "suite.run" or "suite.inbounds" or "suite.inbound-policy") await Run("inbounds", InboundRegression);
+                        if (command is "suite.run" or "suite.inbounds" or "suite.inbound-policy" or "suite.application-udp") await Run("inbounds", InboundRegression);
                         if (command is "suite.run" or "suite.hysteria") await Run("hysteria", HysteriaRegression);
                         if (command is "suite.run" or "suite.tuic") await Run("tuic", TuicRegression);
                         if (command is "suite.run" or "suite.xhttp") await Run("xhttp", XhttpRegression);
-                        if (command is "suite.run" or "suite.udp-forward") await Run("udp_forward", UdpForwardRegression);
+                        if (command is "suite.run" or "suite.udp-forward" or "suite.forward-targets") await Run("udp_forward", UdpForwardRegression);
                         if (command is "suite.run" or "suite.resources") await Run("resources", ResourceRegression);
+                        if (command is "suite.run" or "suite.certificates") await Run("certificates", CertificateRegression);
+                        if (command is "suite.run" or "suite.diagnostics") await Run("diagnostics", DiagnosticsRegression);
+                        if (command is "suite.run" or "suite.client-templates") await Run("client_templates", ClientTemplateRegression);
                         if (testActivations != 0 || testForegroundSamples != 0) throw new OperationException("界面回归获得前台焦点。");
                         testSuiteResult = result; testSuiteState = "passed";
                     }

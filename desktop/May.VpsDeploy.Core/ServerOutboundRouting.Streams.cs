@@ -9,7 +9,7 @@ public static partial class ServerOutboundRouting
 {
     public static bool IsStream(JsonNode? native) => native.Text("type") is "vless" or "trojan" or "anytls";
     public static string OutboundProtocol(JsonNode native) => native.Text("protocol") == "hysteria" ? "hysteria2" : native.Text("protocol", native.Text("type"));
-    public static string CapabilitySummary => "sing-box：Shadowsocks、Hysteria2、TUIC v5、VLESS TLS／Reality、Trojan TLS、AnyTLS；VLESS／Trojan 可保留受支持的 WS／gRPC。固定 Xray：Shadowsocks、Hysteria2、原始 TCP 的 VLESS TLS／Reality、Trojan TLS。端点使用明确 IP；不增加转接核心。";
+    public static string CapabilitySummary => "sing-box：Shadowsocks、Hysteria2、TUIC v5、VLESS TLS／Reality、Trojan TLS、AnyTLS；VLESS／Trojan 可保留受支持的 WS／gRPC。固定 Xray：Shadowsocks、Hysteria2、原始 TCP 的 VLESS TLS／Reality、Trojan TLS，以及 VLESS XHTTP（含独立下载）。XHTTP 下一跳仅供 Xray 入站使用。端点使用明确 IP；不增加转接核心。";
     public static string ConnectionLabel(JsonObject native) => (native.Text("type") switch
     {
         "vless" => "VLESS / " + (native.Flag("tls.reality.enabled") ? "Reality" : "TLS") + (native.Text("flow") == "" ? "" : " / Vision") + " / " + native.Text("transport.type", "TCP"),
@@ -19,6 +19,7 @@ public static partial class ServerOutboundRouting
     }) + (native.Flag("tls.ech.enabled") ? " / ECH" : "");
     public static string ConnectionSummary(JsonObject native)
     {
+        if (IsXhttp(native)) return XhttpConnectionSummary(native);
         var tls = native["tls"]!.AsObject(); var result = ConnectionLabel(native) + " · SNI " + tls.Text("server_name") + " · 验证身份";
         result += tls["reality"] != null ? " · 固定 Reality 公钥" : tls["certificate"] == null ? " · 系统信任" : " · 公开信任配置 " + ArchiveStore.Fingerprint(tls["certificate"]!)[..8];
         if (tls["utls"] != null) result += " · 指纹 " + tls.Text("utls.fingerprint");

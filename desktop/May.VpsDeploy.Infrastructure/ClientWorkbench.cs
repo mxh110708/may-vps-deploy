@@ -10,10 +10,11 @@ public sealed partial class ClientWorkbench(ArchiveStore store, IExternalToolRun
         var id = scheme.Text("Id"); if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-f0-9]{32}$")) throw new OperationException("方案标识无效。");
         return store.Paths.Resolve("private/client-schemes/" + id + ".dotnet.private.json");
     }
-    public void Save(JsonObject scheme) { using var held=ClientSourceSync.LockFile(SchemeFile(scheme));new ClientSourceSync(store).GuardPending("Scheme",scheme.Text("Id"));ClientSchemes.UpgradeLayout(scheme); store.WriteSecret(SchemeFile(scheme), scheme); }
+    public void Save(JsonObject scheme) { using var held=ClientSourceSync.LockFile(SchemeFile(scheme));ClientTemplates.GuardPending(store,"Scheme",scheme.Text("Id"));new ClientSourceSync(store).GuardPending("Scheme",scheme.Text("Id"));ClientSchemes.UpgradeLayout(scheme); store.WriteSecret(SchemeFile(scheme), scheme); }
     public void Delete(JsonObject scheme)
     {
         var file = SchemeFile(scheme);
+        ClientTemplates.GuardPending(store,"Scheme",scheme.Text("Id"));
         using var held=ClientSourceSync.LockFile(file);new ClientSourceSync(store).GuardPending("Scheme",scheme.Text("Id"));
         if (new CandidatePublisher(store.Paths).Pending().Any(p => ArchiveStore.ReadJson(p).Text("SchemeId") == scheme.Text("Id"))) throw new OperationException("此方案有未完成的导出事务，请先恢复。");
         var root = store.Paths.Resolve("private/client-candidates");
@@ -48,6 +49,7 @@ public sealed partial class ClientWorkbench(ArchiveStore store, IExternalToolRun
     }
     public async Task<JsonObject> BuildAsync(JsonObject scheme, CancellationToken cancellationToken)
     {
+        new ClientTemplateStore(store,tools,assets,python).Verify(scheme);
         new ClientSourceSync(store).GuardPending("Scheme",scheme.Text("Id"));
         new ClientNodeGroupStore(store).Verify(scheme);
         ClientSchemes.UpgradeLayout(scheme);
@@ -73,6 +75,7 @@ public sealed partial class ClientWorkbench(ArchiveStore store, IExternalToolRun
         if (result.ExitCode != 0 && result.Error.TrimStart().StartsWith("ClientOutputDefaultRemoved:", StringComparison.Ordinal)) throw new OperationException("输出处理会移除保留的自定义组的显式默认节点，请先调整该组默认值后再生成。", code: "ClientOutputDefaultRemoved");
         result.RequireSuccess("候选生成失败，请检查节点、连接关系与分组。");
         var candidate = new JsonObject { ["SchemeId"] = scheme.Text("Id"), ["OutputClients"] = scheme.Text("OutputClients", "Both"), ["Sources"] = sources, ["SpecFingerprint"] = ArchiveStore.Fingerprint(specification), ["ValidationStatus"] = "Pending", ["Targets"] = new JsonObject() };
+        if(scheme["TemplateReference"]!=null)candidate["TemplateSnapshot"]=new JsonObject { ["Id"]=scheme.Text("Id"),["OutputClients"]=scheme.Text("OutputClients","Both"),["TemplateReference"]=scheme["TemplateReference"]!.DeepClone(),["Clash"]=scheme.Text("Clash"),["SingBox"]=scheme.Text("SingBox") };
         candidate["ManagedSources"] = origins;
         candidate["NodeGroupSnapshot"] = new JsonObject { ["Nodes"] = scheme["Nodes"]!.DeepClone(), ["GroupReferences"] = scheme["GroupReferences"]?.DeepClone() ?? new JsonArray() };
         candidate["ForwardedSources"] = new JsonArray(specification["manual_nodes"]!.AsArray().OfType<JsonObject>().Where(n => n["ForwardedOrigin"] != null).Select(n => n["ForwardedOrigin"]!.DeepClone()).ToArray());
@@ -83,6 +86,7 @@ public sealed partial class ClientWorkbench(ArchiveStore store, IExternalToolRun
     }
     private void VerifySources(JsonObject candidate)
     {
+        if(candidate["TemplateSnapshot"] is JsonObject template)new ClientTemplateStore(store,tools,assets,python).Verify(template);
         ClientSourceBarrier.RequireAvailable(store,"Scheme",candidate.Text("SchemeId"));
         if (candidate["NodeGroupSnapshot"] is JsonObject groups) new ClientNodeGroupStore(store).Verify(groups);
         foreach (var source in candidate["Sources"]!.AsObject()) if (ClientSchemes.SourceFingerprint(source.Key) != source.Value!.ToString()) throw new OperationException("来源已变化，请重新生成候选。");
@@ -93,6 +97,7 @@ public sealed partial class ClientWorkbench(ArchiveStore store, IExternalToolRun
     }
     private void VerifyCandidate(JsonObject scheme, JsonObject candidate)
     {
+        new ClientTemplateStore(store,tools,assets,python).Verify(scheme);
         ClientSourceBarrier.RequireAvailable(store,"Scheme",scheme.Text("Id"));
         new ClientNodeGroupStore(store).Verify(scheme);
         if (candidate.Text("OutputClients", "Both") != scheme.Text("OutputClients", "Both") || candidate.Text("SpecFingerprint") != ArchiveStore.Fingerprint(ClientSchemes.Specification(scheme))) throw new OperationException("方案已变化，请重新生成候选。");

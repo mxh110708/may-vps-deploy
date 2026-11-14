@@ -22,7 +22,7 @@ public static partial class ServerOutboundRouting
     public static JsonArray HopReferences(JsonNode? value)
     {
         if (value == null) return new();
-        if (value is not JsonArray list || list.Count > MaximumAdditionalHops) throw new OperationException("每个入站最多添加 7 个 TCP 落地。");
+        if (value is not JsonArray list || list.Count > MaximumAdditionalHops) throw new OperationException("每个入站最多添加 7 个附加落地。");
         var ids = new HashSet<string>(StringComparer.Ordinal); var sources = new HashSet<string>(StringComparer.Ordinal); var result = new JsonArray();
         foreach (var item in list)
         {
@@ -56,7 +56,9 @@ public static partial class ServerOutboundRouting
     }
     private static JsonObject ToOutbound(string role, JsonObject native, string tag)
     {
+        RequireNativeEngine(native, role == "RealityEntry");
         if (role == "AnyTlsEntry") { var result = native.DeepClone().AsObject(); result["tag"] = tag; return result; }
+        if (IsXhttp(native)) return XrayXhttpNextHop(native, tag);
         if (IsQuic(native)) return XrayHysteria(native, tag);
         if (IsStream(native)) return XrayStream(native, tag);
         return new JsonObject { ["tag"] = tag, ["protocol"] = "shadowsocks", ["settings"] = new JsonObject { ["servers"] = new JsonArray(new JsonObject { ["address"] = native.Text("server"), ["port"] = native.Number("server_port"), ["method"] = native.Text("method"), ["password"] = native.Text("password") }) } };
@@ -80,12 +82,12 @@ public static partial class ServerOutboundRouting
     private static JsonArray AddNamedHops(string role, JsonArray outputs, IReadOnlyList<ServerOutboundHop>? hops, JsonObject defaultNode, JsonObject plan)
     {
         if (hops == null) return new();
-        if (hops.Count > MaximumAdditionalHops) throw new OperationException("每个入站最多添加 7 个 TCP 落地。");
+        if (hops.Count > MaximumAdditionalHops) throw new OperationException("每个入站最多添加 7 个附加落地。");
         var ids = new HashSet<string>(StringComparer.Ordinal); var connections = new HashSet<string>(StringComparer.Ordinal) { Connection(defaultNode) }; var metadata = new JsonArray();
         foreach (var hop in hops)
         {
             if (!ids.Add(HopId(hop.Id)) || !connections.Add(Connection(hop.Node))) throw new OperationException("落地标识或连接参数重复，请复用已有落地。");
-            var native = NextHop(hop.Node); var endpoint = Address(native.Text("server")); var expected = Address(hop.ExpectedAddress);
+            var native = NextHop(hop.Node); RejectOwnNextHop(plan, native); var endpoint = Address(native.Text("server")); var expected = Address(hop.ExpectedAddress);
             if (new[] { plan.Text("Server.IPv4"), plan.Text("Server.IPv6") }.Any(s => IPAddress.TryParse(s, out var address) && address.Equals(endpoint))) throw new OperationException("附加落地不能指回当前实例。");
             var outbound = ToOutbound(role, native, HopTag(hop.Id)); outputs.Add(outbound);
             metadata.Add(new JsonObject { ["Version"] = 1, ["Id"] = hop.Id, ["Name"] = hop.Node.Text("name"), ["Endpoint"] = new IPEndPoint(endpoint, native.Number("server_port")).ToString(), ["ExpectedAddress"] = expected.ToString(), ["EgressFamily"] = Family(hop.ExpectedAddress), ["OutboundFingerprint"] = ArchiveStore.Fingerprint(outbound), ["SchemeId"] = hop.Source?.Text("SchemeId"), ["NodeId"] = hop.Source?.Text("NodeId"), ["NodeFingerprint"] = ArchiveStore.Fingerprint(hop.Node) });
@@ -101,7 +103,7 @@ public static partial class ServerOutboundRouting
         foreach (var outbound in actual) outputs.Remove(outbound);
     }
     private static string RulesSummary(JsonObject metadata) => ServerDestinationRules.Summary(metadata["DestinationRules"], MetadataHops(metadata).OfType<JsonObject>().ToDictionary(h => h.Text("Id"), h => h.Text("Name"), StringComparer.Ordinal));
-    private static string NamedHopsSummary(JsonObject metadata) => string.Join('\n', MetadataHops(metadata).OfType<JsonObject>().Select(h => "附加 TCP 落地：" + h.Text("Name") + " · " + h.Text("Endpoint") + " · 预期出口 " + h.Text("ExpectedAddress") + "（" + h.Text("EgressFamily") + "）" + (h.Text("Connection") == "" ? "" : " · " + h.Text("Connection"))));
+    private static string NamedHopsSummary(JsonObject metadata) => string.Join('\n', MetadataHops(metadata).OfType<JsonObject>().Select(h => "附加落地：" + h.Text("Name") + " · " + h.Text("Endpoint") + " · 预期出口 " + h.Text("ExpectedAddress") + "（" + h.Text("EgressFamily") + "）" + (h.Text("Connection") == "" ? "" : " · " + h.Text("Connection"))));
     public static JsonArray ProbeRequests(string role, JsonObject configuration, JsonObject plan)
     {
         VerifyManaged(role, configuration, plan); var result = new JsonArray(); var metadata = plan.At("ServerOutbound." + role) as JsonObject;
@@ -109,16 +111,28 @@ public static partial class ServerOutboundRouting
         {
             var outbound = configuration["outbounds"]!.AsArray().OfType<JsonObject>().Single(o => o.Text("tag") == HopTag(hop.Text("Id")));
             result.Add(new JsonObject { ["Id"] = hop.Text("Id"), ["ExpectedAddress"] = hop.Text("ExpectedAddress"), ["Outbound"] = outbound.DeepClone() });
+            if (IsXrayXhttp(outbound) || ServerUdpRouting.Required(ServerDestinationRules.Normalize(metadata?["DestinationRules"]), hop.Text("Id"), "default")) result[^1]!["UdpRequired"] = true;
+        }
+        var rules = ServerDestinationRules.Normalize(metadata?["DestinationRules"]);
+        if (ServerDestinationRules.HasUdp(rules) || IsXrayXhttp(configuration["outbounds"]!.AsArray().SingleOrDefault(o => o!.Text("tag") == Tag)))
+        {
+            var outputs = configuration["outbounds"]!.AsArray().OfType<JsonObject>();
+            result.Add(new JsonObject { ["Id"] = "default", ["ExpectedAddress"] = metadata!.Text("ExpectedAddress"), ["Outbound"] = outputs.Single(o => o.Text("tag") == Tag).DeepClone(), ["UdpRequired"] = true });
+            if (rules.Any(r => ServerDestinationRules.Applies(r!, "udp") && r!.Text("Action") == "Direct"))
+                result.Add(new JsonObject { ["Id"] = "direct", ["ExpectedAddress"] = "", ["Family"] = plan.Flag((role == "RealityEntry" ? "Reality" : "AnyTls") + ".ForceIpv4Egress", true) ? "IPv4" : metadata.Text("EgressFamily"), ["Outbound"] = outputs.Single(o => o.Text("tag") == "direct").DeepClone(), ["UdpRequired"] = true });
         }
         return result;
     }
     public static void RequireHopValidation(JsonArray requests, JsonObject result)
     {
         var items = (result["Items"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? [];
-        if (result.Text("Status") != "Passed" || items.Length != requests.Count || requests.OfType<JsonObject>().Any(request => items.Count(item => item.Text("Id") == request.Text("Id") && item.Text("Status") == "Passed" && item.Text("From") == "EntryServer" && item.Text("Network") == "TCP" && ProbeProtocolMatches(request["Outbound"]!, item) && IPAddress.TryParse(item.Text("Egress"), out var egress) && egress.Equals(Address(request.Text("ExpectedAddress")))) != 1)) throw new OperationException("附加落地的协议、TLS 或实际出口验收未全部完成，恢复本次范围。", code: "ServerHopValidationIncomplete");
+        if (result.Text("Status") != "Passed" || items.Length != requests.Count || requests.OfType<JsonObject>().Any(request => items.Count(item => item.Text("Id") == request.Text("Id") && item.Text("Status") == "Passed" && item.Text("From") == "EntryServer" && item.Text("Network") == "TCP" && ProbeProtocolMatches(request["Outbound"]!, item) && IPAddress.TryParse(item.Text("Egress"), out var egress) && (request.Text("ExpectedAddress") != "" ? egress.Equals(Address(request.Text("ExpectedAddress"))) : request.Text("Id") == "direct" && (egress.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4") == request.Text("Family"))) != 1)) throw new OperationException("附加落地的协议、TLS 或实际出口验收未全部完成，恢复本次范围。", code: "ServerHopValidationIncomplete");
+        foreach (var request in requests.OfType<JsonObject>().Where(r => r.Flag("UdpRequired")))
+            ServerUdpRouting.RequireProof(items.Single(i => i.Text("Id") == request.Text("Id"))["UdpValidation"], request.Text("Family", request.Text("ExpectedAddress").Contains(':') ? "IPv6" : "IPv4"));
     }
     private static bool ProbeProtocolMatches(JsonNode outbound, JsonObject item)
     {
+        if (IsXrayXhttp(outbound)) return XhttpProofMatches(outbound, item);
         var protocol = OutboundProtocol(outbound);
         if (protocol is "vless" or "trojan" or "anytls") return item.Text("Transport") == "TCP" && item.Text("ValidatedProtocol") == protocol;
         return protocol is not ("hysteria2" or "tuic") || item.Text("Transport") == "QUIC" && item.Text("ValidatedProtocol") == protocol;

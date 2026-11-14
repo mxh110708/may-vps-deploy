@@ -60,7 +60,9 @@ public sealed partial class MainWindow
                             fields.Children.Add(Text("只使用所选节点的原生 SS／SS2022 UDP 参数，凭据不发送到转发服务器。不支持额外链式、插件或 UDP-over-TCP；不以 TCP 成功代替 UDP，不代表 QUIC 等其他业务已验收。", 13, true));
                         }
                         var query = Field("查询域名（应返回有效记录）", check, "QueryName"); query.Tag = "UdpForward.Query." + index;
-                        fields.Children.Add(query); fields.Children.Add(Choice("查询类型", check, "QueryType", [("A", "A / IPv4 记录"), ("AAAA", "AAAA / IPv6 记录")]));
+                        query.TextChanged += (_, _) => UpdateForwardGroupHealth(rule);
+                        var queryType = Choice("查询类型", check, "QueryType", [("A", "A / IPv4 记录"), ("AAAA", "AAAA / IPv6 记录")]); queryType.SelectionChanged += (_, _) => UpdateForwardGroupHealth(rule);
+                        fields.Children.Add(query); fields.Children.Add(queryType);
                     }
                     else fields.Children.Add(Text("目标须将收到的数据报原样返回；每次验收使用新的随机内容。普通 UDP 服务可能不提供此能力。", 13, true));
                 }
@@ -69,11 +71,11 @@ public sealed partial class MainWindow
                     var type = validation.Text("Type");
                     rule["Validation"] = type == "Echo" ? new JsonObject { ["Type"] = "Echo" } : new JsonObject { ["Type"] = type, ["QueryName"] = type == "Shadowsocks" ? "example.com" : "", ["QueryType"] = "A" };
                     if (type == "Shadowsocks") { var check = rule["Validation"]!.AsObject(); check["ResolverAddress"] = "1.1.1.1"; check["ResolverPort"] = 53; check["SchemeId"] = ""; check["NodeId"] = ""; check["NodeFingerprint"] = ""; }
-                    RefreshValidation();
+                    UpdateForwardGroupHealth(rule); RefreshValidation();
                 };
                 RefreshValidation();
                 var remove = Action("移除此规则", () => { rules.RemoveAt(index); Refresh(); return Task.CompletedTask; }); remove.Tag = "UdpForward.Remove." + i;
-                rows.Children.Add(Card(Column(Text("UDP 转发 " + (i + 1), 17), name, enabled, Fields(family, port), Fields(target, targetPort), Fields(timeout, maximum), sources, kind, fields, remove)));
+                rows.Children.Add(Card(Column(Text("UDP 转发 " + (i + 1), 17), name, enabled, Fields(family, port), Fields(target, targetPort), Fields(timeout, maximum), sources, kind, fields, ForwardGroupEditor(rule, "UdpForward", i, InstanceState(relative)["UdpForwarding"] as JsonObject), remove)));
             }
             if (add != null) add.IsEnabled = rules.Count < TcpForwarding.MaximumRules;
         }

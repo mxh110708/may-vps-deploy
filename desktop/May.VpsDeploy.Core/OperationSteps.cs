@@ -4,12 +4,19 @@ namespace May.VpsDeploy.Core;
 
 public static class OperationSteps
 {
-    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate or OperationKind.ServerOutbound or OperationKind.TcpForward or OperationKind.UdpForward or OperationKind.MayMonitor or OperationKind.TcpChain or OperationKind.Inbounds or OperationKind.WireGuardTunnel;
+    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate or OperationKind.ServerOutbound or OperationKind.TcpForward or OperationKind.UdpForward or OperationKind.MayMonitor or OperationKind.TcpChain or OperationKind.Inbounds or OperationKind.WireGuardTunnel or OperationKind.ManagedCertificate;
     public static IReadOnlyList<PlannedTaskStep> Create(OperationRequest request, JsonObject plan)
     {
         var steps = new List<PlannedTaskStep>();
         if (request.Kind == OperationKind.CheckComponentUpdate) return [new("component-release-check", "查询并核对官方稳定版", "锁定具体发行资产与摘要，只查询版本，不安装软件。")];
         void Add(string id, string title, string description) => steps.Add(new(id, title, description));
+        if (request.Kind == OperationKind.ManagedCertificate)
+        {
+            Add("certificate-preflight", "核对证书与入站归属", "核对固定策略、当前证书和管理连接。");
+            if(request.Options.Text("Action")!="Check") { Add("certificate-backup", "建立证书范围恢复点", "保存本证书、续期任务与相关入站，启用限时回退。"); Add("certificate-apply", "应用证书操作", "DNS-01 申请或维护，核验证书、私钥及共享使用者。"); }
+            Add("certificate-validation", "核验与保存证书状态", "核对部署材料、相关运行服务及管理连接。");
+            if(request.Options.Text("Action")!="Check") Add("certificate-commit", "提交证书事务", "确认同一事务后解除回退任务。"); return steps;
+        }
         if (request.Kind == OperationKind.Inbounds)
         {
             Add("inbound-preflight", "核对资源引用与实际布局", "核对管理连接、用户/证书/出站引用、端口和明确影响范围。");

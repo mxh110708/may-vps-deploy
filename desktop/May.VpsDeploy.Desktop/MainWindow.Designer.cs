@@ -50,7 +50,7 @@ public sealed partial class MainWindow
     {
         if (scheme == null)
         {
-            page.Children.Add(Card(Trailing(SectionHeading("连接配置设计", Symbol.Link, "点亮需要的配置目标，设计节点、连接与分组。"), Action("创建方案", CreateScheme, true))));
+            page.Children.Add(Card(Trailing(SectionHeading("连接配置设计", Symbol.Link, "点亮需要的配置目标，设计节点、连接与分组。"), Row(Action("客户端模板库", ClientTemplateLibrary), Action("创建方案", CreateScheme, true)))));
             var saved = workbench.List().ToArray();
             if (saved.Length == 0) page.Children.Add(Card(Column(Text("从一个方案开始", 18), Text("选择生成目标，添加节点，再直观地组织入口与落地。", 14, true))));
             else
@@ -108,7 +108,9 @@ public sealed partial class MainWindow
         page.Children.Add(SectionHeading("生成哪些配置", Symbol.Document, "点亮 sing-box 或 Clash；两个都点亮就分别生成两份配置。")); page.Children.Add(OutputSelection(selected, DirtyScheme));
         if (!HasOutput(selected)) page.Children.Add(Text("请至少点亮一个生成目标。", 14, true));
         var read = Action("读取现有配置", ReadClientSources); read.IsEnabled = HasOutput(selected);
-        page.Children.Add(Card(Column(SectionHeading("基础配置", Symbol.Library, selected.Text("SourceMode") == "ExistingAuthority" ? "沿用读取来源中的规则、DNS 及未编辑的高级配置。" : "使用内置基础模板，自动生成节点和业务分组。"), Row(read, Action("恢复内置模板", () => { var template = ClientSchemes.New(paths); selected["Clash"] = template["Clash"]!.DeepClone(); selected["SingBox"] = template["SingBox"]!.DeepClone(); selected["SourceMode"] = "GenericTemplate"; selected.Remove("SourceFingerprints"); DirtyScheme(); return Task.CompletedTask; })), Text("sing-box 配置可用于兼容的下游客户端，包括 May Route。", 14, true))));
+        page.Children.Add(Card(Column(SectionHeading("基础配置", Symbol.Library, selected.Text("SourceMode") == "ExistingAuthority" ? "沿用读取来源中的规则、DNS 及未编辑的高级配置。" : "使用内置基础模板，自动生成节点和业务分组。"), Row(read, Action("恢复内置模板", () => { var template = ClientSchemes.New(paths); selected["Clash"] = template["Clash"]!.DeepClone(); selected["SingBox"] = template["SingBox"]!.DeepClone(); selected["SourceMode"] = "GenericTemplate"; selected.Remove("SourceFingerprints"); selected.Remove("TemplateReference"); DirtyScheme(); return Task.CompletedTask; })), Text("sing-box 配置可用于兼容的下游客户端，包括 May Route。", 14, true))));
+        var templates = Action("客户端模板库", ClientTemplateLibrary); templates.Tag = "ClientTemplates.Open";
+        page.Children.Add(Card(Column(Text("版本化客户端模板", 17), Text(selected["TemplateReference"] == null ? "保存当前方案后，可审阅并应用模板版本；模板不包含固定节点或订阅。" : "已固定模板修订 " + selected.Number("TemplateReference.Revision") + "；更新和恢复均需审阅。", 14, true), templates)));
     }
     private void DesignerNodes()
     {

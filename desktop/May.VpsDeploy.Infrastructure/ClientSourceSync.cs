@@ -217,6 +217,7 @@ public sealed class ClientSourceSync(ArchiveStore store, IClientSourceFetch? fet
         try
         {
             locks.Add(LockFile(SourceFile(reviewed.SourceId)));
+            foreach(var item in reviewed.Items)ClientTemplates.GuardPending(store,item.Kind,item.Id);
             foreach(var entityFile in reviewed.Items.Select(i=>EntityFile(i.Kind,i.Id)).Order(StringComparer.Ordinal))locks.Add(LockFile(entityFile));
             var current=Preview(reviewed.SourceId,reviewed.SchemeIds,reviewed.GroupIds);
             if(!reviewed.Ready||!current.Ready||current.Revision!=reviewed.Revision||current.Fingerprint!=reviewed.Fingerprint)throw new OperationException("批量预览有冲突、来源或方案已变化，请重新预览。");

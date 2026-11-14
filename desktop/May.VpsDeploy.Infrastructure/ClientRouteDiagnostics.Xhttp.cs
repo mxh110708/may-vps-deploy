@@ -20,11 +20,11 @@ public sealed partial class ClientRouteDiagnostics
         var targets = endpoints ?? ClientDiagnosticEndpoints.Default;
         foreach (var uri in new[] { targets.Ipv4, targets.Ipv6, targets.Any }) if (uri.Scheme != "https" && !(uri.Scheme == "http" && uri.IsLoopback)) throw new OperationException("诊断目标必须使用 HTTPS。");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); deadline.CancelAfter(TimeSpan.FromSeconds(75)); var ct = deadline.Token;
-        var stages = new JsonArray(); var report = new JsonObject { ["Fingerprint"] = route.Fingerprint, ["At"] = DateTimeOffset.UtcNow.ToString("O"), ["Path"] = route.Label, ["Status"] = "Incomplete", ["Stages"] = stages, ["Scope"] = "固定 Mihomo 经所选 VLESS/XHTTP 入口检查 HTTPS 与有限 UDP DNS；不代表公网 CDN、任意高级模式、吞吐或当前客户端选择。" };
-        var clock = Stopwatch.StartNew(); string? work = null; Process? process = null; Task? output = null, error = null;
+        var stages = new JsonArray(); var report = new JsonObject { ["Fingerprint"] = route.Fingerprint, ["At"] = DateTimeOffset.UtcNow.ToString("O"), ["Path"] = route.Label, ["Status"] = "Incomplete", ["Stages"] = stages, ["Profile"] = Profile(targets, "mihomo", true), ["Scope"] = "固定 Mihomo 经所选 VLESS/XHTTP 入口检查 HTTPS 与有限 UDP DNS；不代表公网 CDN、任意高级模式、吞吐或当前客户端选择。" };
+        var clock = Stopwatch.StartNew(); var activeStage = "Core"; string? work = null; Process? process = null; Task? output = null, error = null;
         async Task<bool> Stage(string id, string label, Func<CancellationToken, Task> action)
         {
-            progress.Report(label); var watch = Stopwatch.StartNew(); using var part = CancellationTokenSource.CreateLinkedTokenSource(ct); part.CancelAfter(TimeSpan.FromSeconds(12));
+            activeStage = id; progress.Report(label); var watch = Stopwatch.StartNew(); using var part = CancellationTokenSource.CreateLinkedTokenSource(ct); part.CancelAfter(TimeSpan.FromSeconds(12));
             try { await action(part.Token); stages.Add(new JsonObject { ["Id"] = id, ["Label"] = label, ["Status"] = "Passed", ["Milliseconds"] = watch.ElapsedMilliseconds }); return true; }
             catch (Exception e) when (e is SocketException or HttpRequestException or IOException or AuthenticationException or OperationException || e is OperationCanceledException && !cancellationToken.IsCancellationRequested)
             { stages.Add(new JsonObject { ["Id"] = id, ["Label"] = label, ["Status"] = "Failed", ["Milliseconds"] = watch.ElapsedMilliseconds, ["Detail"] = e is OperationCanceledException ? "此阶段超时。" : e is OperationException safe ? safe.Message : "所选协议、传输安全或目标不可用；未采用直连兜底。" }); return false; }
@@ -42,7 +42,7 @@ public sealed partial class ClientRouteDiagnostics
                 if (certificateAuthority != null) { options.CertificateChainPolicy = new X509ChainPolicy { TrustMode = X509ChainTrustMode.CustomRootTrust, RevocationMode = X509RevocationMode.NoCheck }; options.CertificateChainPolicy.CustomTrustStore.Add(certificateAuthority); }
                 await tls.AuthenticateAsClientAsync(options, t); if (tls.NegotiatedApplicationProtocol != expected) throw new OperationException("入口未协商到所选 HTTP 版本。");
             })) return report;
-            progress.Report("准备固定 Mihomo 隔离核心"); var binary = assets.ResolveCore("mihomo"); await ProtocolValidation.VerifyVersion(assets, tools, "mihomo", binary, ct);
+            activeStage = "Core"; progress.Report("准备固定 Mihomo 隔离核心"); var binary = assets.ResolveCore("mihomo"); await ProtocolValidation.VerifyVersion(assets, tools, "mihomo", binary, ct);
             work = SafePath.Resolve(privateDirectory, "xhttp-diagnostic-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(work);
             using var incoming = new TcpListener(IPAddress.Loopback, 0); using var controller = new TcpListener(IPAddress.Loopback, 0); incoming.Start(); controller.Start();
             var port = ((IPEndPoint)incoming.LocalEndpoint).Port; var controlPort = ((IPEndPoint)controller.LocalEndpoint).Port; var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
@@ -62,11 +62,15 @@ public sealed partial class ClientRouteDiagnostics
                     catch (HttpRequestException) { await Task.Delay(100, t); }
                 }
             })) return report;
-            if (!await Stage("EntryHttps", "VLESS / " + VlessXhttp.Security(route.Entry) + " / XHTTP h2 实际 HTTPS 出口", async t => report["EntryEgress"] = await Egress(port, route.Entry, targets, t))) return report;
+            if (!await Stage("EntryHttps", "VLESS / " + VlessXhttp.Security(route.Entry) + " / XHTTP HTTP/" + version + " 实际 HTTPS 出口", async t => report["EntryEgress"] = await Egress(port, route.Entry, targets, t))) return report;
             if (!await Stage("EntryUdp", "经 XHTTP 的应用 UDP DNS 回程", async t => report["UdpValidation"] = await ClientProxyUdp.ProbeAsync(port, ClientTopology.EgressFamily(route.Entry) == "IPv6" ? targets.Udp6 : targets.Udp4, t))) return report;
             report["ValidatedProtocol"] = "vless"; report["Transport"] = "xhttp"; report["TransportSecurity"] = VlessXhttp.Security(route.Entry); report["TransportAlpn"] = VlessXhttp.Alpn(version); report["ClientCore"] = "mihomo"; report["Status"] = "Reachable"; return report;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && route.PreservePartialOnCancel)
+        { stages.Add(new JsonObject { ["Id"] = activeStage, ["Status"] = "Cancelled", ["Label"] = "已取消的阶段" }); report["Status"] = "Cancelled"; return report; }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { report["Status"] = "TimedOut"; return report; }
+        catch (Exception e) when (e is OperationException or IOException or SocketException or AuthenticationException)
+        { stages.Add(new JsonObject { ["Id"] = "Core", ["Label"] = "隔离核心准备", ["Status"] = "Failed", ["Detail"] = "固定核心、配置或隔离监听未就绪。" }); report["Status"] = "Failed"; return report; }
         finally
         {
             report["ElapsedMilliseconds"] = clock.ElapsedMilliseconds; if (report.Text("Status") == "Incomplete" && stages.Any(s => s!.Text("Status") == "Failed")) report["Status"] = "Failed";

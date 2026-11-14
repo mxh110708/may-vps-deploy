@@ -205,9 +205,15 @@ class InboundOwnership(unittest.TestCase):
             with self.assertRaises(ValueError):M.Host(self.root,wrong).wait_ready(binding)
     def test_hopping_checks_alternative_udp_before_writes(self):
         value=self.quic();base=value['Bindings'][0]['Port']
-        with socket.socket(type=socket.SOCK_DGRAM) as other:
+        # Keep the primary reserved until the alternate is chosen; a released
+        # ephemeral port may otherwise be returned by the OS a second time.
+        with socket.socket(type=socket.SOCK_DGRAM) as primary, socket.socket(type=socket.SOCK_DGRAM) as other:
+            if hasattr(socket,'SO_EXCLUSIVEADDRUSE'):primary.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
+            primary.bind(('127.0.0.1',base))
             other.bind(('127.0.0.1',0));alternative=other.getsockname()[1]
+            self.assertNotEqual(base,alternative)
             value['Model']['Inbounds'][0]['Options']={'HopPorts':str(base)+','+str(alternative),'HopIntervalSeconds':30}
+            primary.close()
             with self.assertRaises(OSError):self.host.preflight(value,[A])
         self.assertFalse(self.host.path(M.REGISTRY).exists())
     def test_hopping_bounds_and_conflicts_are_rechecked_remotely(self):

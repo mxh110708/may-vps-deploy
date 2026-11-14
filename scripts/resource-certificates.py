@@ -73,14 +73,32 @@ def certificate_bytes(root, key):
         if inbound['streamSettings'].get('security') != 'tls':
             raise ValueError('Consumer does not use a local TLS certificate.')
         material, = inbound['streamSettings']['tlsSettings']['certificates']
+        if 'certificateFile' in material:
+            return managed_public_certificate(root, identifier, material['certificateFile'])
         material = material['certificate']
     else:
+        if 'certificate_path' in inbound['tls']:
+            return managed_public_certificate(root, identifier, inbound['tls']['certificate_path'])
         material = inbound['tls']['certificate']
     if isinstance(material, list) and all(isinstance(line, str) for line in material):
         material = '\n'.join(material)
     if not isinstance(material, str) or 'PRIVATE KEY' in material or len(material) > 1024 * 1024:
         raise ValueError('Invalid public certificate material.')
     return material.encode('ascii')
+
+
+def managed_public_certificate(root, identifier, credential):
+    if credential != '/run/credentials/may-inbound-' + identifier + '.service/certificate.pem':
+        raise ValueError('Unowned public certificate path.')
+    registry = json.loads(read_regular(root, '/etc/may-inbounds/model.json'))
+    consumer, = [i for i in registry['Model']['Inbounds'] if i['Id'] == identifier]
+    certificate, = [c for c in registry['Model']['Certificates'] if c['Id'] == consumer['CertificateId'] and isinstance(c.get('Managed'), dict)]
+    if not re.fullmatch('[a-f0-9]{32}', certificate['Id']):
+        raise ValueError('Invalid certificate resource identity.')
+    data = read_regular(root, '/etc/may-certificates/' + certificate['Id'] + '/fullchain.pem')
+    if b'PRIVATE KEY' in data:
+        raise ValueError('Invalid public certificate material.')
+    return data
 
 
 def command(run, arguments, pem):

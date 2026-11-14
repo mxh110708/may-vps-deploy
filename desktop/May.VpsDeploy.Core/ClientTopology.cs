@@ -8,6 +8,7 @@ public sealed record ClientRegion(string Name, IReadOnlyList<JsonObject> Entries
 public sealed record ClientDiagnosticRoute(JsonObject Entry, JsonObject? Landing, string Fingerprint)
 {
     public bool RequiresApplicationUdp { get; init; }
+    public bool PreservePartialOnCancel { get; init; }
     public JsonObject Exit => Landing ?? Entry;
     public string Label => Entry.Text("name") + (Landing == null ? " → 网站" : " → " + Landing.Text("name") + " → 网站");
 }
@@ -28,7 +29,7 @@ public static class ClientTopology
         return IPAddress.TryParse(host, out var address) ? address.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4" : "域名 · 由 DNS 解析";
     }
     public static string EgressFamily(JsonObject node) => node.Text("Egress.Family", node.Text("ManagedOrigin.EgressFamily", "Unknown"));
-    public static string OriginLabel(JsonObject node) => node["InboundOrigin"] != null ? "独立入站 · 按用户验收" : node["ForwardedOrigin"] != null ? "受管转发 · " + (node.Text("ForwardedOrigin.UdpRuleId") != "" ? "TCP + 独立 UDP" : node.Text("sing_box.type") == "shadowsocks" ? "仅 TCP" : "TCP · 协议 UDP 封装") : node["ManagedOrigin"] != null ? "受管实例" + (node.Text("ServerRoute.Name") == "" ? "" : " · 默认服务器落地 " + node.Text("ServerRoute.Name") + (node.At("ServerRoute.DestinationRules") is JsonArray rules && rules.Count > 0 ? " · 存在服务器 TCP 分流例外" : "") + (node.Number("ServerRoute.AdditionalHopCount") > 0 ? " · 附加落地 " + node.Number("ServerRoute.AdditionalHopCount") + " 个" : "")) : node.Text("Source.Kind") == "Subscription" ? "外部订阅来源" : node.Text("Source.Kind") == "ShareLink" ? "外部分享链接" : "外部 / 手动节点";
+    public static string OriginLabel(JsonObject node) => node["InboundOrigin"] != null ? "独立入站 · 按用户验收" : node["ForwardedOrigin"] != null ? "受管转发 · " + (node.Text("ForwardedOrigin.UdpRuleId") != "" ? "TCP + 独立 UDP" : node.Text("sing_box.type") == "shadowsocks" ? "仅 TCP" : "TCP · 协议 UDP 封装") : node["ManagedOrigin"] != null ? "受管实例" + (node.Text("ServerRoute.Name") == "" ? "" : " · 默认服务器落地 " + node.Text("ServerRoute.Name") + (node.At("ServerRoute.DestinationRules") is JsonArray rules && rules.Count > 0 ? " · 存在服务器分流例外" : "") + (node.Number("ServerRoute.AdditionalHopCount") > 0 ? " · 附加落地 " + node.Number("ServerRoute.AdditionalHopCount") + " 个" : "")) : node.Text("Source.Kind") == "Subscription" ? "外部订阅来源" : node.Text("Source.Kind") == "ShareLink" ? "外部分享链接" : "外部 / 手动节点";
 
     public static ClientDiagnosticRoute DiagnosticRoute(JsonObject scheme, string entryName, string? landingName = null)
     {

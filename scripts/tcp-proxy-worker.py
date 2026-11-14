@@ -29,9 +29,9 @@ def header(version, source, destination):
     return b'\r\n\r\n\x00\r\nQUIT\n' + bytes((0x21, 0x11 if src.version == 4 else 0x21)) + struct.pack('!H', len(payload)) + payload
 
 
-def run(listeners, target, port, version, *, idle=60, connection_idle=300, stop=None):
+def run(listeners, target, port, version, *, idle=60, connection_idle=300, stop=None, target_selector=None):
     ip = ipaddress.ip_address(target)
-    if version not in ('v1', 'v2') or ip.is_unspecified or ip.is_multicast or not 1 <= port <= 65535:
+    if version not in (None, 'v1', 'v2') or ip.is_unspecified or ip.is_multicast or not 1 <= port <= 65535:
         raise ValueError('Invalid fixed TCP target.')
     selector = selectors.DefaultSelector()
     pairs = set()
@@ -79,10 +79,13 @@ def run(listeners, target, port, version, *, idle=60, connection_idle=300, stop=
                         client.close(); continue
                     upstream = None
                     try:
-                        prefix = header(version, source, client.getsockname())
-                        upstream = socket.socket(socket.AF_INET6 if ip.version == 6 else socket.AF_INET, socket.SOCK_STREAM)
+                        selected = target_selector() if target_selector is not None else (str(ip), port)
+                        if selected is None: client.close(); continue
+                        selected_ip = ipaddress.ip_address(selected[0])
+                        prefix = header(version, source, client.getsockname()) if version is not None else b''
+                        upstream = socket.socket(socket.AF_INET6 if selected_ip.version == 6 else socket.AF_INET, socket.SOCK_STREAM)
                         upstream.setblocking(False); client.setblocking(False)
-                        code = upstream.connect_ex((str(ip), port))
+                        code = upstream.connect_ex((str(selected_ip), selected[1]))
                         if code not in (0, errno.EINPROGRESS, errno.EWOULDBLOCK, errno.EALREADY, 10035):
                             raise OSError(code, 'TCP target refused')
                         pair = Pair(); pair.sockets = (client, upstream)

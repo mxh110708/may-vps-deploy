@@ -27,10 +27,11 @@ public sealed partial class WorkflowEngine
     }
     private async Task<JsonObject?> ValidateAdditionalHops(Context c, string role)
     {
-        if (c.Plan.At("ServerOutbound." + role + ".AdditionalHops") is not JsonArray hops || hops.Count == 0) return null;
+        if (c.Plan.At("ServerOutbound." + role) is not JsonObject) return null;
         var observed = await c.Run("server-outbound-read.sh", new() { ["ROLE"] = role }, marker: "SERVER_OUTBOUND_READ");
         var configuration = JsonNode.Parse(RemoteAssets.Marker(observed.Output, "SERVER_CONFIG"))!.AsObject();
         var requests = ServerOutboundRouting.ProbeRequests(role, configuration, c.Plan);
+        if (requests.Count == 0) return null;
         var response = await c.Run("server-hop-probe.sh", new() { ["ROLE"] = role, ["PROBES_JSON"] = requests.ToJsonString() }, timeout: 240, marker: "SERVER_HOPS_PASSED");
         var result = JsonNode.Parse(RemoteAssets.Marker(response.Output, "HOP_VALIDATION"))!.AsObject(); ServerOutboundRouting.RequireHopValidation(requests, result);
         c.State.Put("ServerOutboundValidation." + role + ".AdditionalHops", result.DeepClone()); return result;
@@ -49,6 +50,7 @@ public sealed partial class WorkflowEngine
             observed = await c.Run("server-outbound-read.sh", new() { ["ROLE"] = role }, marker: "SERVER_OUTBOUND_READ");
             if (RemoteAssets.Marker(observed.Output, "SERVER_CONFIG_SHA256") != c.Request.Options.Text("ConfigSha256")) throw new OperationException("远端配置与审阅时的归档不同，未建立变更或覆盖服务器。", code: "ServerOutboundRemoteDrift");
             var actual = JsonNode.Parse(RemoteAssets.Marker(observed.Output, "SERVER_CONFIG"))!.AsObject();
+            if (preview.Configuration["outbounds"]!.AsArray().Any(ServerOutboundRouting.IsXrayXhttp)) ServerOutboundRouting.RequireXhttpRuntime(preview.Configuration, RemoteAssets.Marker(observed.Output, "SERVER_CORE_VERSION"));
             // Validate the observed configuration, never replace it with a regenerated template.
             if (ArchiveStore.Fingerprint(actual) != ArchiveStore.Fingerprint(ArchiveStore.ReadJson(c.File(ServerOutboundRouting.ConfigRelative(role))))) throw new OperationException("远端配置与归档不一致。");
         });

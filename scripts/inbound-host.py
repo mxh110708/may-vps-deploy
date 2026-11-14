@@ -95,9 +95,10 @@ def listener_ports(item, binding):
     return sorted(ports)
 
 
-def unit(identifier, core):
+def unit(identifier, core, certificate=None):
     argument='-config' if core['Engine']=='xray' else '-c'
-    return HEADER + '[Unit]\nDescription=May inbound ' + identity(identifier) + '\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nLoadCredential=config.json:' + config_path(identifier) + '\nExecStart=' + core_path(core) + ' run '+argument+' %d/config.json\nRestart=on-failure\nRestartSec=3s\nDynamicUser=yes\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=yes\nRestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nTimeoutStopSec=15s\n\n[Install]\nWantedBy=multi-user.target\n'
+    extra = '' if certificate is None else ''.join('LoadCredential=' + leaf + ':/etc/may-certificates/' + identity(certificate) + '/' + source + '\n' for leaf, source in (('certificate.pem','fullchain.pem'),('certificate.key','privkey.pem')))
+    return HEADER + '[Unit]\nDescription=May inbound ' + identity(identifier) + '\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nLoadCredential=config.json:' + config_path(identifier) + '\n' + extra + 'ExecStart=' + core_path(core) + ' run '+argument+' %d/config.json\nRestart=on-failure\nRestartSec=3s\nDynamicUser=yes\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=yes\nRestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nTimeoutStopSec=15s\n\n[Install]\nWantedBy=multi-user.target\n'
 
 
 
@@ -155,7 +156,7 @@ def validate_xhttp(model, item, source):
         raise ValueError('XHTTP users or flow differ.')
     if security=='TLS':
         tls=stream['tlsSettings']
-        if options['Reality']!={} or not item['CertificateId'] or set(tls)!={'serverName','minVersion','maxVersion','alpn','certificates'} or tls['serverName']!=options['ServerName'] or tls['minVersion']!='1.3' or tls['maxVersion']!='1.3' or tls['alpn']!=[{'1.1':'http/1.1','2':'h2','3':'h3'}[version]] or not isinstance(tls['certificates'],list) or len(tls['certificates'])!=1 or set(tls['certificates'][0])!={'certificate','key'}:
+        if options['Reality']!={} or not item['CertificateId'] or set(tls)!={'serverName','minVersion','maxVersion','alpn','certificates'} or tls['serverName']!=options['ServerName'] or tls['minVersion']!='1.3' or tls['maxVersion']!='1.3' or tls['alpn']!=[{'1.1':'http/1.1','2':'h2','3':'h3'}[version]] or not isinstance(tls['certificates'],list) or len(tls['certificates'])!=1 or set(tls['certificates'][0]) not in ({'certificate','key'}, {'certificateFile','keyFile'}):
             raise ValueError('XHTTP TLS must retain inline identity and h2.')
     else:
         r=options['Reality']; actual=stream['realitySettings']
@@ -202,8 +203,11 @@ def validate_inbound_policy(model, item, config):
             raise ValueError('Policy domain is not canonical.')
         return value
     for rule in policy['Rules']:
-        if not isinstance(rule, dict) or not {'Kind','Value','Action'} <= set(rule) or set(rule)-{'Kind','Value','Action','Target','RuleSet'} or rule['Action'] not in ('NextHop','Direct','Reject') or not isinstance(rule['Value'], str):
+        if not isinstance(rule, dict) or not {'Kind','Value','Action'} <= set(rule) or set(rule)-{'Kind','Value','Action','Target','RuleSet','Network'} or rule['Action'] not in ('NextHop','Direct','Reject') or not isinstance(rule['Value'], str):
             raise ValueError('Invalid policy rule fields.')
+        network = rule.get('Network', 'TCP')
+        if not isinstance(network, str) or network not in ('TCP', 'UDP', 'Both'):
+            raise ValueError('Invalid application network.')
         target = rule.get('Target', '')
         if not isinstance(target, str) or 'Target' in rule and not target:
             raise ValueError('Policy target must be an explicit resource identity.')
@@ -213,10 +217,11 @@ def validate_inbound_policy(model, item, config):
                 raise ValueError('Policy references a removed or invalid outbound.')
             if target not in targets:
                 targets.append(target)
-        key = (rule['Kind'], rule['Value'])
-        if key in seen:
-            raise ValueError('Duplicate policy rule.')
-        seen.add(key)
+        for transport in ('TCP', 'UDP') if network == 'Both' else (network,):
+            key = (rule['Kind'], rule['Value'], transport)
+            if key in seen:
+                raise ValueError('Duplicate application network rule.')
+            seen.add(key)
         if rule['Kind'] == 'RuleSet':
             snapshot = rule.get('RuleSet')
             if not isinstance(snapshot, dict) or set(snapshot) != {'Schema','Id','Name','Revision','Rules'} or type(snapshot['Schema']) is not int or snapshot['Schema'] != 1 or snapshot['Id'] != rule['Value'] or not re.fullmatch('[a-z0-9][a-z0-9-]{0,63}', snapshot['Id']) or not isinstance(snapshot['Name'], str) or not 1 <= len(snapshot['Name']) <= 100 or any(ord(c)<32 for c in snapshot['Name']) or not isinstance(snapshot['Revision'], str) or not re.fullmatch(r'(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})(?:-[a-zA-Z0-9.-]{1,24})?', snapshot['Revision']) or not isinstance(snapshot['Rules'], list) or not 1 <= len(snapshot['Rules']) <= 2048:
@@ -228,7 +233,7 @@ def validate_inbound_policy(model, item, config):
             if 'RuleSet' in rule:
                 raise ValueError('Unexpected policy snapshot.')
             terms = [term({'Kind':rule['Kind'], 'Value':rule['Value']})]
-        expanded.extend(dict(t, Action=rule['Action'], Target=target) for t in terms)
+        expanded.extend(dict(t, Action=rule['Action'], Target=target, Network=network) for t in terms)
         if len(expanded) > 4096:
             raise ValueError('Policy expansion exceeds its bound.')
     if len(targets) > 8 or any(i not in resources for i in targets):
@@ -266,13 +271,14 @@ def validate_inbound_policy(model, item, config):
                 native['ip_cidr' if kind=='Cidr' else 'domain']=[value]
             if action!='Reject':
                 native['outbound']=output
+        native['network'] = ('tcp,udp' if xray else ['tcp','udp']) if rule['Network']=='Both' else rule['Network'].lower()
         rules.append(native)
     family = resources[item['OutboundId']]['Family']
     if family != 'Auto':
         rules.append({'type':'field', 'ip':['::/0' if family=='IPv4' else '0.0.0.0/0'], 'outboundTag':'block'} if xray else {'ip_version':6 if family=='IPv4' else 4, 'action':'reject'})
     actual = config['routing' if xray else 'route']
     if actual != ({'domainStrategy':'AsIs','rules':rules} if xray else {'final':'egress','rules':rules}):
-        raise ValueError('Native policy order, targets, TCP scope or fallback differs.')
+        raise ValueError('Native policy order, targets, application network or fallback differs.')
 
 
 def normalize(payload):
@@ -303,6 +309,11 @@ def normalize(payload):
         ports.update(hops)
         if set(config) != ({'log','inbounds','outbounds','routing'} if reality else {'log', 'dns', 'inbounds', 'outbounds', 'route'}) or len(config['inbounds']) != 1:
             raise ValueError('Only one independently scoped inbound is supported per service.')
+        for target in config['outbounds']:
+            if reality and target.get('streamSettings',{}).get('network')=='xhttp':
+                if selected_core(payload, identifier)['Version'] != '26.3.27': raise ValueError('Unsupported Xray pin for XHTTP next hop.')
+                validate_xray_xhttp(target)
+            if not reality and target.get('transport',{}).get('type')=='xhttp': raise ValueError('XHTTP next hop requires pinned Xray.')
         source = config['inbounds'][0]
         if item['Protocol'] not in ('Reality', 'AnyTLS', 'Shadowsocks2022','Hysteria2','TuicV5','VLESS') or source.get('protocol' if reality else 'type') != {'Reality':'vless','VLESS':'vless','AnyTLS':'anytls','Shadowsocks2022':'shadowsocks','Hysteria2':'hysteria2','TuicV5':'tuic'}[item['Protocol']] or source.get('tag') != identifier or source.get('listen') != binding['Address'] or source.get('port' if reality else 'listen_port') != binding['Port'] or item['Enabled'] != binding['Enabled'] or binding['Udp'] != (item['Protocol'] in ('Shadowsocks2022','Hysteria2','TuicV5') or item['Protocol']=='VLESS' and item['Options']['Transport'].get('HTTPVersion','2')=='3'):
             raise ValueError('Rendered inbound differs from the catalogue.')
@@ -312,6 +323,13 @@ def normalize(payload):
             defaults = [o for o in config['outbounds'] if o.get('tag')=='egress']
             if len(defaults)!=1 or target['Kind']=='Direct' and defaults[0].get('protocol')!='freedom' or target['Kind']=='Proxy' and defaults[0].get('protocol') not in ('shadowsocks','hysteria','vless','trojan'):
                 raise ValueError('XHTTP default outbound differs from its catalogue resource.')
+        certificate = next((c for c in model['Certificates'] if c['Id']==item.get('CertificateId') and 'Managed' in c), None)
+        if certificate:
+            expected='/run/credentials/'+unit_name(identifier)+'/'
+            tls=source.get('streamSettings',{}).get('tlsSettings',{}).get('certificates',[{}])[0] if reality else source.get('tls',{})
+            actual=(tls.get('certificateFile'),tls.get('keyFile')) if reality else (tls.get('certificate_path'),tls.get('key_path'))
+            if actual!=(expected+'certificate.pem',expected+'certificate.key'): raise ValueError('Managed certificate credential path differs.')
+        elif reality and item['Protocol']=='VLESS' and set(source['streamSettings'].get('tlsSettings',{}).get('certificates',[{}])[0])=={'certificateFile','keyFile'}: raise ValueError('Unowned file certificate.')
         validate_inbound_policy(model, item, config)
         if reality and ('Reality' not in payload['Core'] or selected_core(payload,identifier)['Engine']!='xray'): raise ValueError('Reality requires its pinned Xray core.')
     return payload
@@ -323,8 +341,20 @@ def material(payload):
     for binding in payload['Bindings']:
         identifier = binding['Id']
         result[config_path(identifier)] = base64.b64decode(payload['Configurations'][identifier])
-        result[unit_path(identifier)] = unit(identifier, selected_core(payload,identifier)).encode()
+        item = next(i for i in payload['Model']['Inbounds'] if i['Id']==identifier)
+        managed = next((c for c in payload['Model']['Certificates'] if c['Id']==item.get('CertificateId') and 'Managed' in c), None)
+        result[unit_path(identifier)] = unit(identifier, selected_core(payload,identifier), managed['Id'] if managed else None).encode()
     return result
+
+
+def check_material(payload, identifier, data):
+    item=next(i for i in payload['Model']['Inbounds'] if i['Id']==identifier)
+    certificate=next((c for c in payload['Model']['Certificates'] if c['Id']==item.get('CertificateId') and 'Managed' in c),None)
+    if not certificate: return data
+    value=json.loads(data);source=value['inbounds'][0];directory='/etc/may-certificates/'+identity(certificate['Id'])+'/'
+    if item['Protocol']=='VLESS': source['streamSettings']['tlsSettings']['certificates']=[{'certificateFile':directory+'fullchain.pem','keyFile':directory+'privkey.pem'}]
+    else: source['tls'].update(certificate_path=directory+'fullchain.pem',key_path=directory+'privkey.pem')
+    return encoded(value).encode()
 
 
 class Host:
@@ -504,7 +534,7 @@ class Host:
         for identifier in affected:
             if config_path(identifier) not in files: continue
             with tempfile.NamedTemporaryFile(mode='wb',prefix='may-inbound-check-',suffix='.json') as candidate:
-                os.chmod(candidate.name,0o600); candidate.write(files[config_path(identifier)]); candidate.flush()
+                os.chmod(candidate.name,0o600); candidate.write(check_material(payload, identifier, files[config_path(identifier)])); candidate.flush()
                 core=selected_core(payload,identifier)
                 arguments=['run','-test','-config',candidate.name] if core['Engine']=='xray' else ['check','-c',candidate.name]
                 self.command([str(self.path(core_path(core))),*arguments])

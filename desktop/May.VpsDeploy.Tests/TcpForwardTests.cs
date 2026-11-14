@@ -97,6 +97,7 @@ internal sealed partial class BoundaryTests
     {
         public FakeRemote Inner { get; } = new(); public JsonObject? Configuration { get; private set; } private JsonObject? original;
         public bool ReadDrift { get; set; } public bool LoseApplyAck { get; set; } public int ApplyCalls { get; private set; }
+        public bool[] GroupHealthy { get; set; } = [true, true]; public bool GroupProofDrift { get; set; } public int GroupProbeCalls { get; private set; }
         public string LastUdpPorts { get; private set; } = "";
         public async Task<IRemoteSession> OpenAsync(SshEndpoint endpoint, IUserInteraction user, CancellationToken token) { await Inner.OpenAsync(endpoint, user, token); return this; }
         public Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken token) => Inner.RunAsync(command, timeout, token);
@@ -108,6 +109,18 @@ internal sealed partial class BoundaryTests
             if (asset == "nftables-apply.sh") LastUdpPorts = Parameter("UDP_PORTS");
             if (asset == transport + "-forward-read.sh")
             {
+                if (Parameter("PROBE_GROUPS") == "true")
+                {
+                    Inner.Commands.Add(asset + ":groups"); GroupProbeCalls++;
+                    var hash = Configuration == null ? "Absent" : ArchiveStore.Fingerprint(Configuration);
+                    if (Parameter("EXPECTED_HASH") != hash) throw new OperationException("synthetic stale group probe source");
+                    var probe = new JsonObject { ["ConfigurationHash"] = hash, ["Groups"] = new JsonArray(TcpForwarding.Rules(Configuration).Where(r => r.Flag("Enabled") && r["TargetGroup"] is JsonObject).Select(r => (JsonNode?)new JsonObject
+                    {
+                        ["RuleId"] = r.Text("Id"), ["RuleFingerprint"] = GroupProofDrift ? new string('f', 64) : ForwardTargetGroups.Fingerprint(r), ["HealthType"] = r.Text("TargetGroup.Health.Type"),
+                        ["Targets"] = new JsonArray(ForwardTargetGroups.Targets(r).Select((target, index) => (JsonNode?)new JsonObject { ["Index"] = index, ["Address"] = target.Address, ["Port"] = target.Port, ["Passed"] = GroupHealthy[index] }).ToArray())
+                    }).ToArray()) };
+                    return new(0, "VPSDEPLOY_FORWARD_GROUP_PROBE_B64=" + Convert.ToBase64String(Encoding.UTF8.GetBytes(probe.ToJsonString())) + "\nVPSDEPLOY_" + marker + "_READ\n", "");
+                }
                 Inner.Commands.Add(asset); var state = new JsonObject { ["Hash"] = ReadDrift ? new string('f', 64) : Configuration == null ? "Absent" : ArchiveStore.Fingerprint(Configuration), ["Configuration"] = Configuration?.DeepClone() };
                 return new(0, "VPSDEPLOY_" + marker + "_STATE_B64=" + Convert.ToBase64String(Encoding.UTF8.GetBytes(state.ToJsonString())) + "\nVPSDEPLOY_" + marker + "_READ\n", "");
             }

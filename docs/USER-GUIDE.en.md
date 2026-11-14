@@ -1,8 +1,22 @@
 # Desktop walkthrough
 
+Included [round 37](ROUTE-DIAGNOSTICS-ROUND-37-2026-11-14.zh-CN.md) adds a Route Diagnostics page. Choose a saved scheme and explicit entry/optional landing, review the targets and run a finite check. Segment connectivity, protocol/egress, monitor context and historical quality remain separate. Cancellation retains completed stages; no server or OS proxy configuration is changed.
+
+Included [round 36](FORWARD-TARGET-GROUPS-ROUND-36-2026-11-13.zh-CN.md) adds explicit primary/standby groups to independent TCP and UDP forwarding. Set the standby endpoint, failure confirmations and stable recovery interval, review, and accept both targets plus the actual listener. UDP groups require DNS/echo response health; proxy TCP health checks reachability only.
+
+Included [round 35](SERVER-XHTTP-ROUND-35-2026-11-13.zh-CN.md) adds native VLESS XHTTP next hops for Xray inbounds, including separate download identities and advanced settings. Review both endpoints and verify HTTPS, application UDP and scoped recovery. Original sing-box inbounds reject this next hop; available in v0.9.42.
+
+Included [round 34](APPLICATION-UDP-ROUND-34-2026-11-13.zh-CN.md) adds an application-network selector to fixed-role and independent-inbound rules, plus TCP/UDP trial selection. UDP acceptance requires actual datagrams; absent domain metadata follows IP rules or the default. Updating the application does not alter deployed policies.
+
 Round 30 adds both adjacent WireGuard segments, independently mapped listener/target ports and explicit TCP PROXY v1/v2 output, included in v0.9.41. Accept each tunnel first, then select both segments in the chain editor. Consult the [scope and recovery guide](FORWARDING-WIREGUARD-ROUND-30-2026-11-02.zh-CN.md); branch documentation does not prove installed capabilities.
 
-Baseline: May VPS Deploy v0.9.41 on Windows amd64. The Chinese [full manual](USER-GUIDE.zh-CN.md) covers all current desktop workflows; this guide gives the installation, acceptance and recovery sequence in English.
+Baseline: May VPS Deploy v0.9.42 on Windows amd64. The Chinese [full manual](USER-GUIDE.zh-CN.md) covers all current desktop workflows; this guide gives the installation, acceptance and recovery sequence in English.
+
+## Versioned client templates (round 38, v0.9.42)
+
+Open Client Templates from Configuration Design. Select a revision, create a new revision or fork a template, then edit its client scope, ports, logging, default mode and optional LAN listener. Advanced editors hold the complete DNS/routing base and regional/business layout. Saving a revision never changes existing schemes.
+
+Save the destination scheme before reviewing application differences. Applying preserves nodes, credentials, subscriptions and export paths, and requires regeneration and selected-core validation before export. Use Application Records and Restore to review a scoped return to the previous base. Later base edits or changed original source files block restoration. See the [full template guide](CLIENT-TEMPLATES-ROUND-38-2026-11-14.zh-CN.md) for limits and recovery.
 
 ## Independent-inbound policies
 
@@ -129,3 +143,7 @@ Open Operations Resources from the sidebar or the selected instance. Filter by a
 Open Configuration Design, then the node page and the batch manager. Filter, select and review all affected members before applying to the draft. Filtering retains hidden selections and shows their count. Save the scheme and regenerate/revalidate after changes. Referenced upstreams, active defaults and partially selected reusable groups block unsafe changes.
 
 On the export page, native merge fragments preserve the selected client format and all disclosed node/region dependencies, including advanced fields that cannot fit in sharing URIs. They do not contain complete DNS, routing or listener settings. Copy only after reviewing the extra dependencies, or save a new YAML/JSON file; merge and validate in the destination client. Full configuration export separately reviews added/removed/changed counts and DNS/routing/listener/settings changes without displaying authentication values. Canceling writes nothing; changed sources, candidates or destinations require review again. See the [detailed guide](CLIENT-BATCH-OUTPUT-ROUND-32-2026-11-03.zh-CN.md).
+
+## Managed certificates (round 33, unreleased)
+
+Use the instance certificate automation entry to request a Cloudflare DNS-01 certificate, then bind it to independent inbounds. A separate server timer checks renewal, validates the new material and restarts only enabled consumers. Disabling renewal keeps the current certificate; removal requires every reference to be detached. See the [lifecycle and recovery guide](CERTIFICATES-ROUND-33-2026-11-12.zh-CN.md). No real public-CA issuance is claimed by the isolated acceptance tests.

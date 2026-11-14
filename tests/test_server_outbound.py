@@ -39,6 +39,11 @@ class ServerOutboundScripts(unittest.TestCase):
         binary.parent.mkdir(parents=True)
         binary.write_bytes('''#!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == version ]]; then
+  [[ "${TEST_VERSION_INVALID:-false}" != true ]] || exit 1
+  printf '%s\\n' 'Xray 26.3.27 synthetic'
+  exit 0
+fi
 touch "$TEST_ROOT/core-checked"
 if [[ "${TEST_INVALID:-false}" == true ]]; then echo 'sensitive-native-output' >&2; exit 1; fi
 python3 -m json.tool "${@: -1}" >/dev/null
@@ -131,6 +136,10 @@ systemctl(){
         marker = re.search(r'^VPSDEPLOY_SERVER_CONFIG_SHA256_B64=(.*)$', result.stdout, re.M)
         self.assertEqual(base64.b64decode(marker[1]).decode(), hashlib.sha256(self.original).hexdigest())
         self.assertEqual(self.config.read_bytes(), self.original)
+        self.assertFalse((self.root / 'core-checked').exists())
+        if self.role == 'RealityEntry':
+            version = re.search(r'^VPSDEPLOY_SERVER_CORE_VERSION_B64=(.*)$', result.stdout, re.M)
+            self.assertEqual(base64.b64decode(version[1]).decode(), 'Xray 26.3.27 synthetic')
         self.no_restart()
 
     def test_linked_file_is_rejected(self):
@@ -147,6 +156,13 @@ systemctl(){
 
 class RealityOutboundScripts(ServerOutboundScripts):
     role = 'RealityEntry'
+
+    def test_failed_version_read_does_not_mutate(self):
+        result = self.run_asset('server-outbound-read.sh', TEST_VERSION_INVALID='true')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.config.read_bytes(), self.original)
+        self.assertFalse((self.root / 'core-checked').exists())
+        self.no_restart()
 
     def test_config_group_follows_service_user(self):
         result = self.run_asset('server-outbound-apply.sh', TEST_USER='nobody')

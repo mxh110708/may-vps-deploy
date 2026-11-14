@@ -11,6 +11,7 @@ public static class ClientSourceBarrier
     public static void RequireNoPending(ArchiveStore store)=>Check(store,null,null);
     private static void Check(ArchiveStore store,string? kind,string? id)
     {
+        ClientTemplates.GuardPending(store,kind,id);
         var root=store.Paths.Resolve("private/client-source-sync/transactions");if(!Directory.Exists(root))return;
         SafePath.CheckTree(root);
         foreach(var file in Directory.EnumerateFiles(root,"*.dotnet.private.json"))

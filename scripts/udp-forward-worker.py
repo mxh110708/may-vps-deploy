@@ -10,13 +10,14 @@ import time
 
 
 class Relay:
-    def __init__(self, listeners, target, timeout=120, maximum=256, idle=60, allowed=('127.0.0.0/8', '::1/128')):
+    def __init__(self, listeners, target, timeout=120, maximum=256, idle=60, allowed=('127.0.0.0/8', '::1/128'), target_selector=None, target_healthy=None, stop=None):
         address = ipaddress.ip_address(target[0])
         if address.is_unspecified or address.is_multicast or '%' in str(address) or getattr(address, 'ipv4_mapped', None):
             raise ValueError('A unicast UDP target is required.')
         if not 1 <= target[1] <= 65535 or not 0 < timeout <= 600 or not 1 <= maximum <= 1024 or not 0 < idle <= 60:
             raise ValueError('UDP worker limits are invalid.')
         self.target, self.timeout, self.maximum, self.idle = target, timeout, maximum, idle
+        self.target_selector, self.target_healthy, self.stop = target_selector, target_healthy, stop
         self.family = socket.AF_INET if address.version == 4 else socket.AF_INET6
         self.allowed = tuple(ipaddress.ip_network(source, strict=False) for source in allowed)
         if not 1 <= len(self.allowed) <= 32:
@@ -44,16 +45,17 @@ class Relay:
     def run(self):
         sweep_at = 0
         try:
-            while True:
+            while self.stop is None or not self.stop.is_set():
                 now = time.monotonic()
                 if self.sessions and now >= sweep_at:
                     for key, session in list(self.sessions.items()):
-                        if now - session['activity'] >= self.timeout:
+                        if now - session['activity'] >= self.timeout or self.target_healthy is not None and not self.target_healthy(session['target']):
                             self.close_session(key)
                     sweep_at = now + min(1, self.timeout)
                 if not self.sessions and now - self.empty_since >= self.idle:
                     return
                 wait = max(0, sweep_at - now) if self.sessions else self.idle - (now - self.empty_since)
+                if self.stop is not None: wait = min(.1, wait)
                 for event, _ in self.selector.select(wait):
                     if event.data is None:
                         listener = event.fileobj
@@ -84,18 +86,20 @@ class Relay:
                                     continue
                                 if len(self.sessions) >= self.maximum:
                                     continue  # Preserve established sessions.
+                                selected = self.target_selector() if self.target_selector is not None else self.target
+                                if selected is None: continue
                                 try:
-                                    upstream = socket.socket(self.family, socket.SOCK_DGRAM)
+                                    upstream = socket.socket(socket.AF_INET6 if ipaddress.ip_address(selected[0]).version == 6 else socket.AF_INET, socket.SOCK_DGRAM)
                                 except OSError:
                                     continue
                                 try:
                                     upstream.setblocking(False)
-                                    upstream.connect(self.target)
+                                    upstream.connect(selected)
                                     self.selector.register(upstream, selectors.EVENT_READ, key)
                                 except OSError:
                                     upstream.close()
                                     continue
-                                self.sessions[key] = {'socket': upstream, 'listener': listener, 'peer': peer, 'control': reply_control, 'activity': time.monotonic()}
+                                self.sessions[key] = {'socket': upstream, 'listener': listener, 'peer': peer, 'control': reply_control, 'activity': time.monotonic(), 'target': selected}
                             session = self.sessions[key]
                             try:
                                 session['socket'].send(payload)  # Empty datagrams are valid.

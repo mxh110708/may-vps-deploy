@@ -29,3 +29,8 @@ for name, value in [('SERVER_CONFIG', json.dumps(config, separators=(',', ':')))
     print('VPSDEPLOY_' + name + '_B64=' + base64.b64encode(value.encode()).decode())
 PY
 printf '%s\n' 'VPSDEPLOY_SERVER_OUTBOUND_READ'
+if [[ "$VPS_PARAM_ROLE" == RealityEntry ]]; then
+  version_line="$("$binary" version)"
+  version_line="${version_line%%$'\n'*}"
+  printf 'VPSDEPLOY_SERVER_CORE_VERSION_B64=%s\n' "$(printf '%s' "$version_line" | base64 -w0)"
+fi

@@ -49,10 +49,15 @@ public sealed partial class WorkflowEngine
                 if (observed["Configuration"] == null || ArchiveStore.Fingerprint(observed["Configuration"]!) != ArchiveStore.Fingerprint(preview.Configuration)) throw new OperationException("实际转发配置与审阅结果不符。");
                 if (tcpForwarding == null) throw new OperationException("实际转发验收适配器不可用，未提交变更。");
                 var result = await tcpForwarding.ValidateAsync(c.Plan, preview.Configuration, c.File("tcp-forward-validation/" + c.Id), new InlineProgress<string>(m => c.Report("实际 TCP 转发验收", m)), c.Cancellation);
+                if (TcpForwarding.Rules(preview.Configuration).Any(r => r.Flag("Enabled") && r["TargetGroup"] is JsonObject))
+                {
+                    var probe = await c.Run("tcp-forward-read.sh", new() { ["PROBE_GROUPS"] = "true", ["EXPECTED_HASH"] = observed.Text("Hash") }, false, 180, "TCP_FORWARD_READ");
+                    ForwardTargetGroups.AttachProof(preview.Configuration, result, JsonNode.Parse(RemoteAssets.Marker(probe.Output, "FORWARD_GROUP_PROBE"))!.AsObject(), observed.Text("Hash"), action == "Apply");
+                }
                 TcpForwarding.RequireValidation(preview.Configuration, result);
                 var after = await Read();
                 if (after.Text("Hash") != observed.Text("Hash")) throw new OperationException("验收期间转发配置发生变化，未提交。");
-                c.State["TcpForwarding"] = new JsonObject { ["RemoteHash"] = observed.Text("Hash"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(preview.Configuration), ["TemplateCurrent"] = observed.Flag("TemplateCurrent", true), ["Validation"] = result.DeepClone(), ["At"] = DateTimeOffset.UtcNow };
+                c.State["TcpForwarding"] = new JsonObject { ["RemoteHash"] = observed.Text("Hash"), ["ConfigurationFingerprint"] = ArchiveStore.Fingerprint(preview.Configuration), ["TemplateCurrent"] = observed.Flag("TemplateCurrent", true), ["TargetGroups"] = after["TargetGroups"]?.DeepClone(), ["Validation"] = result.DeepClone(), ["At"] = DateTimeOffset.UtcNow };
                 if (!observed.Flag("TemplateCurrent", true)) { c.Warnings = true; c.Report("TCP 转发需要更新", "旧单元已按归档核对并保持原样，请重新审阅保存转发规则以应用当前启动依赖。"); }
             }
             await VerifyManagement(c); c.Save();

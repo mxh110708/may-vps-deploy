@@ -5,11 +5,12 @@ using May.VpsDeploy.Core;
 
 namespace May.VpsDeploy.Infrastructure;
 
-public interface IValidationAssets { string ResolveCore(string name); string DataDirectory { get; } string ExpectedVersion(string name) => ""; bool Supports(string name,string capability) => false; }
+public interface IValidationAssets { string ResolveCore(string name); string DataDirectory { get; } string ExpectedVersion(string name) => ""; string DiagnosticIdentity(string name) => ExpectedVersion(name); bool Supports(string name,string capability) => false; }
 public sealed class ValidationAssets(AppPaths paths, string platform) : IValidationAssets
 {
     public string DataDirectory => paths.Resolve("vendor/test-cores/" + platform + "/mihomo-geodata");
     public string ExpectedVersion(string name) => ArchiveStore.ReadJson(paths.Resolve("vendor/test-cores/" + platform + "/checksums.json"))["artifacts"]!.AsArray().Single(n => n!.Text("core") == name)!.Text("version");
+    public string DiagnosticIdentity(string name) => ArchiveStore.Fingerprint(ArchiveStore.ReadJson(paths.Resolve("vendor/test-cores/" + platform + "/checksums.json"))["artifacts"]!.AsArray().Single(n => n!.Text("core") == name)!);
     public bool Supports(string name,string capability)
     {
         var item=ArchiveStore.ReadJson(paths.Resolve("vendor/test-cores/"+platform+"/checksums.json"))["artifacts"]!.AsArray().SingleOrDefault(n=>n!.Text("core")==name);

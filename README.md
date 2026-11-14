@@ -1,5 +1,9 @@
 # May VPS Deploy
 
+v0.9.42 汇总主线第33至38轮：托管证书、应用 UDP 分类、XHTTP 服务器下一跳、转发主备、线路诊断及客户端模板库。各项验收范围见[发行记录](docs/TESTING-0.9.42.zh-CN.md)；更新桌面应用不自动变更已部署服务。
+
+[第38轮模板库](docs/CLIENT-TEMPLATES-ROUND-38-2026-11-14.zh-CN.md)可为 Mihomo／May Route 保存固定修订，编辑参数与基础 DNS／规则，检查依赖，审阅应用差异并恢复原基础配置。方案保留节点、订阅和导出位置；新修订不会自动替换已使用版本。
+
 面向 Debian VPS 的 Windows 部署与维护工具。通过 WinUI 3 桌面界面管理实例、代理服务、跨实例线路、客户端配置及 May Monitor，把审阅、实际验收、私人归档和失败恢复放进同一操作流程。
 
 [English](README.en.md) · [下载发行版](https://github.com/mxh110708/may-vps-deploy/releases/latest) · [使用手册](docs/USER-GUIDE.zh-CN.md) · [文档目录](docs/README.md)
@@ -8,7 +12,7 @@
 
 正式桌面控制端为 Windows 10 2004 及以上／Windows 11 amd64；远端运维验收面向 Debian 12／13 amd64。安装版自带 .NET、WinUI 及专用配置转换运行时，日常使用不需要另外安装 PowerShell、Python 或 .NET SDK。其他系统、架构与自定义服务器布局需要独立验证。
 
-当前文档以 **v0.9.41** 为基准；下载页面是获取新版本的入口。源码主分支可能包含尚未发行的文档或功能，不能用分支内容推断本机已安装版本。
+当前文档以 **v0.9.42** 为基准；下载页面是获取新版本的入口。源码主分支可能包含尚未发行的文档或功能，不能用分支内容推断本机已安装版本。
 
 本版[第二十八轮](docs/INBOUND-POLICY-ROUND-28-2026-11-02.zh-CN.md)将分类规则与多出站接入独立入站，增加引用保护、实际去向验收和局部恢复。例外仅分类 TCP，应用 UDP 保持默认出站；不自动改写已部署服务。
 
@@ -28,14 +32,16 @@
 
 本版纳入[第十五轮 Hysteria2 分享与端口跳跃](docs/HYSTERIA2-ROUND-15-2026-10-28.zh-CN.md)、[第十六轮 TUIC v5](docs/TUIC-ROUND-16-2026-10-28.zh-CN.md)、[第十七轮服务器 QUIC 下一跳](docs/SERVER-QUIC-ROUND-17-2026-10-28.zh-CN.md)、[第十八轮外部 WS／gRPC](docs/CLIENT-STREAMS-ROUND-18-2026-10-29.zh-CN.md)、[第二十轮 XHTTP 客户端配套](docs/XHTTP-ROUND-20-2026-10-29.zh-CN.md)、[第二十一轮双地址族 TCP／限定 UDP 编排](docs/CHAIN-ROUND-21-2026-10-30.zh-CN.md)和[第二十二轮 WireGuard 双实例通道](docs/WIREGUARD-ROUND-22-2026-10-30.zh-CN.md)。XHTTP 已扩展四模式、合法 HTTP 版本、独立下载身份及高级字段，使用配套 May Core／可等价表达的 Mihomo；跨实例 UDP 限固定端口 Hysteria2／TUIC。原第十九轮有限范围作为历史保留，不能推断当前安装或公网 CDN 支持。
 
+本版[第33轮托管证书](docs/CERTIFICATES-ROUND-33-2026-11-12.zh-CN.md)支持：独立入站可申请 Cloudflare DNS-01 证书，在 VPS 定时续期并部署到共享使用者，包含检查、授权替换和范围恢复。真实公网签发需使用者另行执行并验收。
+
 ## 能做什么
 
-| 工作 | v0.9.41 的能力与边界 |
+| 工作 | v0.9.42 的能力与边界 |
 | --- | --- |
 | 实例生命周期 | 新机部署、受支持布局的已有实例接入、SSH 身份核对、健康审计、维护、恢复与退役。 |
 | 代理入站 | Reality、AnyTLS、SS2022、Hysteria2、TUIC v5 及限定 XHTTP 组合；独立管理监听、用户、证书、出站和恢复范围。 |
 | 服务端线路 | TCP／UDP 转发、经 Shadowsocks／SS2022 的 UDP 验收、双地址族 TCP／限定 UDP 前置→中转→落地编排及 WireGuard 双实例通道；不是任意协议的通用多跳控制器。 |
-| 客户端配置 | 生成 Clash／Mihomo 和 sing-box 配置；方案、节点来源、地区组、路由分类、校验、导出及变更后的来源复核。 |
+| 客户端配置 | 生成 Clash／Mihomo 和 sing-box 配置；方案、节点来源、地区组、路由分类、固定版本模板、校验、导出差异及变更后的来源复核。 |
 | 网络维护 | 测量与建议、fq／BBR 配置、固定预构建 Google BBR v3 内核的显式升级与恢复。 |
 | May Monitor | 独立 Server／Agent 生命周期、HTTPS 来源核对、受限只读查看、固定静态主题维护；完整历史、探测和告警管理由监控 Web 提供。 |
 | 操作保护 | 先审阅后写入，限定组件快照与恢复，凭据加密归档；连接中断后的确认不明先核对身份和状态，不自动重复执行。 |

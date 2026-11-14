@@ -13,10 +13,14 @@ internal sealed partial class BoundaryTests
     }
     private static JsonObject Policy28Proof(JsonObject request)
     {
-        return new JsonObject { ["InboundId"] = request.Text("InboundId"), ["ConfigurationSha256"] = request.Text("ConfigurationSha256"), ["PolicyFingerprint"] = request.Text("PolicyFingerprint"), ["Status"] = "Passed", ["Items"] = new JsonArray(request["Paths"]!.AsArray().Select(p => (JsonNode?)new JsonObject
+        var result = new JsonObject { ["InboundId"] = request.Text("InboundId"), ["ConfigurationSha256"] = request.Text("ConfigurationSha256"), ["PolicyFingerprint"] = request.Text("PolicyFingerprint"), ["Status"] = "Passed", ["Items"] = new JsonArray(request["Paths"]!.AsArray().Select(p => (JsonNode?)new JsonObject
         {
             ["Id"] = p!.Text("Id"), ["OutboundFingerprint"] = p.Text("OutboundFingerprint"), ["Status"] = "Passed", ["From"] = "EntryServer", ["Scope"] = "NativeOutboundHttps", ["Network"] = "TCP", ["Egress"] = p.Text("ExpectedAddress") != "" ? p.Text("ExpectedAddress") : p.Text("Family") == "IPv6" ? "2001:db8::28" : "198.51.100.28"
         }).ToArray()) };
+        foreach (var path in request["Paths"]!.AsArray().Where(p => p!.Flag("UdpRequired")))
+            result["Items"]!.AsArray().Single(i => i!.Text("Id") == path!.Text("Id"))!["UdpValidation"] = Udp34Proof(path!.Text("Family") == "IPv6" ? "IPv6" : "IPv4");
+        foreach (var path in request["Paths"]!.AsArray().Where(p => p!["Xhttp"] != null)) result["Items"]!.AsArray().Single(i => i!.Text("Id") == path!.Text("Id"))!["Xhttp"] = path!["Xhttp"]!.DeepClone();
+        return result;
     }
     private static (JsonObject Resource, JsonObject Scheme, JsonObject Node) Policy28Exit(Fixture f, JsonObject model, string name, string host = "192.0.2.28", int port = 33443)
     {

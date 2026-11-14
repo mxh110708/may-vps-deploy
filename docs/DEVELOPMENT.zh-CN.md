@@ -1,8 +1,20 @@
 # 开发与验证
 
-日常使用请下载发行包；本页面向修改源码的维护者。先读[仓库约定](../AGENTS.md)、[安全说明](SECURITY.md)和[架构](DOTNET-ARCHITECTURE.zh-CN.md)。发行基线为 v0.9.41，各轮记录保留实施当时的验证边界。
+第38轮使用 `--client-templates-only`、`tests/test_client_template_library.py` 和后台原生 `suite.client-templates`；模板来源、事务、恢复与实际候选生成纳入 `--group clients`，Python 检查纳入主校验与 CI。测试等待原生文本／点击事件，不注入全局输入，不显示测试窗口；见[模板库](CLIENT-TEMPLATES-ROUND-38-2026-11-14.zh-CN.md)。
+
+第37轮使用 `--diagnostics-only`；模型、来源、分段、监测绑定及历史测试纳入 `--group clients`，真实回环工作台检查接入既有客户端线路回归。原生后台入口为 `suite.diagnostics`；界面合成传输必须受现有隔离会话约束，见[诊断工作台](ROUTE-DIAGNOSTICS-ROUND-37-2026-11-14.zh-CN.md)。
+
+第36轮使用 `--forward-targets-only`，完整配置／事务专项进入 `--group chains`；Python `tests/test_forward_target_groups.py` 进入主校验与CI。`tests/forward-group-runtime36.py` 在临时Linux目录验证继承监听描述符、非特权进程及实际主备，不能代替生产或Debian整机重启。后台界面入口为 `suite.forward-targets`，见[本轮记录](FORWARD-TARGET-GROUPS-ROUND-36-2026-11-13.zh-CN.md)。
+
+第35轮为 `--server-xhttp-only`，可用 `--server-xhttp-model-only` 和 `--server-xhttp-split-only` 单独定位；完整专项进入 `--group server-stream`。`tests/test_server_xhttp.py` 进入主校验与 CI；后台界面复用 `suite.server-outbound`／`suite.server-xhttp`。验证范围见[本轮记录](SERVER-XHTTP-ROUND-35-2026-11-13.zh-CN.md)，独立下载需测试实际端点与错误身份。
+
+第34轮专项为 `--application-udp-only`／`--application-udp-model-only`、`tests/test_application_udp.py` 和隐藏的 `suite.application-udp`；真实核心矩阵与远端探测程序纳入 `--group udp`。保留域名实际去向与新目标关联的证据边界，见[本轮记录](APPLICATION-UDP-ROUND-34-2026-11-13.zh-CN.md)。
+
+日常使用请下载发行包；本页面向修改源码的维护者。先读[仓库约定](../AGENTS.md)、[安全说明](SECURITY.md)和[架构](DOTNET-ARCHITECTURE.zh-CN.md)。发行基线为 v0.9.42，各轮记录保留实施当时的验证边界。
 
 ## 资源总览专项
+
+第33轮证书专项使用 `--certificates-only`、`tests/test_managed_certificates.py` 和隐藏的 `suite.certificates`，并纳入运维组与主校验。`tests/managed-certificate-runtime.py` 只允许身份固定的临时 Debian 客体，使用测试 CA 验证真实 systemd 凭据和 TLS；不能拿模拟签发当作真实 Cloudflare／ACME 验收。详见[证书生命周期](CERTIFICATES-ROUND-33-2026-11-12.zh-CN.md)。
 
 第三十一轮资源专项可用 `--resources-only` 单独运行，也已纳入 `--group operations`。公开证书读取行为使用 `tests/test_resource_certificates.py`，需要 OpenSSL 3；远端生产目标仍为 Debian，macOS CI 保留核心模型回归，不把系统 LibreSSL 当作 Debian OpenSSL 的等价验收。隐藏原生资源界面使用 `suite.resources`，维护界面可用 `suite.maintenance`，详见[资源指南](OPERATIONS-RESOURCES-ROUND-31-2026-11-03.zh-CN.md)。
 

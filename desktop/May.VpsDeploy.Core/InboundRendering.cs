@@ -34,7 +34,7 @@ public static partial class InboundRendering
     private static JsonArray WithoutNulls(this JsonArray values) => new(values.Where(v => v != null).Select(v => v!.DeepClone()).ToArray());
     public static void ValidateOutboundLoop(JsonObject plan, JsonObject model, JsonObject actual)
     {
-        if (actual.Text("server") != "" && new[] { plan.Text("Server.IPv4"), plan.Text("Server.IPv6"), "127.0.0.1", "::1", "localhost" }.Contains(actual.Text("server")) && InboundCatalog.Items(model, "Inbounds").Any(i => Hysteria2Ports.ListenerPorts(i).Contains(actual.Number("server_port")))) throw new OperationException("出站指向本实例的入站，可能形成环路。");
+        if (ServerOutboundRouting.NextHopEndpoints(actual).Any(e => e.Address != "" && new[] { plan.Text("Server.IPv4"), plan.Text("Server.IPv6"), "127.0.0.1", "::1", "localhost" }.Contains(e.Address) && InboundCatalog.Items(model, "Inbounds").Any(i => Hysteria2Ports.ListenerPorts(i).Contains(e.Port)))) throw new OperationException("出站指向本实例的入站，可能形成环路。");
     }
     public static bool RequiresApplicationUdp(ArchiveStore store, string instance, JsonObject model, string inboundId)
     {
@@ -80,9 +80,20 @@ public static partial class InboundRendering
         var actual = ResolveOutbound(store, plan.Text("Provider") + "/" + plan.Text("Instance") + "/May-VPS-Deploy", outbound);
         ValidateOutboundLoop(plan, model, actual);
         if (inbound.Text("Protocol") == "Reality") return InboundRoutingPolicy.Apply(store, plan, model, inbound, XrayReality(inbound, credentials, options.AsObject(), outbound, actual));
-        if (inbound.Text("Protocol") == "VLESS") return InboundRoutingPolicy.Apply(store, plan, model, inbound, XrayXhttp(inbound, credentials, outbound, actual));
+        if (inbound.Text("Protocol") == "VLESS") return InboundRoutingPolicy.Apply(store, plan, model, inbound, ApplyManagedCertificate(XrayXhttp(inbound, credentials, outbound, actual), model, inbound));
         var rules = new JsonArray(); if (outbound.Text("Family") != "Auto") rules.Add(new JsonObject { ["ip_version"] = outbound.Text("Family") == "IPv4" ? 6 : 4, ["action"] = "reject" });
-        return InboundRoutingPolicy.Apply(store, plan, model, inbound, new JsonObject { ["log"] = new JsonObject { ["level"] = "warn", ["timestamp"] = true }, ["dns"] = new JsonObject { ["servers"] = new JsonArray(new JsonObject { ["type"] = "local", ["tag"] = "local" }) }, ["inbounds"] = new JsonArray(input), ["outbounds"] = new JsonArray(actual), ["route"] = new JsonObject { ["final"] = "egress", ["rules"] = rules } });
+        return InboundRoutingPolicy.Apply(store, plan, model, inbound, ApplyManagedCertificate(new JsonObject { ["log"] = new JsonObject { ["level"] = "warn", ["timestamp"] = true }, ["dns"] = new JsonObject { ["servers"] = new JsonArray(new JsonObject { ["type"] = "local", ["tag"] = "local" }) }, ["inbounds"] = new JsonArray(input), ["outbounds"] = new JsonArray(actual), ["route"] = new JsonObject { ["final"] = "egress", ["rules"] = rules } }, model, inbound));
+    }
+    private static JsonObject ApplyManagedCertificate(JsonObject configuration, JsonObject model, JsonObject inbound)
+    {
+        var cert = InboundCatalog.Items(model, "Certificates").SingleOrDefault(c => c.Text("Id") == inbound.Text("CertificateId"));
+        if (cert == null || !ManagedCertificates.Managed(cert)) return configuration;
+        var domain = inbound.Text("Options.ServerName");
+        if (!cert["Managed"]!.Strings("Domains").Any(d => d == domain || d.StartsWith("*.", StringComparison.Ordinal) && domain.EndsWith(d[1..], StringComparison.Ordinal) && domain.Split('.').Length == d.Split('.').Length)) throw new OperationException("托管证书策略未覆盖入站 SNI。");
+        var pem = ManagedCertificates.Credential(inbound.Text("Id"), "certificate.pem"); var key = ManagedCertificates.Credential(inbound.Text("Id"), "certificate.key");
+        if (inbound.Text("Protocol") == "VLESS") configuration["inbounds"]![0]!["streamSettings"]!["tlsSettings"]!["certificates"] = new JsonArray(new JsonObject { ["certificateFile"] = pem, ["keyFile"] = key });
+        else { var tls = configuration["inbounds"]![0]!["tls"]!.AsObject(); tls.Remove("certificate"); tls.Remove("key"); tls["certificate_path"] = pem; tls["key_path"] = key; }
+        return configuration;
     }
     private static JsonObject XrayReality(JsonObject inbound, JsonObject credentials, JsonObject options, JsonObject outbound, JsonObject native)
     {
@@ -99,6 +110,7 @@ public static partial class InboundRendering
         foreach (var inbound in InboundCatalog.Items(model, "Inbounds"))
         {
             var config = Configuration(store, plan, model, credentials, inbound); var bytes = ArchiveStore.JsonBytes(config); var id = inbound.Text("Id");
+            if (config["outbounds"]!.AsArray().Any(ServerOutboundRouting.IsXrayXhttp)) ServerOutboundRouting.RequireXhttpVersion(core.Text("Reality.Version"));
             if (bytes.Length > 1048576) throw new OperationException("单个入站生成配置超过 1 MiB，请缩小分类规则范围。");
             configs[id] = Convert.ToBase64String(bytes);
             var outbound = InboundCatalog.Items(model, "Outbounds").Single(o => o.Text("Id") == inbound.Text("OutboundId"));

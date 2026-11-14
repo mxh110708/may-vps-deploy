@@ -39,6 +39,7 @@ internal sealed class FakeAssets : IValidationAssets { public string ResolveCore
 internal sealed class SelectedAssets(IValidationAssets inner, string allowed) : IValidationAssets { public string ResolveCore(string name) => name == allowed ? inner.ResolveCore(name) : throw new Exception("Unselected core resolved."); public string DataDirectory => inner.DataDirectory; public string ExpectedVersion(string name) => inner.ExpectedVersion(name); }
 internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
 {
+    public string XrayVersionLine { get; set; } = "Xray 26.3.27 synthetic";
     private readonly JsonObject protocolInventory = new();
     public void SeedProtocols(JsonObject plan)
     {
@@ -105,13 +106,21 @@ internal sealed class FakeRemote : IRemoteSessionFactory, IRemoteSession
             if (asset is "server-outbound-read.sh" or "maintenance-protocol-config-read.sh")
             {
                 var bytes = ProtocolConfigs[protocol];
-                return Task.FromResult(new CommandResult(0, Marker("SERVER_CONFIG", Encoding.UTF8.GetString(bytes)) + Marker("SERVER_CONFIG_SHA256", ArchiveStore.Digest(bytes)) + (asset == "server-outbound-read.sh" ? "VPSDEPLOY_SERVER_OUTBOUND_READ\n" : ""), ""));
+                return Task.FromResult(new CommandResult(0, Marker("SERVER_CONFIG", Encoding.UTF8.GetString(bytes)) + Marker("SERVER_CONFIG_SHA256", ArchiveStore.Digest(bytes)) + (protocol == "RealityEntry" ? Marker("SERVER_CORE_VERSION", XrayVersionLine) : "") + (asset == "server-outbound-read.sh" ? "VPSDEPLOY_SERVER_OUTBOUND_READ\n" : ""), ""));
             }
             if (asset == "server-hop-probe.sh")
             {
                 if (HopProbeFailure) return Task.FromResult(new CommandResult(1, "", "synthetic hop probe failed"));
                 var requests = JsonNode.Parse(Parameter("PROBES_JSON"))!.AsArray();
                 var items = new JsonArray(requests.OfType<JsonObject>().Select(r => (JsonNode?)new JsonObject { ["Id"] = r.Text("Id"), ["Status"] = "Passed", ["Egress"] = r.Text("ExpectedAddress"), ["From"] = "EntryServer", ["Network"] = "TCP", ["Transport"] = ServerOutboundRouting.OutboundProtocol(r["Outbound"]!) is "hysteria2" or "tuic" ? "QUIC" : "TCP", ["ValidatedProtocol"] = ServerOutboundRouting.OutboundProtocol(r["Outbound"]!) }).ToArray());
+                foreach (var request in requests.OfType<JsonObject>().Where(r => r.Flag("UdpRequired")))
+                {
+                    var item = items.Single(i => i!.Text("Id") == request.Text("Id"))!;
+                    if (request.Text("ExpectedAddress") == "") item["Egress"] = request.Text("Family") == "IPv6" ? "2001:db8::34" : "198.51.100.34";
+                    item["UdpValidation"] = BoundaryTests.Udp34Proof(request.Text("Family", request.Text("ExpectedAddress").Contains(':') ? "IPv6" : "IPv4"));
+                }
+                foreach (var request in requests.OfType<JsonObject>().Where(r => ServerOutboundRouting.IsXrayXhttp(r["Outbound"])))
+                { var item = items.Single(i => i!.Text("Id") == request.Text("Id"))!.AsObject(); foreach (var field in ServerOutboundRouting.XhttpProof(request["Outbound"]!)) item[field.Key] = field.Value?.DeepClone(); }
                 if (HopProbeIncomplete && items.Count > 0) items.RemoveAt(0);
                 return Task.FromResult(new CommandResult(0, Marker("HOP_VALIDATION", new JsonObject { ["Status"] = "Passed", ["Items"] = items }.ToJsonString()) + "VPSDEPLOY_SERVER_HOPS_PASSED\n", ""));
             }
