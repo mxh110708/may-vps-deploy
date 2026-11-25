@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using May.VpsDeploy.Core;
+using May.VpsDeploy.Infrastructure;
 
 internal sealed partial class BoundaryTests
 {
@@ -41,6 +42,17 @@ internal sealed partial class BoundaryTests
         using var f = new Fixture(repository); var model = InboundCatalog.Empty(); var creds = InboundCatalog.EmptyCredentials(); var outbound = InboundCatalog.AddDirect(model, "Dual egress", "PreferIPv6");
         var input = InboundCatalog.AddInbound(model, creds, "Shadowsocks2022"); input["OutboundId"] = outbound.Text("Id");
         var plan = f.Plan("address44");
+        plan["Server"]!["IPv6"] = "2001:db8::44";
+        var pair = new ClientProfiles.NodePair("Synthetic", "RealityEntry", "IPv4", new(), new(), "Unknown");
+        ProtocolValidation.RequireEgress(plan, pair, plan.Text("Server.IPv4")); Check(true, "unknown policy rejected valid observed IPv4");
+        ProtocolValidation.RequireEgress(plan, pair, "2001:db8::44"); Check(true, "IPv6 observed egress compared against IPv4 plan");
+        Refuses(() => ProtocolValidation.RequireEgress(plan, pair with { EgressFamily = "IPv4" }, "2001:db8::44"), "strict IPv4 accepted IPv6 egress");
+        Refuses(() => ProtocolValidation.RequireEgress(plan, pair, "2001:db8::45"), "known planned IPv6 identity ignored");
+        plan["Server"]!.AsObject().Remove("IPv6"); ProtocolValidation.RequireEgress(plan, pair, "2001:db8::44"); Check(true, "observed optional IPv6 was mistaken for verified IPv4");
+        plan["ServerOutbound"] = new JsonObject { ["RealityEntry"] = new JsonObject { ["ExpectedAddress"] = "198.51.100.44" } };
+        ProtocolValidation.RequireEgress(plan, pair, "198.51.100.44"); Check(true, "fixed landing endpoint compared against entry egress");
+        Refuses(() => ProtocolValidation.RequireEgress(plan, pair, plan.Text("Server.IPv4")), "proxy endpoint family bypassed final landing verification");
+        plan.Remove("ServerOutbound");
         var config = InboundRendering.Configuration(f.Store, plan, model, creds, input);
         Check(config["route"]!["rules"]!.AsArray().Count == 0 && config.Text("outbounds.0") == "", "preferred family accidentally blocked explicit opposite-family IP");
         Check(config["outbounds"]![0]!.Text("domain_resolver.strategy") == "prefer_ipv6", "preference not applied through product renderer");

@@ -30,7 +30,7 @@ public sealed class RemoteLibrarySources(ArchiveStore store, ClientTemplateStore
     public JsonObject Read(string id)
     {
         var file = FileName(id); SafePath.CheckLinks(file);
-        if (new FileInfo(file).Length > 24 * 1024 * 1024) throw new OperationException("来源缓存超过大小限制。");
+        if (new FileInfo(file).Length > 160 * 1024 * 1024) throw new OperationException("来源缓存超过大小限制。");
         var value = store.ReadSecret(file);
         if (value.Number("Schema") != 1 || value.Text("Id") != id || value["Definition"] is not JsonObject definition || definition.Text("Id") != id || value["Versions"] is not JsonArray versions || versions.Count > 32)
             throw new OperationException("来源缓存身份或版本无效。");
@@ -81,6 +81,7 @@ public sealed class RemoteLibrarySources(ArchiveStore store, ClientTemplateStore
         if (versions.Count >= 32) throw new OperationException("此来源已有32个固定修订，请另建来源，不自动清理旧版本。");
         token.ThrowIfCancellationRequested();
         versions.Add(new JsonObject { ["Digest"] = digest, ["Identity"] = document.Text("Id"), ["Revision"] = document.Text("Revision"), ["Content"] = content, ["FetchedAt"] = DateTimeOffset.UtcNow });
+        if (Encoding.UTF8.GetByteCount(current.ToJsonString()) > 16 * 1024 * 1024) throw new OperationException("此来源缓存已达16 MiB序列化上限，保留旧修订；请登记新来源，不自动清理历史。");
         store.WriteSecret(FileName(id), current); return digest;
     }
     public RemoteLibraryReview Preview(string id, string digest)

@@ -284,7 +284,7 @@ def validate(probes, role):
         if 'UdpRequired' in item and item['UdpRequired'] is not True:
             raise ValueError('Invalid UDP proof requirement')
         if item['Id'] == 'direct':
-            if item['ExpectedAddress'] != '' or item.get('Family') not in ('IPv4','IPv6'):
+            if item['ExpectedAddress'] != '' or item.get('Family') not in ('IPv4','IPv6','Auto'):
                 raise ValueError('Invalid server-direct probe family')
         else:
             ipaddress.ip_address(item['ExpectedAddress'])
@@ -293,11 +293,19 @@ def validate(probes, role):
         if not isinstance(native, dict):
             raise ValueError('Invalid outbound')
         if item['Id'] == 'direct':
-            if native.get('tag') != 'direct' or native.get('protocol' if role=='RealityEntry' else 'type') != ('freedom' if role=='RealityEntry' else 'direct') or set(native) - ({'tag','protocol','settings'} if role=='RealityEntry' else {'tag','type','domain_resolver','domain_strategy'}):
+            if native.get('tag') != 'direct' or native.get('protocol' if role=='RealityEntry' else 'type') != ('freedom' if role=='RealityEntry' else 'direct') or set(native) - ({'tag','protocol','settings','streamSettings'} if role=='RealityEntry' else {'tag','type','domain_resolver','domain_strategy','fallback_delay'}):
                 raise ValueError('Unowned server-direct probe')
             if role=='RealityEntry' and (set(native.get('settings',{}))-{'domainStrategy'} or native.get('settings',{}).get('domainStrategy','AsIs') not in ('AsIs','UseIP','UseIPv4','UseIPv6','ForceIP','ForceIPv4','ForceIPv6')):
                 raise ValueError('Unexpected server-direct settings')
+            if role=='RealityEntry' and 'streamSettings' in native:
+                stream = native['streamSettings']; sock = stream.get('sockopt', {}) if isinstance(stream, dict) else {}
+                if not isinstance(stream,dict) or set(stream)!={'sockopt'} or not isinstance(sock,dict) or set(sock)!={'domainStrategy','happyEyeballs'} or sock['domainStrategy']!='ForceIP':
+                    raise ValueError('Unexpected direct dial policy')
+                happy = sock['happyEyeballs']
+                if not isinstance(happy,dict) or set(happy)!={'prioritizeIPv6','tryDelayMs','interleave','maxConcurrentTry'} or type(happy['prioritizeIPv6']) is not bool or happy['tryDelayMs']!=300 or happy['interleave']!=1 or happy['maxConcurrentTry']!=2:
+                    raise ValueError('Unexpected direct fallback policy')
             if role=='AnyTlsEntry':
+                if 'fallback_delay' in native and native['fallback_delay']!='300ms': raise ValueError('Unexpected direct fallback delay')
                 resolver = native.get('domain_resolver')
                 if resolver is not None and (not isinstance(resolver,dict) or set(resolver) != {'server','strategy'} or resolver['server'] != 'local' or resolver['strategy'] not in ('ipv4_only','ipv6_only','prefer_ipv4','prefer_ipv6')):
                     raise ValueError('Unexpected server-direct resolver')
@@ -369,7 +377,7 @@ def run_probe(binary, role, item):
                     time.sleep(0.05)
             family = item.get('Family') or ('IPv6' if ipaddress.ip_address(item['ExpectedAddress']).version==6 else 'IPv4')
             actual = query(port, PROBE_HOST_V6 if family=='IPv6' else PROBE_HOST_V4, min(10, deadline - time.monotonic()))
-            if item['ExpectedAddress'] and actual != str(ipaddress.ip_address(item['ExpectedAddress'])) or ipaddress.ip_address(actual).version != (6 if family=='IPv6' else 4):
+            if item['ExpectedAddress'] and actual != str(ipaddress.ip_address(item['ExpectedAddress'])) or family!='Auto' and ipaddress.ip_address(actual).version != (6 if family=='IPv6' else 4):
                 raise ValueError('Egress mismatch')
             protocol = ('hysteria2' if outbound.get('protocol') == 'hysteria' else outbound['protocol']) if role == 'RealityEntry' else outbound['type']
             result = {'Id': item['Id'], 'Status': 'Passed', 'Egress': actual, 'From': 'EntryServer', 'Network': 'TCP', 'Transport': 'QUIC' if protocol in ('hysteria2', 'tuic') else 'TCP', 'ValidatedProtocol': protocol}
@@ -378,7 +386,7 @@ def run_probe(binary, role, item):
                 result.update(xhttp_proof(outbound))
             if item.get('UdpRequired'):
                 exec(os.environ['VPS_APPLICATION_UDP_PROGRAM'], globals())
-                result['UdpValidation'] = application_udp_probe(port, family)
+                result['UdpValidation'] = application_udp_probe(port, ('IPv6' if ipaddress.ip_address(actual).version==6 else 'IPv4') if family=='Auto' else family)
             return result
         finally:
             if process.poll() is None:

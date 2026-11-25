@@ -112,3 +112,5 @@ pwsh -NoProfile -File .\scripts\New-VpsReleasePackage.ps1 -Destination '<本地�
 第二十七轮使用 `--client-roundtrip-only`；其模型子集为 `--client-roundtrip-model-only`，完整模型及双核心真实协议矩阵已纳入 clients 组。原生后台接口新增 `suite.client-roundtrip` 并回归 `suite.client-share`；只用合成数据、隔离复制接收器和原生控件接口，不弹窗或修改系统剪贴板。详见[第二十七轮](CLIENT-OUTPUT-ROUND-27-2026-11-02.zh-CN.md)。
 
 WinUI 使用既有隐藏接口 `suite.source-sync`、`suite.server-rule-sets`，继续回归 `suite.server-outbound`。合成归档中的定时器禁止联网，下载另由受控本机服务器验证；全部要求零窗口激活与零前台采样。调度身份索引不含 URL，实际缓存和事务使用加密私人归档，不可作为公开测试附件。用例、使用与边界见[第二十五轮](SOURCE-SYNC-ROUND-25-2026-11-01.zh-CN.md)、[第二十六轮](SERVER-RULESETS-ROUND-26-2026-11-01.zh-CN.md)。
+
+第43／44轮及第42轮 TLS 夹具的开发／CI 依赖使用 `python -m pip install -r requirements-test.txt`；正式应用仍只内置 YAML 转换运行时，不附带此测试依赖。

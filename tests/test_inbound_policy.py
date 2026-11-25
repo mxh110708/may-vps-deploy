@@ -41,6 +41,18 @@ class PolicyOwnership(unittest.TestCase):
     snapshot=existing.InboundOwnership.snapshot
     apply=existing.InboundOwnership.apply
     restore=existing.InboundOwnership.restore
+    def test_preferred_family_and_connection_policy_round44(self):
+        original,_=policy_fixture();self.apply(original,[A,B]);before=self.host.read()
+        changed=copy.deepcopy(original);config=json.loads(existing.base64.b64decode(changed['Configurations'][A]))
+        changed['Model']['Outbounds'][0]['Family']='PreferIPv6';changed['Model']['Outbounds'][1]['ConnectionFamily']='PreferIPv4'
+        config['outbounds'][0].update(domain_resolver={'server':'local','strategy':'prefer_ipv6'},fallback_delay='300ms')
+        config['outbounds'][1].update(domain_resolver={'server':'local','strategy':'prefer_ipv4'},fallback_delay='300ms')
+        config['route']['rules'].pop();encode(changed,config)
+        self.kernel.events.clear();backup,_=self.snapshot(changed,[A]);self.host.apply(backup,changed,before['Hash'],[A]);observed=self.host.read()
+        self.assertNotIn(('stop',M.unit_name(B)),self.kernel.events)
+        self.assertEqual(namespace['policy_paths'](changed['Model'],changed['Model']['Inbounds'][0])[0]['Family'],'Auto')
+        self.restore(backup);self.assertEqual(self.host.read()['Hash'],before['Hash']);self.assertNotIn(('start',M.unit_name(B)),self.kernel.events)
+        self.assertNotEqual(observed['Hash'],before['Hash'])
     def test_policy_scope_and_restore(self):
         original,_=policy_fixture();self.apply(original,[A,B]);before=self.host.read();changed=copy.deepcopy(original);config=json.loads(existing.base64.b64decode(changed['Configurations'][A]))
         changed['Model']['Inbounds'][0]['Routing']['Rules'][0]['Action']='Reject';changed['Model']['Inbounds'][0]['Routing']['Rules'][0].pop('Target');config['outbounds'].pop();config['route']['rules'][0]['action']='reject';config['route']['rules'][0].pop('outbound');encode(changed,config)

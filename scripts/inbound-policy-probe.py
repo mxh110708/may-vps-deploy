@@ -23,10 +23,11 @@ def policy_paths(model, item, configuration=None):
         if rule.get('Target') and rule['Target'] not in ids:
             ids.append(rule['Target'])
     targets = {o['Id']: o for o in model['Outbounds']}
+    observed_family = lambda family: family if family in ('IPv4','IPv6') else 'Auto'
     result = [{'Id': i, 'Tag': 'egress' if i == item['OutboundId'] else 'policy-' + i,
-               'Family': targets[i]['Family'], 'ExpectedAddress': targets[i]['ExpectedAddress']} for i in ids]
+               'Family': observed_family(targets[i]['Family']), 'ExpectedAddress': targets[i]['ExpectedAddress']} for i in ids]
     if any(r['Action'] == 'Direct' for r in policy['Rules']):
-        result.append({'Id': 'Direct', 'Tag': 'policy-direct', 'Family': targets[item['OutboundId']]['Family'], 'ExpectedAddress': ''})
+        result.append({'Id': 'Direct', 'Tag': 'policy-direct', 'Family': observed_family(targets[item['OutboundId']]['Family']), 'ExpectedAddress': ''})
     udp_rules = [r for r in policy['Rules'] if r.get('Network', 'TCP') in ('UDP', 'Both')]
     for path in result:
         source = next((o for o in (configuration or {}).get("outbounds", []) if o.get("tag")==path["Tag"]), {})

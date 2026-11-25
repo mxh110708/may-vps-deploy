@@ -8,6 +8,15 @@ namespace May.VpsDeploy.Infrastructure;
 
 public sealed class ProtocolValidation(IValidationAssets assets, IExternalToolRunner tools, ArchiveStore? store = null) : IProtocolValidation
 {
+    public static void RequireEgress(JsonObject plan, ClientProfiles.NodePair node, string text)
+    {
+        if (!IPAddress.TryParse(text, out var address)) throw new OperationException("协议出口不是有效 IP，未计为通过。");
+        var family = address.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4";
+        if (node.EgressFamily is "IPv4" or "IPv6" && node.EgressFamily != family) throw new OperationException("协议出口与严格地址族不符，未计为通过。");
+        var fallback = family == "IPv6" ? node.Role == "ShadowsocksLanding" ? plan.Text("Shadowsocks.SecondaryIpv6Address") : plan.Text("Server.IPv6") : plan.Text("Server.IPv4");
+        var expected = ServerOutboundRouting.EgressAddress(plan, node.Role, fallback);
+        if (expected != "" && (!IPAddress.TryParse(expected, out var planned) || !address.Equals(planned))) throw new OperationException("协议出口与计划不一致，未计为通过。");
+    }
     public void Export(JsonObject plan, JsonObject secrets, string directory) => ClientProfiles.Export(plan, secrets, directory);
     public async Task<JsonObject> ValidateAsync(JsonObject plan, JsonObject secrets, string privateDirectory, IUserInteraction user, IProgress<string> progress, CancellationToken cancellationToken)
     {
@@ -59,11 +68,10 @@ public sealed class ProtocolValidation(IValidationAssets assets, IExternalToolRu
                     var http = await client.GetAsync("https://cp.cloudflare.com/generate_204", cancellationToken);
                     if (http.StatusCode != HttpStatusCode.NoContent) throw new OperationException("协议 HTTPS 验收未返回预期结果。");
                     httpsPassed = true; stage = "出口地址";
-                    var egress = (await client.GetStringAsync(node.EgressFamily == "IPv6" ? "https://api64.ipify.org" : "https://api.ipify.org", cancellationToken)).Trim();
-                    var expected = ServerOutboundRouting.EgressAddress(plan, node.Role, node.EgressFamily == "IPv6" ? plan.Text("Shadowsocks.SecondaryIpv6Address") : plan.Text("Server.IPv4"));
-                    if (!IPAddress.TryParse(egress, out var address) || address.ToString() != IPAddress.Parse(expected).ToString()) throw new OperationException("协议出口与计划不一致，未计为通过。");
+                    var egress = (await client.GetStringAsync(node.EgressFamily == "IPv4" ? "https://api.ipify.org" : "https://api64.ipify.org", cancellationToken)).Trim();
+                    RequireEgress(plan, node, egress);
                     egressPassed = true; stage = "UDP DNS";
-                    await SocksUdpProbe(port, node.EgressFamily == "IPv6", cancellationToken);
+                    await SocksUdpProbe(port, IPAddress.Parse(egress).AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6, cancellationToken);
                     items.Add(new JsonObject { ["Core"] = core, ["Node"] = node.Name, ["Role"] = node.Role, ["Path"] = entry == null ? "DirectEntry" : "TrustedEntry", ["Entry"] = entry?.Name, ["Status"] = "Passed", ["Https"] = "Passed", ["Egress"] = egress, ["Udp"] = "Passed" });
                 }
                 catch (Exception error) when (error is not OperationCanceledException || !cancellationToken.IsCancellationRequested)

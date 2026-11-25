@@ -119,14 +119,14 @@ public static partial class ServerOutboundRouting
             var outputs = configuration["outbounds"]!.AsArray().OfType<JsonObject>();
             result.Add(new JsonObject { ["Id"] = "default", ["ExpectedAddress"] = metadata!.Text("ExpectedAddress"), ["Outbound"] = outputs.Single(o => o.Text("tag") == Tag).DeepClone(), ["UdpRequired"] = true });
             if (rules.Any(r => ServerDestinationRules.Applies(r!, "udp") && r!.Text("Action") == "Direct"))
-                result.Add(new JsonObject { ["Id"] = "direct", ["ExpectedAddress"] = "", ["Family"] = plan.Flag((role == "RealityEntry" ? "Reality" : "AnyTls") + ".ForceIpv4Egress", true) ? "IPv4" : metadata.Text("EgressFamily"), ["Outbound"] = outputs.Single(o => o.Text("tag") == "direct").DeepClone(), ["UdpRequired"] = true });
+                result.Add(new JsonObject { ["Id"] = "direct", ["ExpectedAddress"] = "", ["Family"] = OutboundAddressPolicy.ObservedFamily(OutboundAddressPolicy.Legacy(plan, role)), ["Outbound"] = outputs.Single(o => o.Text("tag") == "direct").DeepClone(), ["UdpRequired"] = true });
         }
         return result;
     }
     public static void RequireHopValidation(JsonArray requests, JsonObject result)
     {
         var items = (result["Items"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? [];
-        if (result.Text("Status") != "Passed" || items.Length != requests.Count || requests.OfType<JsonObject>().Any(request => items.Count(item => item.Text("Id") == request.Text("Id") && item.Text("Status") == "Passed" && item.Text("From") == "EntryServer" && item.Text("Network") == "TCP" && ProbeProtocolMatches(request["Outbound"]!, item) && IPAddress.TryParse(item.Text("Egress"), out var egress) && (request.Text("ExpectedAddress") != "" ? egress.Equals(Address(request.Text("ExpectedAddress"))) : request.Text("Id") == "direct" && (egress.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4") == request.Text("Family"))) != 1)) throw new OperationException("附加落地的协议、TLS 或实际出口验收未全部完成，恢复本次范围。", code: "ServerHopValidationIncomplete");
+        if (result.Text("Status") != "Passed" || items.Length != requests.Count || requests.OfType<JsonObject>().Any(request => items.Count(item => item.Text("Id") == request.Text("Id") && item.Text("Status") == "Passed" && item.Text("From") == "EntryServer" && item.Text("Network") == "TCP" && ProbeProtocolMatches(request["Outbound"]!, item) && IPAddress.TryParse(item.Text("Egress"), out var egress) && (request.Text("ExpectedAddress") != "" ? egress.Equals(Address(request.Text("ExpectedAddress"))) : request.Text("Id") == "direct" && (request.Text("Family") == "Auto" || (egress.AddressFamily == AddressFamily.InterNetworkV6 ? "IPv6" : "IPv4") == request.Text("Family")))) != 1)) throw new OperationException("附加落地的协议、TLS 或实际出口验收未全部完成，恢复本次范围。", code: "ServerHopValidationIncomplete");
         foreach (var request in requests.OfType<JsonObject>().Where(r => r.Flag("UdpRequired")))
             ServerUdpRouting.RequireProof(items.Single(i => i.Text("Id") == request.Text("Id"))["UdpValidation"], request.Text("Family", request.Text("ExpectedAddress").Contains(':') ? "IPv6" : "IPv4"));
     }

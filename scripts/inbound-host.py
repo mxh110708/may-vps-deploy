@@ -174,14 +174,14 @@ def validate_inbound_policy(model, item, config):
         raise ValueError('Unsupported inbound routing policy.')
     resources = {}
     for outbound in model['Outbounds']:
-        if not isinstance(outbound, dict) or set(outbound) != {'Id','Name','Kind','Family','ExpectedAddress','Source'} or outbound['Kind'] not in ('Direct','Proxy') or outbound['Family'] not in ('Auto','IPv4','IPv6') or not isinstance(outbound['Name'], str) or not 1 <= len(outbound['Name']) <= 60 or any(ord(c)<32 for c in outbound['Name']):
+        if not isinstance(outbound, dict) or set(outbound) not in ({'Id','Name','Kind','Family','ExpectedAddress','Source'}, {'Id','Name','Kind','Family','ExpectedAddress','Source','ConnectionFamily'}) or outbound['Kind'] not in ('Direct','Proxy') or outbound['Family'] not in ('Auto','IPv4','IPv6','PreferIPv4','PreferIPv6') or outbound.get('ConnectionFamily','Auto') not in ('Auto','IPv4','IPv6','PreferIPv4','PreferIPv6') or outbound['Kind']=='Proxy' and outbound['Family'] in ('PreferIPv4','PreferIPv6') or not isinstance(outbound['Name'], str) or not 1 <= len(outbound['Name']) <= 60 or any(ord(c)<32 for c in outbound['Name']):
             raise ValueError('Invalid policy outbound resource.')
         identifier = identity(outbound['Id'])
         if identifier in resources or not isinstance(outbound['ExpectedAddress'], str) or not isinstance(outbound['Source'], dict):
             raise ValueError('Duplicate or invalid policy outbound identity.')
         if outbound['ExpectedAddress']:
             address = ipaddress.ip_address(outbound['ExpectedAddress'])
-            if outbound['Family'] != 'Auto' and address.version != (6 if outbound['Family']=='IPv6' else 4):
+            if outbound['Family'] in ('IPv4','IPv6') and address.version != (6 if outbound['Family']=='IPv6' else 4):
                 raise ValueError('Policy outbound egress family differs.')
         source = outbound['Source']
         if outbound['Kind']=='Direct':
@@ -274,10 +274,16 @@ def validate_inbound_policy(model, item, config):
         native['network'] = ('tcp,udp' if xray else ['tcp','udp']) if rule['Network']=='Both' else rule['Network'].lower()
         rules.append(native)
     family = resources[item['OutboundId']]['Family']
-    if family != 'Auto':
-        rules.append({'type':'field', 'ip':['::/0' if family=='IPv4' else '0.0.0.0/0'], 'outboundTag':'block'} if xray else {'ip_version':6 if family=='IPv4' else 4, 'action':'reject'})
+    if family in ('IPv4','IPv6'):
+        rules.append({'type':'field', 'inboundTag':[item['Id']], 'ip':['::/0' if family=='IPv4' else '0.0.0.0/0'], 'outboundTag':'block'} if xray else {'ip_version':6 if family=='IPv4' else 4, 'action':'reject'})
     actual = config['routing' if xray else 'route']
-    if actual != ({'domainStrategy':'AsIs','rules':rules} if xray else {'final':'egress','rules':rules}):
+    expected = {'domainStrategy':'AsIs','rules':rules} if xray else {'final':'egress','rules':rules}
+    if actual != expected:
+        # Restore older owned versions with their original unscoped family guard.
+        # New generations bind the guard to the business inbound, protecting DNS.
+        if xray and family in ('IPv4','IPv6'):
+            legacy = json.loads(json.dumps(expected));legacy['rules'][-1].pop('inboundTag')
+            if actual == legacy: return
         raise ValueError('Native policy order, targets, application network or fallback differs.')
 
 

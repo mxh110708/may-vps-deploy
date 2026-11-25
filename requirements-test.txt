@@ -1,0 +1,3 @@
+-r requirements-client-merge.txt
+# TLS identities for isolated protocol fixtures; never bundled in the app runtime.
+cryptography==46.0.3
