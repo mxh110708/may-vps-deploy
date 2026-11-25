@@ -19,7 +19,7 @@
 - May Core：**1.14.4-may.1**，固定发布提交 `5c4415cfd3ba448326c9564d9f934809cd74d4b3`，未改动已发布 ZIP；二进制、完整 CLI 源码 ZIP 和1609项源码文件摘要逐项核对。
 - Route 兼容基线：**1.14.4-may.1**；其安装包不进入 Deploy 发行附件，也不自动安装。
 - Mihomo 保持 **1.19.32**；Xray 保持 **26.3.27**。不借本轮无关升级其他核心。
-- 内置模板修订升为 **2**。旧私人模板修订保持固定；核心变化后需要新建并审阅修订，不以同一修订覆盖不同依赖。
+- 内置模板修订升为 **2**，采用新的基线模板身份，避免与用户在旧身份下派生的修订2冲突。旧私人模板修订保持固定；核心变化后需要新建并审阅修订，不以同一修订覆盖不同依赖。迁移回归验证原参数和历史摘要保持不变。
 
 原始来源：[官方 sing-box v1.14.4](https://github.com/SagerNet/sing-box/releases/tag/v1.14.4)、[May Core 发布和源码](https://github.com/mxh110708/may-route-core/releases/tag/v1.14.4-may.1)、[May Route](https://github.com/mxh110708/may-route-desktop/releases/tag/v1.14.4-may.1)。原公共 SRS 仍固定同一来源提交和字节，并未随 Route 版本号任意改动。
 

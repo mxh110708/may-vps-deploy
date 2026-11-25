@@ -75,5 +75,14 @@ internal sealed partial class BoundaryTests
         Refuses(() => ClientSourceBarrier.RequireAvailable(f.Store, "Scheme", scheme.Text("Id")), "pending template did not block downstream node source use");
         Refuses(() => workbench.Save(applied), "normal save overwrote unresolved template transaction");
         library.Restore(library.PreviewRestore(application)); Check(ClientTemplates.Journals(f.Store).Single(j => j.Text("Id") == application).Text("Phase") == "RolledBack", "lost acknowledgement was replayed or left pending");
+        // A user may already have derived revision 2 under the old builtin ID.
+        // A core-baseline update must not collide with or rewrite that revision.
+        var oldBuiltin = library.Draft(built, true); oldBuiltin["Id"] = "00000000000000000000000000000038"; oldBuiltin["Name"] = "Legacy builtin fixture";
+        await library.SaveVersionAsync(oldBuiltin, default); var oldChild = library.Draft(oldBuiltin, false); oldChild["Parameters"]!["RouteMixedPort"] = 19038; await library.SaveVersionAsync(oldChild, default);
+        var oldStamp = ArchiveStore.Fingerprint(library.Read(oldBuiltin.Text("Id"), 2));
+        Check(library.List().Any(d => d.Text("Id") == built.Text("Id")) && oldBuiltin.Text("Id") != built.Text("Id"), "new builtin collided with legacy derived revision");
+        Check(ArchiveStore.Fingerprint(library.Read(oldBuiltin.Text("Id"), 2)) == oldStamp && library.Read(oldBuiltin.Text("Id"), 2).Number("Parameters.RouteMixedPort") == 19038, "baseline update overwrote private template content");
+        var migrated = library.Draft(library.Read(oldBuiltin.Text("Id"), 2), false); await library.SaveVersionAsync(migrated, default);
+        Check(library.Read(oldBuiltin.Text("Id"), 3).Number("Parameters.RouteMixedPort") == 19038 && ArchiveStore.Fingerprint(library.Read(oldBuiltin.Text("Id"), 2)) == oldStamp, "explicit core rebase lost old version or user parameters");
     }
 }

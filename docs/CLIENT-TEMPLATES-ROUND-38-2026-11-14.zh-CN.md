@@ -81,3 +81,5 @@
 专项入口为 `--client-templates-only`、`tests/test_client_template_library.py` 和后台原生 `suite.client-templates`。模型、事务和候选闭环纳入 `--group clients`；Python检查纳入主校验及CI。非Windows的CI运行跨平台模型／渲染，Windows固定核心的执行明确单列。
 
 维护者修改基础模板、布局或固定核心目录身份后，必须同步增加 `config/client-templates.json` 的内置修订号，并保留已应用的私有版本；不得用同一修订号替换不同内容。
+
+v0.9.43 的1.14.4核心基线使用新的内置模板身份和修订2，避免与用户在旧内置身份下自行派生的修订2冲突。旧私人模板和参数保留原身份；需要升级其核心时，从该模板最新私人修订显式派生并审阅新修订。模板库默认打开当前内置基线，不自动应用它。

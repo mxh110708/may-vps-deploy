@@ -15,7 +15,7 @@ public sealed partial class MainWindow
         while (true)
         {
             var documents = library.List(); var selectedKey = choiceState.Text("Version");
-            if (!documents.Any(d => d.Text("Id") + ":" + d.Number("Revision") == selectedKey)) choiceState["Version"] = documents[0].Text("Id") + ":" + documents[0].Number("Revision");
+            if (!documents.Any(d => d.Text("Id") + ":" + d.Number("Revision") == selectedKey)) { var current = library.BuiltIn(); choiceState["Version"] = current.Text("Id") + ":" + current.Number("Revision"); }
             JsonObject Selected() { var entry = documents.Single(d => d.Text("Id") + ":" + d.Number("Revision") == choiceState.Text("Version")); return library.Read(entry.Text("Id"), entry.Number("Revision")); }
             var choice = Choice("模板与修订", choiceState, "Version", documents.Select(d => (d.Text("Id") + ":" + d.Number("Revision"), d.Text("Name") + " · 修订 " + d.Number("Revision") + " · " + (d.Text("Clients") == "Both" ? "Mihomo + May Route" : d.Text("Clients") == "Clash" ? "Mihomo" : "May Route")))); choice.Tag = "ClientTemplates.Version";
             var detail = Text("", 13, true);

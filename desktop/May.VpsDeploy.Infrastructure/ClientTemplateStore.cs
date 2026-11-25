@@ -102,6 +102,8 @@ public sealed class ClientTemplateStore(ArchiveStore store, IExternalToolRunner 
         using var held = ClientSourceSync.LockFile(store.Paths.Resolve(Root + "library"));
         var all = List(); var id = snapshot.Text("Id"); var revision = snapshot.Number("Revision"); var file = VersionFile(id, revision);
         if (File.Exists(file)) throw new OperationException("模板版本不可覆盖，请创建新修订。");
+        var versionRoot = store.Paths.Resolve(Root + "versions");
+        if (Directory.Exists(versionRoot) && Directory.EnumerateFiles(versionRoot, "*.private.json").Count() >= ClientTemplates.MaximumTemplates * ClientTemplates.MaximumVersions) throw new OperationException("模板库已达存储版本上限，保留现有版本；请先单独归档后使用新模板。");
         var same = all.Where(d => d.Text("Id") == id).ToArray();
         if (same.Any(d => d.Number("Revision") == revision && d.Text("Fingerprint") != fingerprint)) throw new OperationException("此模板修订号已被占用。");
         if (same.Length == 0 && all.Select(d => d.Text("Id")).Distinct().Count() >= ClientTemplates.MaximumTemplates) throw new OperationException("模板库最多32组。");
