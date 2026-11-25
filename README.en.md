@@ -1,3 +1,5 @@
+> Current release: **v0.9.43** includes rounds 39–44, immutable HTTPS template/rule caches and separate direct/next-hop address-family policies. Official sing-box is pinned to **1.14.4**; May Core and Route to **1.14.4-may.1**. See the [release evidence](docs/TESTING-0.9.43.zh-CN.md). Updating Deploy does not install or reload proxy applications or upgrade VPS services.
+
 # May VPS Deploy
 
 v0.9.42 includes rounds 33–38: managed certificates, application UDP routing, XHTTP server next hops, forwarding primary/standby groups, route diagnostics and a versioned client template library. The [release verification record](docs/TESTING-0.9.42.zh-CN.md) preserves the acceptance limits of each round. Updating the desktop app does not modify deployed services.

@@ -177,6 +177,10 @@ public sealed partial class MainWindow
             case "suite.certificates":
             case "suite.diagnostics":
             case "suite.client-templates":
+            case "suite.instance-address":
+            case "suite.forward-proxy-health":
+            case "suite.forward-multi-target":
+            case "suite.forward-proxy-receive":
             case "suite.client-batch":
             case "suite.maintenance":
             case "suite.run":
@@ -223,6 +227,10 @@ public sealed partial class MainWindow
                         if (command is "suite.run" or "suite.certificates") await Run("certificates", CertificateRegression);
                         if (command is "suite.run" or "suite.diagnostics") await Run("diagnostics", DiagnosticsRegression);
                         if (command is "suite.run" or "suite.client-templates") await Run("client_templates", ClientTemplateRegression);
+                        if (command is "suite.run" or "suite.instance-address") await Run("instance_address", InstanceAddressRegression);
+                        if (command is "suite.run" or "suite.forward-proxy-health") await Run("forward_proxy_health", ForwardProxyHealthRegression);
+                        if (command is "suite.run" or "suite.forward-multi-target") await Run("forward_multi_target", ForwardMultiTargetRegression);
+                        if (command is "suite.run" or "suite.forward-proxy-receive") await Run("forward_proxy_receive", ForwardProxyReceiveRegression);
                         if (testActivations != 0 || testForegroundSamples != 0) throw new OperationException("界面回归获得前台焦点。");
                         testSuiteResult = result; testSuiteState = "passed";
                     }

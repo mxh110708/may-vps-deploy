@@ -62,6 +62,7 @@ public static class SafePath
 
 public sealed class ArchiveStore(AppPaths paths, ISecretProtector protector)
 {
+    internal ArchiveStore WithPrivateRoot(string directory) { var scoped = new AppPaths(Paths.Root); scoped.SetPrivate(directory); return new ArchiveStore(scoped, protector); }
     public AppPaths Paths { get; } = paths;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     public static string Digest(ReadOnlySpan<byte> bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));

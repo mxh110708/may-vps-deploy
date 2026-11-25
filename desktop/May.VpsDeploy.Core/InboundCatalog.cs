@@ -102,8 +102,11 @@ public static class InboundCatalog
         }
         foreach (var outbound in Items(m, "Outbounds"))
         {
-            Fields(outbound, "Id", "Name", "Kind", "Family", "ExpectedAddress", "Source");
-            if (outbound.Text("Kind") is not ("Direct" or "Proxy") || outbound.Text("Family") is not ("IPv4" or "IPv6" or "Auto")) throw new OperationException("出站类型或出口地址族无效。");
+            Fields(outbound, new[] { "Id", "Name", "Kind", "Family", "ExpectedAddress", "Source" }.Concat(outbound.ContainsKey("ConnectionFamily") ? new[] { "ConnectionFamily" } : Array.Empty<string>()).ToArray());
+            _ = OutboundAddressPolicy.Validate(outbound.Text("Family"));
+            if (outbound.ContainsKey("ConnectionFamily")) _ = OutboundAddressPolicy.Validate(outbound.Text("ConnectionFamily"));
+            if (outbound.Text("Kind") == "Proxy" && outbound.Text("Family") is "PreferIPv4" or "PreferIPv6") throw new OperationException("代理的最终网站地址族由落地决定；请在下一跳连接策略中设置优先地址族。");
+            if (outbound.Text("Kind") is not ("Direct" or "Proxy") || !OutboundAddressPolicy.Values.Contains(outbound.Text("Family"))) throw new OperationException("出站类型或出口地址族无效。");
             if (outbound.Text("ExpectedAddress") != "" && (!IPAddress.TryParse(outbound.Text("ExpectedAddress"), out var address) || IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any) || outbound.Text("Family") == "IPv4" && address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || outbound.Text("Family") == "IPv6" && address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)) throw new OperationException("预期出口地址与地址族不符。");
             var reference = outbound["Source"] as JsonObject ?? throw new OperationException("出站来源无效。");
             if (outbound.Text("Kind") == "Direct") Fields(reference);

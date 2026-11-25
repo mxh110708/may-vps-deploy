@@ -75,6 +75,14 @@ pwsh -NoProfile -File .\scripts\New-VpsReleasePackage.ps1 -Destination '<本地�
 
 ## 验证层级
 
+第42轮入口 `--forward-proxy-receive-only`，纳入 chains；`tests/test_proxy_receive.py` 纳入主校验与 CI。原生入口 `suite.forward-proxy-receive` 仅使用内部合成归档与零前台接口。实际 Debian 12／13、systemd、nftables、原端点、哈希、重启和恢复由 `tests/proxy-receive-runtime42.py` 验证，要求专用标记与 DMI 相同；固定 Xray VLESS/TLS 的实际鉴权与原来源记录由 `tests/proxy-receive-xray-runtime42.py` 验证，仅使用专用标记的临时进程夹具，不改系统信任／服务。见[第42轮](FORWARD-PROXY-RECEIVE-ROUND-42-2026-11-25.zh-CN.md)。
+
+第41轮使用 `--forward-multi-target-only`，配置／事务专项并入 chains 组；Python `tests/test_forward_multi_target.py` 纳入主校验和 CI。原生合成入口 `suite.forward-multi-target` 仅通过内部接口运行，无截图或全局输入，并要求零前台活动。实际分配、会话、systemd、重启与恢复使用 `tests/forward-multi-target-runtime41.py`；三目标 SS／SS2022 鉴权、HTTPS／出口及加密 UDP 使用 `tests/forward-multi-proxy-runtime41.py`。两者均要求专用标记与 DMI 一致的一次性 Debian 客体，不可直接在工作机／生产运行。见[第41轮](FORWARD-MULTI-TARGET-ROUND-41-2026-11-24.zh-CN.md)。
+
+第40轮入口 `--forward-proxy-health-only`，模型及事务并入 chains 组；`tests/test_forward_proxy_health.py` 纳入主校验／CI，Linux CI 补齐 root 私有资源夹具。后台原生 `suite.forward-proxy-health` 与旧 `suite.forward-targets` 分别记录新授权及旧表单结果。实际业务、主备和重启使用 `tests/forward-proxy-health-runtime40.py`，仅在专用标记与 DMI 一致的一次性 Debian 客体执行，不能直接运行在生产。见[第40轮](FORWARD-PROXY-HEALTH-ROUND-40-2026-11-16.zh-CN.md)。
+
+第39轮使用 `--instance-address-only`，模型与事务纳入 `--group operations`；Python `tests/test_instance_address.py` 纳入主校验和 CI，Linux CI 额外执行隔离 root 文件夹具。后台原生入口 `suite.instance-address` 仅使用合成归档，要求零激活／零前台采样。一次性客体内的实际换址、独立入站与重启使用 `tests/instance-address-runtime39.py`，双槽位内核及固定恢复程序使用 `tests/instance-address-wireguard-runtime39.py`；两者均先核对专用标记和 DMI，不能直接运行在工作机／生产机。详见[第39轮](INSTANCE-ADDRESS-ROUND-39-2026-11-16.zh-CN.md)。
+
 解析／静态检查证明格式；模拟测试证明分支和事务判断；临时 Debian 的真实 systemd 测试证明相应生命周期；真实协议验收证明指定路径；生产观察与长测还需时间、报告新鲜度、同阶段资源和清理证据。报告必须写清缺口，不能用前一层替代后一层。
 
 所有公开文档和夹具使用占位符。不要提交私人目录、实际实例信息、签名材料或完整运行配置。上游模块名、协议字段、历史文件名和许可证按其技术含义保留，不能为了品牌统一进行盲目替换。

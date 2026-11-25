@@ -14,6 +14,8 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
 
     public async Task<TaskOutcome> ExecuteAsync(OperationRequest request, string taskId, IProgress<TaskProgress> progress, CancellationToken cancellationToken)
     {
+        InstanceAddressChanges.GuardOperation(store, request);
+        if (request.Kind == OperationKind.InstanceAddress) return await ChangeInstanceAddress(request, taskId, progress, cancellationToken);
         if (request.Kind == OperationKind.WireGuardTunnel) return await ConfigureWireGuard(request, taskId, progress, cancellationToken);
         WireGuardTunnels.GuardOperation(store, request);
         if (request.Kind == OperationKind.TcpChain) return await ConfigureTcpChain(request, taskId, progress, cancellationToken);
@@ -141,6 +143,8 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
         private readonly Dictionary<string, string> passwords = new(StringComparer.Ordinal);
         private string? passphrase;
         public string? KeyPassphrase { get => passphrase; set => passphrase = value; }
+        public string? HostPin { get; set; }
+        public int? AddressWireGuardSlot { get; set; }
         public JsonObject? RestoreRecord { get; set; }
         public InboundPreview? InboundsPreview { get; set; }
         private int stage;
@@ -202,19 +206,20 @@ public sealed partial class WorkflowEngine(ArchiveStore store, IRemoteSessionFac
                     if (password.Length == 0) password = await owner.User.SecretAsync(promptTarget + username + " 的 SSH 登录密码", Cancellation) ?? throw new OperationCanceledException();
                     passwords[username] = password;
                 }
-                return await owner.Connections.OpenAsync(new(Plan.Text("Server.IPv4"), port ?? Port, username, null, password), owner.User, Cancellation);
+                return await owner.Connections.OpenAsync(new(Plan.Text("Server.IPv4"), port ?? Port, username, null, password, ExpectedHostFingerprint: HostPin), owner.User, Cancellation);
             }
-            try { return await owner.Connections.OpenAsync(new(Plan.Text("Server.IPv4"), port ?? Port, username, key, KeyPassphrase: passphrase), owner.User, Cancellation); }
+            try { return await owner.Connections.OpenAsync(new(Plan.Text("Server.IPv4"), port ?? Port, username, key, KeyPassphrase: passphrase, ExpectedHostFingerprint: HostPin), owner.User, Cancellation); }
             catch (KeyPassphraseRequiredException) when (passphrase == null)
             {
                 // A retry is allowed only while opening authentication, before any command is sent.
                 passphrase = await owner.User.SecretAsync(promptTarget + "SSH 私钥口令（未加密可留空）", Cancellation) ?? throw new OperationCanceledException();
-                return await owner.Connections.OpenAsync(new(Plan.Text("Server.IPv4"), port ?? Port, username, key, KeyPassphrase: passphrase), owner.User, Cancellation);
+                return await owner.Connections.OpenAsync(new(Plan.Text("Server.IPv4"), port ?? Port, username, key, KeyPassphrase: passphrase, ExpectedHostFingerprint: HostPin), owner.User, Cancellation);
             }
         }
         public async Task<CommandResult> Run(string asset, Dictionary<string, string>? parameters = null, bool mutation = false, int timeout = 600, string? marker = null, int? port = null, bool bootstrap = false)
         {
             Cancellation.ThrowIfCancellationRequested(); parameters ??= [];
+            if (AddressWireGuardSlot != null) parameters["WIREGUARD_SLOT"] = AddressWireGuardSlot.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (Request.Kind == OperationKind.WireGuardTunnel && Request.Options["Configuration"] is JsonObject tunnel) parameters["WIREGUARD_SLOT"] = WireGuardTunnels.Slot(tunnel, Request.InstanceRelativePath).ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (mutation && !asset.StartsWith("kernel-", StringComparison.Ordinal) && asset is not ("may-monitor-lifecycle.sh" or "tcp-chain-rollback.sh" or "wireguard-pair-rollback.sh" or "protocol-migration-trigger-rollback.sh" or "maintenance-transaction-commit.sh" or "maintenance-transaction-status.sh") && Pending?.Text("RemoteBackup") is { Length: > 0 } backup) parameters["EXPECTED_TRANSACTION"] = backup;
             Report(asset[..^3], mutation ? "正在执行受管步骤，取消将在安全边界处理。" : "正在读取远端状态。");

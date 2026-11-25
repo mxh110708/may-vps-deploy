@@ -65,7 +65,7 @@ public static partial class ServerOutboundRouting
     }
     public static JsonObject XrayNextHop(JsonObject native)
     {
-        var next = NextHop(new JsonObject { ["name"] = "独立入站出站", ["sing_box"] = native.DeepClone() });
+        var next = NextHop(new JsonObject { ["name"] = "独立入站出站", ["sing_box"] = native.DeepClone() }, allowDomain: true);
         return ToOutbound("RealityEntry", next, "egress");
     }
     private static JsonArray MetadataHops(JsonObject? metadata)

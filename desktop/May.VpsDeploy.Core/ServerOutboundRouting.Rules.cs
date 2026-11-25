@@ -7,7 +7,7 @@ public static partial class ServerOutboundRouting
     private static JsonArray AddedRules(string role, JsonArray policy, string[] tags, string family, JsonObject plan, JsonArray? additional = null)
     {
         if (family is not ("IPv4" or "IPv6")) throw new OperationException("服务器出站的出口地址族无效。");
-        ServerDestinationRules.ValidatePath(policy, family, plan.Flag((role == "RealityEntry" ? "Reality" : "AnyTls") + ".ForceIpv4Egress", true), (additional ?? new JsonArray()).OfType<JsonObject>().ToDictionary(h => h.Text("Id"), h => h.Text("EgressFamily"), StringComparer.Ordinal));
+        ServerDestinationRules.ValidatePath(policy, family, plan.Flag((role == "RealityEntry" ? "Reality" : "AnyTls") + ".ForceIpv4Egress", true), (additional ?? new JsonArray()).OfType<JsonObject>().ToDictionary(h => h.Text("Id"), h => h.Text("EgressFamily"), StringComparer.Ordinal), OutboundAddressPolicy.Legacy(plan, role));
         var result = ServerDestinationRules.Render(role, policy, tags);
         JsonArray Inbounds() => new(tags.Select(t => (JsonNode?)JsonValue.Create(t)).ToArray());
         if (role == "RealityEntry")

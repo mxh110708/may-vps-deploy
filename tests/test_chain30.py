@@ -183,7 +183,7 @@ class ProxyOwnership(unittest.TestCase):
         self.assertEqual(self.host.read()['Hash'], original['Hash']); self.assertEqual(self.host.read()['Configuration'], original['Configuration'])
         self.host.path(fixture.TCP.WORKER).write_text('unreviewed replacement')
         # The archived resource hash must detect a worker replaced outside the transaction.
-        self.assertNotEqual(self.host.read()['Hash'], original['Hash'])
+        with self.assertRaises(ValueError): self.host.read()
 
     def test_modes_and_rule_limits_do_not_introduce_implicit_targets(self):
         for version in (None, True, {}, 'auto', 'receive-v2'):

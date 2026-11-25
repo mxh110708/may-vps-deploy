@@ -48,6 +48,7 @@ public sealed partial class MainWindow
                     Details("Reality 端口", Fields(Field("主入口端口", deploymentForm, "RealityPort", "443", true), Field("备用端口（空为自动，0 为关闭）", deploymentForm, "RealityBackupPort", numeric: true))))));
             }
             if (roles.Contains("AnyTlsEntry")) page.Children.Add(Card(Column(SectionHeading("AnyTLS / ECH 入口", Symbol.Link), Fields(Field("服务器名称", deploymentForm, "AnyTlsName"), Field("ECH public name", deploymentForm, "EchPublicName")), Field("入口端口", deploymentForm, "AnyTlsPort", "443", true))));
+            if (roles.Any(r => r is "RealityEntry" or "AnyTlsEntry")) { deploymentForm["EgressPolicy"] ??= "IPv4"; page.Children.Add(Card(Column(Text("直连网站出口", 16), Choice("地址族策略", deploymentForm, "EgressPolicy", OutboundAddressPolicy.Values.Select(v => (v, OutboundAddressPolicy.Label(v)))), Text("只控制入口直连网站；代理落地的最终出口由落地配置决定。", 13, true)))); }
             if (roles.Contains("ShadowsocksLanding")) page.Children.Add(Card(Column(SectionHeading("Shadowsocks 落地", Symbol.Link), Field("可信入口地址（逗号分隔）", deploymentForm, "TrustedEntries"),
                 Fields(Field("落地 TCP / UDP 端口", deploymentForm, "LandingPort", "45001", true), Field("入口组", deploymentForm, "TransitGroup", "US-West-LA Entry")),
                 Fields(Field("IPv4 出口节点名（可选）", deploymentForm, "LandingPrimaryName"), Field("IPv6 出口节点名（可选）", deploymentForm, "LandingSecondaryName")),

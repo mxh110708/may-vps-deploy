@@ -46,8 +46,9 @@ public static class RouteDiagnostics
                     var instance = forward.Text("Instance"); var plan = TcpChains.Plan(store, instance); instances.Add(instance);
                     var rule = TcpForwarding.Rules(plan["TcpForwarding"]!.AsObject()).Single(r => r.Text("Id") == forward.Text("RuleId"));
                     Add(prefix + ".Forward", "转发 → 主目标", instance, rule, "TcpForwarding", "TCP");
-                    if (rule["TargetGroup"] is JsonObject group)
-                        Add(prefix + ".Standby", "转发 → 备用目标（独立检查，不代表当前选用）", instance, rule, "TcpForwarding", "TCP", group.Text("BackupAddress"), group.Number("BackupPort"));
+                    if (rule["TargetGroup"] is JsonObject)
+                        foreach (var (target, i) in ForwardTargetGroups.Targets(rule).Skip(1).Select((t, i) => (t, i + 1)))
+                            Add(prefix + (ForwardTargetGroups.Balanced(rule) ? ".Target." + ForwardTargetGroups.TargetIds(rule).ElementAt(i) : ".Standby"), "转发 → 目标 " + (i + 1) + "（独立检查，不代表当前选用）", instance, rule, "TcpForwarding", "TCP", target.Address, target.Port);
                 }
                 else
                 {

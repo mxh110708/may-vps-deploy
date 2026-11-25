@@ -2,7 +2,7 @@ using System.Text.Json.Nodes;
 
 namespace May.VpsDeploy.Core;
 
-public enum OperationKind { ConnectExisting, Deploy, Resume, HealthAudit, TuneNetwork, ProtocolState, RotateCredentials, Upgrade, Restore, Recover, Komari, Decommission, ResumeImport, InstallComponent, TunnelAccess, MeasureNetwork, BbrKernel, CheckComponentUpdate, ServerOutbound, TcpForward, UdpForward, MayMonitor, MayMonitorAccess, TcpChain, Inbounds, WireGuardTunnel, ManagedCertificate }
+public enum OperationKind { ConnectExisting, Deploy, Resume, HealthAudit, TuneNetwork, ProtocolState, RotateCredentials, Upgrade, Restore, Recover, Komari, Decommission, ResumeImport, InstallComponent, TunnelAccess, MeasureNetwork, BbrKernel, CheckComponentUpdate, ServerOutbound, TcpForward, UdpForward, MayMonitor, MayMonitorAccess, TcpChain, Inbounds, WireGuardTunnel, ManagedCertificate, InstanceAddress }
 public enum TaskOutcome { Running, Completed, CompletedWithWarnings, Cancelled, Failed, NeedsRecovery }
 public enum ComponentScope { Protocol, Network, Firewall, Ssh, KomariAgent, KomariController, Tunnel, ManagedInstance }
 public sealed record HostIdentity(string Host, int Port, string Algorithm, string Sha256Fingerprint, bool Changed);
@@ -32,7 +32,7 @@ public sealed record CommandResult(int ExitCode, string Output, string Error)
         if (ExitCode != 0) throw SafeFailures.Remote(this, safeDescription);
     }
 }
-public sealed record SshEndpoint(string Host, int Port, string User, string? KeyPath, string? Password = null, string? KeyPassphrase = null);
+public sealed record SshEndpoint(string Host, int Port, string User, string? KeyPath, string? Password = null, string? KeyPassphrase = null, string? ExpectedHostFingerprint = null);
 public interface IRemoteSession : IAsyncDisposable
 {
     Task<CommandResult> RunAsync(string command, TimeSpan timeout, CancellationToken cancellationToken);

@@ -48,7 +48,7 @@ public static class ClientProfiles
                             clash["type"] = "ss"; clash["cipher"] = plan.Text("Shadowsocks.Method"); clash["password"] = password;
                             sing["type"] = "shadowsocks"; sing["method"] = plan.Text("Shadowsocks.Method"); sing["password"] = password;
                         }
-                        yield return new(nodeName, role, family, clash, sing, ServerOutboundRouting.EgressFamily(plan, role, egress), role == "RealityEntry" && port != plan.Number("Ports.XrayPrimary"), ServerOutboundRouting.Roles.Contains(role) && plan.At("ServerOutbound." + role) is JsonObject serverRoute ? ArchiveStore.Fingerprint(serverRoute) : "");
+                        yield return new(nodeName, role, family, clash, sing, ServerOutboundRouting.EgressFamily(plan, role, role == "ShadowsocksLanding" ? egress : OutboundAddressPolicy.Strict(OutboundAddressPolicy.Legacy(plan, role)) ? OutboundAddressPolicy.Legacy(plan, role) : "Unknown"), role == "RealityEntry" && port != plan.Number("Ports.XrayPrimary"), ServerOutboundRouting.Roles.Contains(role) && plan.At("ServerOutbound." + role) is JsonObject serverRoute ? ArchiveStore.Fingerprint(serverRoute) : "");
                     }
                 }
             }

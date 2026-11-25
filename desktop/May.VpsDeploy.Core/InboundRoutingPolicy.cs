@@ -47,7 +47,7 @@ public static class InboundRoutingPolicy
             var target = rule.Text("Target") == "" ? original : InboundCatalog.Items(model, "Outbounds").Single(o => o.Text("Id") == rule.Text("Target"));
             var family = rule.Text("Action") == "Direct" ? original.Text("Family") : target.Text("Family");
             var ipv6 = IPAddress.Parse(rule.Text("Value").Split('/')[0]).AddressFamily == AddressFamily.InterNetworkV6;
-            if (family != "Auto" && ipv6 != (family == "IPv6")) throw new OperationException("分流网段与所选出站地址族不符，请明确阻断或选择匹配的去向。");
+            if (OutboundAddressPolicy.Strict(family) && ipv6 != (family == "IPv6")) throw new OperationException("分流网段与所选出站地址族不符，请明确阻断或选择匹配的去向。");
         }
         // Keep the real default-path acceptance independent of policy examples.
         foreach (var host in original.Text("Family") == "IPv4" ? new[] { "api.ipify.org" } : original.Text("Family") == "IPv6" ? new[] { "api6.ipify.org" } : new[] { "api64.ipify.org" })
@@ -58,14 +58,12 @@ public static class InboundRoutingPolicy
     }
     public static string Tag(JsonObject inbound, string id) => id == inbound.Text("OutboundId") ? "egress" : "policy-" + InboundCatalog.Id(id);
     public static string DirectFamily(JsonObject model, JsonObject inbound) => Default(model, inbound).Text("Family");
-    private static JsonObject Direct(string family, string tag, bool xray) => xray
-        ? new JsonObject { ["tag"] = tag, ["protocol"] = "freedom", ["settings"] = new JsonObject { ["domainStrategy"] = family switch { "IPv4" => "ForceIPv4", "IPv6" => "ForceIPv6", _ => "AsIs" } } }
-        : new JsonObject { ["type"] = "direct", ["tag"] = tag, ["domain_resolver"] = new JsonObject { ["server"] = "local", ["strategy"] = family switch { "IPv4" => "ipv4_only", "IPv6" => "ipv6_only", _ => "prefer_ipv4" } } };
+    private static JsonObject Direct(string family, string tag, bool xray) => OutboundAddressPolicy.Direct(family, tag, xray);
     public static JsonObject Apply(ArchiveStore store, JsonObject plan, JsonObject model, JsonObject inbound, JsonObject configuration)
     {
         var rules = Rules(inbound); var isXray = InboundCatalog.UsesXray(inbound);
         foreach (var native in configuration["outbounds"]!.AsArray().OfType<JsonObject>()) ServerOutboundRouting.RequireNativeEngine(native, isXray);
-        if (rules.Count == 0) return configuration;
+        if (rules.Count == 0) return OutboundAddressPolicy.Configure(configuration, model, inbound);
         Validate(model, inbound); var xray = InboundCatalog.UsesXray(inbound); var outputs = configuration["outbounds"]!.AsArray();
         foreach (var target in InboundCatalog.Items(model, "Outbounds").Where(o => References(inbound).Contains(o.Text("Id")) && o.Text("Id") != inbound.Text("OutboundId")))
         {
@@ -82,7 +80,7 @@ public static class InboundRoutingPolicy
         foreach (var rule in original) rendered.Add(rule!.DeepClone());
         configuration[xray ? "routing" : "route"]!["rules"] = rendered;
         if (xray && !outputs.Any(o => o!.Text("tag") == "block")) outputs.Add(new JsonObject { ["tag"] = "block", ["protocol"] = "blackhole" });
-        return configuration;
+        return OutboundAddressPolicy.Configure(configuration, model, inbound);
     }
     public static JsonArray Paths(JsonObject model, JsonObject inbound, JsonObject configuration)
     {
@@ -97,7 +95,7 @@ public static class InboundRoutingPolicy
         void Add(string id, string tag, string family, string expected)
         {
             var outbound = configuration["outbounds"]!.AsArray().OfType<JsonObject>().Single(o => o.Text("tag") == tag);
-            result.Add(new JsonObject { ["Id"] = id, ["Tag"] = tag, ["Family"] = family, ["ExpectedAddress"] = expected, ["OutboundFingerprint"] = ArchiveStore.Fingerprint(outbound) });
+            result.Add(new JsonObject { ["Id"] = id, ["Tag"] = tag, ["Family"] = OutboundAddressPolicy.ObservedFamily(family), ["ExpectedAddress"] = expected, ["OutboundFingerprint"] = ArchiveStore.Fingerprint(outbound) });
             if (ServerOutboundRouting.IsXrayXhttp(outbound)) result[^1]!["Xhttp"] = ServerOutboundRouting.XhttpProof(outbound);
             if (ServerOutboundRouting.IsXrayXhttp(outbound) || ServerUdpRouting.Required(Rules(inbound), id, inbound.Text("OutboundId"))) result[^1]!["UdpRequired"] = true;
         }

@@ -35,7 +35,7 @@ Assert-True ([string]$manifest.xray.installer_sha256 -match '^[0-9a-f]{64}$') 'X
 Assert-True ([string]$manifest.komari_agent.assets.amd64.sha256 -match '^[0-9a-f]{64}$') 'Komari amd64 SHA-256'
 Assert-True ([string]$manifest.komari_controller.version -eq '1.5.1') 'Komari controller pinned latest stable baseline'
 Assert-True ([string]$manifest.komari_agent.version -eq '1.5.11') 'Komari agent pinned latest stable baseline'
-Assert-True ([string]$manifest.sing_box.assets.windows_amd64.version -eq '1.14.2' -and [string]$manifest.sing_box.version -eq '1.14.2') 'Linux and Windows stable baselines were independently verified at 1.14.2'
+Assert-True ([string]$manifest.sing_box.assets.windows_amd64.version -eq '1.14.4' -and [string]$manifest.sing_box.version -eq '1.14.4') 'Linux and Windows stable baselines were independently verified at 1.14.4'
 Assert-True ([string]$manifest.komari_controller.assets.amd64.name -eq 'komari-linux-amd64') 'Komari controller amd64 asset name'
 Assert-True ([string]$manifest.komari_controller.assets.amd64.sha256 -match '^[0-9a-f]{64}$') 'Komari controller amd64 SHA-256'
 Assert-True ([string]$manifest.komari_controller.assets.arm64.sha256 -match '^[0-9a-f]{64}$') 'Komari controller arm64 SHA-256'
@@ -1749,6 +1749,8 @@ Write-Host "All tests passed: $passed assertions" -ForegroundColor Green
 & (Join-Path $ProjectRoot 'tests/Test-AppUpdate.ps1') -ProjectRoot $ProjectRoot
 if($IsWindows){& (Join-Path $ProjectRoot 'tests/Test-Gui.ps1') -ProjectRoot $ProjectRoot}
 if($pythonCommandForClient){
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_instance_address.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Instance address transaction regressions failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_certbot_source.py')
     if($LASTEXITCODE -ne 0){throw 'Certbot scoped DNS API source tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_client_compatibility.py')
@@ -1766,7 +1768,13 @@ if($pythonCommandForClient){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_server_xhttp.py')
     if ($LASTEXITCODE -ne 0) { throw 'Server XHTTP next-hop regressions failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_forward_target_groups.py')
-    if ($LASTEXITCODE -ne 0) { throw 'Explicit forwarding target group regressions failed.' }
+    if($LASTEXITCODE -ne 0){throw 'Forward target group regression failed.'}
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_forward_multi_target.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Multi-target forwarding regressions failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_proxy_receive.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Trusted PROXY receiving and identity regressions failed.' }
+    & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_forward_proxy_health.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Private proxy protocol health regressions failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_resource_certificates.py')
     if($LASTEXITCODE -ne 0){throw 'Read-only public certificate resource checks failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_client_output_review.py')

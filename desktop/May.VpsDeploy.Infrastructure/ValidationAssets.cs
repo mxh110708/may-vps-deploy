@@ -25,7 +25,7 @@ public sealed class ValidationAssets(AppPaths paths, string platform) : IValidat
         if (ArchiveStore.Digest(File.ReadAllBytes(archive)) != artifact.Text("sha256")) throw new OperationException("验证核心归档摘要不匹配，未替换现有缓存。");
         using var zip = ZipFile.OpenRead(archive);
         var executableName = platform.StartsWith("windows-") ? name + ".exe" : name;
-        var entries = zip.Entries.Where(e => Path.GetFileName(e.FullName).Equals(executableName, StringComparison.OrdinalIgnoreCase) || name == "mihomo" && e.Name.StartsWith("mihomo", StringComparison.OrdinalIgnoreCase) && e.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var entries = zip.Entries.Where(e => Path.GetFileName(e.FullName).Equals(executableName, StringComparison.OrdinalIgnoreCase) || name == "may-core" && e.Name == "sing-box.exe" || name == "mihomo" && e.Name.StartsWith("mihomo", StringComparison.OrdinalIgnoreCase) && e.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)).ToArray();
         if (entries.Length != 1) throw new OperationException("验证归档中的核心不唯一。");
         using var source = entries[0].Open(); using var content = new MemoryStream(); source.CopyTo(content); var bytes = content.ToArray();
         var destination = paths.Resolve(".cache/dotnet-client-cores/" + artifact.Text("sha256") + "/" + executableName);

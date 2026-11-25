@@ -91,9 +91,10 @@ public static class ServerDestinationRules
         for (var i = 0; i < a.Length; i++) { var mask = (byte)(0xff << Math.Clamp(8 - (prefix - i * 8), 0, 8)); if ((a[i] & mask) != b[i]) return false; }
         return true;
     }
-    public static void ValidatePath(JsonArray rules, string family, bool directIpv4Only, IReadOnlyDictionary<string, string>? additionalFamilies = null)
+    public static void ValidatePath(JsonArray rules, string family, bool directIpv4Only, IReadOnlyDictionary<string, string>? additionalFamilies = null, string directFamily = "")
     {
         additionalFamilies ??= new Dictionary<string, string>();
+        directFamily = directFamily == "" ? directIpv4Only ? "IPv4" : "Auto" : OutboundAddressPolicy.Validate(directFamily);
         var targets = rules.OfType<JsonObject>().Where(r => r.Text("Target") != "").Select(r => r.Text("Target")).ToHashSet(StringComparer.Ordinal);
         if (targets.Any(id => !additionalFamilies.ContainsKey(id))) throw new OperationException("规则引用的附加落地已不存在，请重新选择，不会改用默认落地。");
         if (additionalFamilies.Keys.Any(id => !targets.Contains(id))) throw new OperationException("附加落地没有规则引用，请先添加规则或移除不用的落地。");
@@ -102,7 +103,7 @@ public static class ServerDestinationRules
             var isV6 = IPAddress.Parse(rule.Text("Value").Split('/')[0]).AddressFamily == AddressFamily.InterNetworkV6;
             var targetFamily = rule.Text("Target") == "" ? family : additionalFamilies[rule.Text("Target")];
             if (rule.Text("Action") == "NextHop" && isV6 != (targetFamily == "IPv6")) throw new OperationException("落地网段的地址族与预期出口不一致，请修改规则或明确阻断此网段。");
-            if (rule.Text("Action") == "Direct" && isV6 && directIpv4Only) throw new OperationException("原入口机直连策略仅允许 IPv4，不能为 IPv6 网段设置直连。");
+            if (rule.Text("Action") == "Direct" && OutboundAddressPolicy.Strict(directFamily) && isV6 != (directFamily == "IPv6")) throw new OperationException("直连网段与入口机的严格地址族策略冲突，请明确阻断或选择匹配去向。");
         }
         // Keep the existing independent next-hop acceptance meaningful. No hidden priority rules.
         var egressHost = family == "IPv6" ? "api64.ipify.org" : "api.ipify.org";

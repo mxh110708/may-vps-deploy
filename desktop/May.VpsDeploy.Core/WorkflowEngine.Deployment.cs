@@ -30,7 +30,7 @@ public sealed partial class WorkflowEngine
             var data = privateData.At("Protocols." + role)?.AsObject() ?? throw new OperationException("已安装协议缺少完整受支持配置。");
             c.Plan.Put("Ports." + portName, JsonValue.Create(data.Number(role == "RealityEntry" ? "PrimaryPort" : "Port")));
             var target = c.Plan[setting]!.AsObject();
-            foreach (var field in new[] { "TargetMode", "ServerName", "TargetAddress", "LocalHttpsPort", "ForceIpv4Egress", "XrayVersion", "EchPublicName", "PaddingScheme", "SingBoxVersion", "Method", "SecondaryIpv6Enabled", "SecondaryIpv6Address", "SecondaryBindInterface" }) if (data.ContainsKey(field)) target[field] = data[field]?.DeepClone();
+            foreach (var field in new[] { "TargetMode", "ServerName", "TargetAddress", "LocalHttpsPort", "ForceIpv4Egress", "EgressPolicy", "XrayVersion", "EchPublicName", "PaddingScheme", "SingBoxVersion", "Method", "SecondaryIpv6Enabled", "SecondaryIpv6Address", "SecondaryBindInterface" }) if (data.ContainsKey(field)) target[field] = data[field]?.DeepClone();
             if (role == "RealityEntry") { target["Target"] = data.Text("TargetHost"); c.Plan.Put("Ports.XrayBackup", data["BackupPort"]?.DeepClone()); }
             if (data["Secrets"] != null) c.Secrets[role == "RealityEntry" ? "Xray" : setting] = data["Secrets"]!.DeepClone();
         }

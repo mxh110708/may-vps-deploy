@@ -41,6 +41,11 @@ internal sealed partial class BoundaryTests
             var known = new HostTestUser((_, _) => throw new Exception("Trusted host unexpectedly asked again."));
             await using (await factory.OpenAsync(endpoint, known, default)) { }
             Check(known.Confirmations == 0, "known identity requested repeated trust");
+            var pinnedIdentity = ArchiveStore.ReadJson(fixture.Paths.Resolve("private/ssh-hosts.dotnet.json")).Text(ArchiveStore.Digest(Encoding.UTF8.GetBytes(endpoint.Host)));
+            await using (await factory.OpenAsync(endpoint with { ExpectedHostFingerprint = pinnedIdentity }, known, default)) { }
+            var beforeWrongPin = ArchiveStore.ReadJson(statsFile).Number("auth");
+            await RefusesAsync(async () => { await using var rejected = await factory.OpenAsync(endpoint with { ExpectedHostFingerprint = "SHA256:" + new string('A', 43) }, known, default); }, "an already trusted address bypassed the explicit original-host pin");
+            Check(ArchiveStore.ReadJson(statsFile).Number("auth") == beforeWrongPin && known.Confirmations == 0, "wrong explicit host pin sent credentials or asked to replace trust");
             await using (var session = await factory.OpenAsync(endpoint, known, default))
             {
                 var payload = "# MXH_TRANSPORT_FIXTURE\r\nset -euo pipefail\r\nprintf 'VPSDEPLOY_SCRIPT_OK\\n'\r\n" + string.Concat(Enumerable.Repeat("# 中文节点\r\n", 4096));

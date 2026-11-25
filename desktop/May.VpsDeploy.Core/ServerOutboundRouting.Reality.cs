@@ -21,7 +21,8 @@ public static partial class ServerOutboundRouting
         var result = current.DeepClone().AsObject(); var outputs = result["outbounds"]!.AsArray(); var route = result["routing"]!.AsObject();
         if (route["rules"] is not JsonArray rules || route.Text("domainStrategy") != "AsIs" || route.Any(p => p.Key is not ("rules" or "domainStrategy"))) throw new OperationException("Reality 具有自定义分流，未改写原规则。");
         var ownedOutput = outputs.OfType<JsonObject>().Where(o => o.Text("tag") == Tag).ToArray();
-        var ownedRules = rules.OfType<JsonObject>().Where(r => r.Strings("inboundTag").Intersect(tags, StringComparer.Ordinal).Any()).ToArray();
+        bool BusinessFamilyGuard(JsonObject r) => r.Count == 5 && r.Text("network") == "tcp,udp" && r.All(p => p.Key is "type" or "ip" or "inboundTag" or "outboundTag" or "network") && r.Text("type") == "field" && r.Text("outboundTag") == "block" && r.Strings("inboundTag").SequenceEqual(tags) && (r.Strings("ip").SequenceEqual(["::/0"]) || r.Strings("ip").SequenceEqual(["0.0.0.0/0"]));
+        var ownedRules = rules.OfType<JsonObject>().Where(r => !BusinessFamilyGuard(r) && r.Strings("inboundTag").Intersect(tags, StringComparer.Ordinal).Any()).ToArray();
         RemoveNamedHops(outputs, previous);
         if (previous == null)
         {
@@ -32,7 +33,7 @@ public static partial class ServerOutboundRouting
             if (previous.Number("Version") != 1 || ownedOutput.Length != 1 || ArchiveStore.Fingerprint(ownedOutput[0]) != previous.Text("OutboundFingerprint") || !OwnedRulesMatch("RealityEntry", ownedRules, previous, tags, plan)) throw new OperationException("受管 Reality 出站已漂移，未覆盖或删除。", code: "ServerOutboundDrift");
             outputs.Remove(ownedOutput[0]); foreach (var rule in ownedRules) rules.Remove(rule);
         }
-        if (outputs.Count != 2 || outputs[0]?.Text("tag") != "direct" || outputs[0]?.Text("protocol") != "freedom" || outputs[1]?.Text("tag") != "block" || outputs[1]?.Text("protocol") != "blackhole" || rules.Count > 1 || rules.Any(r => r is not JsonObject o || o.Count != 3 || o.Text("type") != "field" || o.Text("outboundTag") != "block" || !o.Strings("ip").SequenceEqual(["::/0"]))) throw new OperationException("Reality 原有出站或规则超出受支持范围，保留原配置。");
+        if (outputs.Count != 2 || outputs[0]?.Text("tag") != "direct" || outputs[0]?.Text("protocol") != "freedom" || outputs[1]?.Text("tag") != "block" || outputs[1]?.Text("protocol") != "blackhole" || rules.Count > 1 || rules.Any(r => r is not JsonObject o || o.Count is not (3 or 4 or 5) || o.ContainsKey("network") && o.Text("network") != "tcp,udp" || o.ContainsKey("inboundTag") && !o.Strings("inboundTag").SequenceEqual(tags) || o.Text("type") != "field" || o.Text("outboundTag") != "block" || !(o.Strings("ip").SequenceEqual(["::/0"]) || o.Strings("ip").SequenceEqual(["0.0.0.0/0"])))) throw new OperationException("Reality 原有出站或规则超出受支持范围，保留原配置。");
         JsonObject? metadata = null;
         if (node == null)
         {

@@ -37,6 +37,14 @@ public sealed class SshSessionFactory(ArchiveStore store, TimeSpan? connectionTi
                     bool Accept(byte[] hostKey, string algorithm)
                     {
                         var identity = HostTrust.Identity(endpoint.Host, endpoint.Port, algorithm, hostKey);
+                        if (endpoint.ExpectedHostFingerprint != null)
+                        {
+                            if (identity.Sha256Fingerprint != endpoint.ExpectedHostFingerprint) { identityFailure = new OperationException("新管理地址的 SSH 身份与原实例不同，换址已停止；重装身份须单独核对。", code: "AddressHostIdentityChanged"); return false; }
+                            // Pin every SSH and SFTP handshake, including an address
+                            // already present in the trust store. Do not learn aliases.
+                            try { _ = trust.IsTrusted(identity); return true; }
+                            catch (OperationException error) { identityFailure = error; return false; }
+                        }
                         try { if (trust.IsTrusted(identity)) return true; unknown = identity; }
                         catch (Exception error) { identityFailure = SafeFailures.Describe(error); }
                         return false;

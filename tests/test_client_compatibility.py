@@ -86,10 +86,10 @@ class ClientCompatibilityTests(unittest.TestCase):
 
     def test_compatibility_catalog_separates_client_from_server(self):
         manifest = json.loads((ROOT / "config/versions.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["sing_box"]["version"], "1.14.2")
-        self.assertEqual(manifest["sing_box"]["assets"]["amd64"]["name"], "sing-box-1.14.2-linux-amd64.tar.gz")
-        self.assertEqual(manifest["sing_box"]["assets"]["windows_amd64"]["version"], "1.14.2")
-        self.assertEqual(manifest["client_compatibility"]["may_route"]["version"], "1.14.2-mxh.7")
+        self.assertEqual(manifest["sing_box"]["version"], "1.14.4")
+        self.assertEqual(manifest["sing_box"]["assets"]["amd64"]["name"], "sing-box-1.14.4-linux-amd64.tar.gz")
+        self.assertEqual(manifest["sing_box"]["assets"]["windows_amd64"]["version"], "1.14.4")
+        self.assertEqual(manifest["client_compatibility"]["may_route"]["version"], "1.14.4-may.1")
 
 
 if __name__ == "__main__":

@@ -56,12 +56,13 @@ internal sealed partial class BoundaryTests
         var source = ClientSchemes.New(f.Paths); source["Nodes"] = new JsonArray(node.DeepClone()); f.Store.WriteSecret(ServerOutboundRouting.SchemeFile(f.Paths, source.Text("Id")), source);
         var rule = new JsonObject { ["Validation"] = new JsonObject { ["SchemeId"] = source.Text("Id"), ["NodeId"] = node.Text("Id"), ["NodeFingerprint"] = ArchiveStore.Fingerprint(node) } };
         Refuses(() => TcpForwarding.ProxyNode(f.Store, rule), "TCP forwarding accepted TUIC");
-        var oldCore = ArchiveStore.ReadJson(stateFile)["Inbounds"]!["Core"]!.DeepClone(); var versions = f.Versions;
-        versions.Put("sing_box.version", JsonValue.Create("1.14.3")); versions.Put("sing_box.assets.amd64.name", JsonValue.Create("sing-box-1.14.3-linux-amd64.tar.gz")); versions.Put("sing_box.assets.amd64.sha256", JsonValue.Create(new string('f', 64))); ArchiveStore.WriteJson(f.Paths.Resolve("config/versions.json"), versions);
+        var oldCore = ArchiveStore.ReadJson(stateFile)["Inbounds"]!["Core"]!.DeepClone(); var versions = f.Versions; var currentVersion = Version.Parse(versions.Text("sing_box.version")); var upgradeVersion = new Version(currentVersion.Major, currentVersion.Minor, currentVersion.Build + 1).ToString(); // Synthetic future-version fixture, never downloaded.
+
+        versions.Put("sing_box.version", JsonValue.Create(upgradeVersion)); versions.Put("sing_box.assets.amd64.name", JsonValue.Create("sing-box-"+upgradeVersion+"-linux-amd64.tar.gz")); versions.Put("sing_box.assets.amd64.sha256", JsonValue.Create(new string('f', 64))); ArchiveStore.WriteJson(f.Paths.Resolve("config/versions.json"), versions);
         OperationRequest Upgrade() => new(OperationKind.Inbounds, f.Relative(plan), InboundCatalog.Options(ArchiveStore.ReadJson(stateFile), "UpgradeSingBox", model, credentials));
         var preview = InboundCatalog.Prepare(f.Store, Upgrade()); Check(preview.Affected.Contains(tuic.Text("Id")) && preview.Affected.Contains(sibling.Text("Id")) && JsonNode.DeepEquals(preview.Payload["Core"]!["Reality"], oldCore["Reality"]), "Shared core upgrade missed TUIC or changed the Xray pin");
         validation.UdpPassed = false; var upgrade = Upgrade(); Check((await coordinator.ExecuteAsync(coordinator.Review(upgrade), upgrade, new InlineProgress<TaskProgress>(_ => { }), default)).Outcome == TaskOutcome.Failed && JsonNode.DeepEquals(ArchiveStore.ReadJson(stateFile)["Inbounds"]!["Core"], oldCore), "TUIC upgrade without UDP proof did not restore its previous core pin");
-        validation.UdpPassed = true; upgrade = Upgrade(); Check((await coordinator.ExecuteAsync(coordinator.Review(upgrade), upgrade, new InlineProgress<TaskProgress>(_ => { }), default)).Outcome == TaskOutcome.Completed && ArchiveStore.ReadJson(stateFile).Text("Inbounds.Core.Version") == "1.14.3", "TUIC explicit shared-core upgrade failed");
+        validation.UdpPassed = true; upgrade = Upgrade(); Check((await coordinator.ExecuteAsync(coordinator.Review(upgrade), upgrade, new InlineProgress<TaskProgress>(_ => { }), default)).Outcome == TaskOutcome.Completed && ArchiveStore.ReadJson(stateFile).Text("Inbounds.Core.Version") == upgradeVersion, "TUIC explicit shared-core upgrade failed");
         credentials.Clear();
     }
     private sealed class TuicMockValidation(ArchiveStore store) : IInboundValidation

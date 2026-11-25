@@ -46,17 +46,29 @@ def main():
         raise ValueError('Owned systemd runtime directory is required.')
     monitor = TargetMonitor(rule, args.transport, runtime / 'group-status.json',
                             probe=lambda endpoint: health_probe(rule, endpoint, args.transport, proxy_header=proxy_group_header))
+    proxy_probe = None
     try:
+        if rule['TargetGroup']['Health']['Type'] == 'Proxy':
+            credential = Path(os.environ['CREDENTIALS_DIRECTORY']) / 'proxy-health'
+            if credential.is_symlink() or credential.stat().st_size > 262144: raise ValueError('Invalid private probe credential.')
+            document = json.loads(credential.read_text())
+            entry = document['Rules'][rule['Id']]
+            if entry['RuleFingerprint'] != group_fingerprint(rule) or entry['NodeFingerprint'] != rule['Validation']['NodeFingerprint']: raise ValueError('Probe credential source drift.')
+            proxy_probe = ProxyProbe(rule, document, runtime)
+            proxy_probe.start()
+            monitor.probe = proxy_probe.probe
+            monitor.details = lambda: copy.deepcopy(proxy_probe.evidence)
         if args.transport == 'TCP' and any(s.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_STREAM or not s.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) for s in listeners):
             raise ValueError('Invalid group activation listener.')
         monitor.start()
         if args.transport == 'TCP':
-            tcp_group_run(listeners, rule['TargetAddress'], rule['TargetPort'], rule.get('ProxyProtocol'), target_selector=monitor.selected)
+            tcp_group_run(listeners, rule['TargetAddress'], rule['TargetPort'], rule.get('ProxyProtocol'), source_selector=monitor.selected, receive=rule.get('ProxyReceive'))
         else:
             Relay(listeners, (rule['TargetAddress'], rule['TargetPort']), rule['SessionTimeoutSeconds'], rule['MaximumSessions'],
-                  allowed=rule['AllowedSources'], target_selector=monitor.selected, target_healthy=monitor.healthy).run()
+                  allowed=rule['AllowedSources'], source_selector=monitor.selected, target_healthy=monitor.healthy).run()
     finally:
         monitor.close()
+        if proxy_probe is not None: proxy_probe.close()
         for listener in listeners: listener.close()
 
 

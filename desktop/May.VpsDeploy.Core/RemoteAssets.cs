@@ -13,11 +13,16 @@ public sealed class RemoteAssets(AppPaths paths)
     }
     public string Payload(string asset, IReadOnlyDictionary<string, string> parameters)
     {
+        if (asset == "instance-address.sh") return AddressPayload(parameters);
         var text = new StringBuilder("# MXH asset: " + asset + "\nset -euo pipefail\n");
         foreach (var (name, value) in parameters.OrderBy(p => p.Key))
         {
             if (!Regex.IsMatch(name, "^[A-Z][A-Z0-9_]*$")) throw new OperationException("远端参数名称无效。");
             var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+            if (name == "PROXY_HEALTH")
+            {
+                text.Append("umask 077\nVPS_PARAM_PROXY_HEALTH_FILE=$(mktemp /tmp/may-forward-health.XXXXXXXXXX)\nexport VPS_PARAM_PROXY_HEALTH_FILE\ntrap 'rm -f -- \"$VPS_PARAM_PROXY_HEALTH_FILE\"' EXIT\nbase64 -d > \"$VPS_PARAM_PROXY_HEALTH_FILE\" <<'MAY_FORWARD_HEALTH_B64'\n").Append(encoded).Append("\nMAY_FORWARD_HEALTH_B64\n"); continue;
+            }
             if (name == "PROBES_JSON")
             {
                 text.Append("VPS_PARAM_PROBES_JSON_FILE=$(mktemp /tmp/may-server-probes.XXXXXXXXXX)\nchmod 0600 \"$VPS_PARAM_PROBES_JSON_FILE\"\nexport VPS_PARAM_PROBES_JSON_FILE\ntrap 'rm -f -- \"$VPS_PARAM_PROBES_JSON_FILE\"' EXIT\nbase64 -d > \"$VPS_PARAM_PROBES_JSON_FILE\" <<'MAY_SERVER_PROBES_B64'\n").Append(encoded).Append("\nMAY_SERVER_PROBES_B64\n");
@@ -36,7 +41,7 @@ public sealed class RemoteAssets(AppPaths paths)
             // Pin the UDP worker inside the recovery program as well as the
             // managed file; old snapshots must not depend on the current app.
             if (variable is "VPS_TCP_FORWARD_PROGRAM" or "VPS_UDP_FORWARD_PROGRAM")
-                foreach (var (name, source) in new[] { ("TCP_PROXY_WORKER_SOURCE", "tcp-proxy-worker.py"), ("UDP_WORKER_SOURCE", "udp-forward-worker.py"), ("FORWARD_GROUP_SOURCE", "forward-target-groups.py"), ("FORWARD_GROUP_WORKER_SOURCE", "forward-group-worker.py") })
+                foreach (var (name, source) in new[] { ("TCP_PROXY_WORKER_SOURCE", "tcp-proxy-worker.py"), ("UDP_WORKER_SOURCE", "udp-forward-worker.py"), ("FORWARD_GROUP_SOURCE", "forward-target-groups.py"), ("FORWARD_GROUP_WORKER_SOURCE", "forward-group-worker.py"), ("PROXY_HEALTH_SOURCE", "forward-proxy-health.py") })
                     program = name + " = " + System.Text.Json.JsonSerializer.Serialize(File.ReadAllText(paths.Resolve("scripts/" + source)).Replace("\r\n", "\n")) + "\n" + program;
             if (variable == "VPS_WIREGUARD_PROGRAM")
             {
@@ -77,6 +82,26 @@ public sealed class RemoteAssets(AppPaths paths)
             if (parameters.ContainsKey("EXPECTED_TRANSACTION")) text.Append("vps_transaction_check || exit 1\n");
         }
         return text.Append(Read(asset)).Append('\n').ToString();
+    }
+    public string AddressProgram()
+    {
+        var sources = new Dictionary<string, string>();
+        foreach (var name in new[] { "forwarding-host", "tcp-forwarding", "udp-forwarding", "tcp-proxy-worker", "udp-forward-worker", "forward-target-groups", "forward-group-worker", "forward-proxy-health", "wireguard-runtime", "wireguard-host", "server-xhttp", "inbound-host" }) sources[name] = File.ReadAllText(paths.Resolve("scripts/" + name + ".py")).Replace("\r\n", "\n");
+        var firewall = Read("firewall-tools.sh"); var start = firewall.IndexOf("def table(", StringComparison.Ordinal); var end = firewall.IndexOf("def identity(", start, StringComparison.Ordinal);
+        sources["firewall-canonical"] = "import re, ipaddress, subprocess\n" + firewall[start..end];
+        var transport = File.ReadAllText(paths.Resolve("scripts/instance-address-launcher.py")).Replace("\r\n", "\n") + Read("instance-address.sh");
+        return "# Address transport: " + ArchiveStore.Digest(Encoding.UTF8.GetBytes(transport)) + "\nADDRESS_SOURCES = " + System.Text.Json.JsonSerializer.Serialize(sources) + "\n" + File.ReadAllText(paths.Resolve("scripts/instance-address.py")).Replace("\r\n", "\n");
+    }
+    private string AddressPayload(IReadOnlyDictionary<string, string> parameters)
+    {
+        if (parameters.Count != 2 || !parameters.ContainsKey("ADDRESS_DOCUMENT") || !new[] { "Inspect", "Prepare", "Bridge", "Apply", "Finalize", "Status", "Rollback", "Commit" }.Contains(parameters.GetValueOrDefault("ADDRESS_ACTION"))) throw new OperationException("换址远端参数无效。");
+        var program = AddressProgram();
+        // Large pinned programs and private documents travel through mode-0600
+        // files, avoiding environment/argv size limits and process listings.
+        var script = new StringBuilder("# MXH asset: instance-address.sh\nset -euo pipefail\numask 077\nVPS_ADDRESS_PROGRAM_FILE=$(mktemp /tmp/may-address-program.XXXXXXXX)\nVPS_PARAM_ADDRESS_DOCUMENT_FILE=$(mktemp /tmp/may-address-document.XXXXXXXX)\nexport VPS_PARAM_ADDRESS_DOCUMENT_FILE\ntrap 'rm -f -- \"$VPS_ADDRESS_PROGRAM_FILE\" \"$VPS_PARAM_ADDRESS_DOCUMENT_FILE\"' EXIT\n");
+        script.Append("base64 -d > \"$VPS_ADDRESS_PROGRAM_FILE\" <<'MAY_ADDRESS_PROGRAM_B64'\n").Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(program))).Append("\nMAY_ADDRESS_PROGRAM_B64\n");
+        script.Append("base64 -d > \"$VPS_PARAM_ADDRESS_DOCUMENT_FILE\" <<'MAY_ADDRESS_DOCUMENT_B64'\n").Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(parameters["ADDRESS_DOCUMENT"]))).Append("\nMAY_ADDRESS_DOCUMENT_B64\n");
+        script.Append("export VPS_PARAM_ADDRESS_ACTION='").Append(parameters["ADDRESS_ACTION"]).Append("'\nexport VPS_ADDRESS_PROGRAM_FILE\n").Append(Read("instance-address.sh").Replace("raise RuntimeError('Address launcher must be rendered by the reviewed application.')", File.ReadAllText(paths.Resolve("scripts/instance-address-launcher.py")).Replace("\r\n", "\n"), StringComparison.Ordinal)); return script.ToString();
     }
     public static string Marker(string text, string name, bool required = true)
     {

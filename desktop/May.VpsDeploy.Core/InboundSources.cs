@@ -36,6 +36,7 @@ public static class InboundSources
             var directory = store.Paths.Instance(instance); var state = ArchiveStore.ReadJson(SafePath.Resolve(directory, "deployment-state.json")); var secrets = store.ReadSecret(SafePath.Resolve(directory, "secrets.dotnet.private.json"));
             try
             {
+                if (InstanceAddressChanges.Preparing.Value) return InboundRendering.Nodes(store, instance, plan, plan["InboundModel"]!.AsObject(), secrets["Inbounds"]!.AsObject()).Single(n => n.Text("InboundOrigin.InboundId") == inboundId && n.Text("InboundOrigin.UserId") == userId && n.Text("InboundOrigin.Family") == family);
                 var model = InboundCatalog.Normalize(plan["InboundModel"]?.AsObject() ?? InboundCatalog.Empty(), (secrets["Inbounds"] ?? InboundCatalog.EmptyCredentials()).AsObject());
                 if (state.Text("Inbounds.ModelFingerprint") != ArchiveStore.Fingerprint(model) || state.Text("Inbounds.RemoteHash") is "" or "Absent" || state.Text("Inbounds.LastCheck") == "Failed") throw new OperationException("入站模型尚未应用、最近核对失败或缺少匹配归档。");
                 var node = InboundRendering.Nodes(store, instance, plan, model, secrets["Inbounds"]!.AsObject()).SingleOrDefault(n => n.Text("InboundOrigin.InboundId") == inboundId && n.Text("InboundOrigin.UserId") == userId && n.Text("InboundOrigin.Family") == family) ?? throw new OperationException("入站或用户已移除、解绑或停用。");

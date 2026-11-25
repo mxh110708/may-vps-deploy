@@ -51,20 +51,20 @@
     }
   },
   "sing_box": {
-    "version": "1.14.2",
+    "version": "1.14.4",
     "assets": {
       "amd64": {
-        "name": "sing-box-1.14.2-linux-amd64.tar.gz",
-        "sha256": "a684484d7477d1437282ee411f4d131d0340aaad60a7868841ebd5d87dd8a0c6"
+        "name": "sing-box-1.14.4-linux-amd64.tar.gz",
+        "sha256": "699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968"
       },
       "arm64": {
-        "name": "sing-box-1.14.2-linux-arm64.tar.gz",
-        "sha256": "b43a1fb1bda131c6653576741ce527eb2bdeab7c9308ca90ee8b972abb7e4a7f"
+        "name": "sing-box-1.14.4-linux-arm64.tar.gz",
+        "sha256": "436441f76ee2f7fe21b5b2d426d3cb261a480455a704865789ad533e4273ec26"
       },
       "windows_amd64": {
-        "version": "1.14.2",
-        "name": "sing-box-1.14.2-windows-amd64.zip",
-        "sha256": "c2d8bfff918755808781dfdeeb8581b6c91eb3a243d9a7b55483cfc0c0684d32"
+        "version": "1.14.4",
+        "name": "sing-box-1.14.4-windows-amd64.zip",
+        "sha256": "99185d75d314a07dbba4a130c8ad986cbeb629a07927975636b341ca61f991df"
       }
     }
   },
@@ -83,9 +83,9 @@
   },
   "client_compatibility": {
     "may_route": {
-      "version": "1.14.2-mxh.7",
-      "core_version": "1.14.2",
-      "release_url": "https://github.com/mxh110708/may-route-desktop/releases/tag/v1.14.2-mxh.7",
+      "version": "1.14.4-may.1",
+      "core_version": "1.14.4",
+      "release_url": "https://github.com/mxh110708/may-route-desktop/releases/tag/v1.14.4-may.1",
       "public_rules_bundle": {
         "source": "https://raw.githubusercontent.com/mxh110708/may-route-desktop/61715f8b20e7e95a068e71b67a80ed058d692774/resources/public-rules-v1.json",
         "sha256": "859c99058f5c9a481f01a8048dce72cf7ce1f623175c85815866b06e8fc29839"

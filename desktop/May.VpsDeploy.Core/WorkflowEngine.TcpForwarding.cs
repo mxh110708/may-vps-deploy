@@ -7,6 +7,8 @@ public sealed partial class WorkflowEngine
     private async Task ConfigureTcpForwarding(Context c)
     {
         var preview = TcpForwarding.Prepare(store, c.Request); var action = c.Request.Options.Text("Action");
+        var healthIdentity = ArchiveStore.Fingerprint(ForwardProxyHealth.Document(store, preview.Configuration));
+        string Health() { var value = ForwardProxyHealth.Document(store, preview.Configuration); if (ArchiveStore.Fingerprint(value) != healthIdentity) throw new OperationException("协议健康来源或固定核心在执行中变化，请重新审阅。"); return value.ToJsonString(); }
         async Task<JsonObject> Read()
         {
             var response = await c.Run("tcp-forward-read.sh", new() { ["ARCHIVED_HASH"] = preview.ExpectedHash }, marker: "TCP_FORWARD_READ");
@@ -21,7 +23,7 @@ public sealed partial class WorkflowEngine
             if (observed.Text("Hash") != preview.ExpectedHash) throw new OperationException("转发实际配置、白名单或监听状态与归档不同，未写入服务器。", code: "TcpForwardRemoteDrift");
             if (action != "Check")
             {
-                await c.Run("tcp-forward-read.sh", new() { ["CANDIDATE_JSON"] = preview.Configuration.ToJsonString(), ["ARCHIVED_HASH"] = preview.ExpectedHash }, marker: "TCP_FORWARD_READ");
+                await c.Run("tcp-forward-read.sh", new() { ["CANDIDATE_JSON"] = preview.Configuration.ToJsonString(), ["ARCHIVED_HASH"] = preview.ExpectedHash, ["PROXY_HEALTH"] = Health() }, timeout: 180, marker: "TCP_FORWARD_READ");
                 if (c.Plan.Text("Firewall.Mode") != "PreserveExisting") await c.Run("firewall-preflight.sh", FirewallParameters(c.Plan, true), marker: "FIREWALL_SCOPE_OK");
             }
         });
@@ -32,7 +34,7 @@ public sealed partial class WorkflowEngine
             {
                 if (action == "Remove") c.Plan.Remove("TcpForwarding"); else c.Plan["TcpForwarding"] = preview.Configuration.DeepClone();
                 c.Save();
-                await c.Run("tcp-forward-apply.sh", new() { ["ACTION"] = action, ["CONFIG_JSON"] = preview.Configuration.ToJsonString(), ["EXPECTED_HASH"] = preview.ExpectedHash }, true, 120, "TCP_FORWARD_APPLIED");
+                await c.Run("tcp-forward-apply.sh", new() { ["ACTION"] = action, ["CONFIG_JSON"] = preview.Configuration.ToJsonString(), ["EXPECTED_HASH"] = preview.ExpectedHash, ["PROXY_HEALTH"] = Health() }, true, 180, "TCP_FORWARD_APPLIED");
                 await Firewall(c, true);
             });
         }
@@ -48,11 +50,21 @@ public sealed partial class WorkflowEngine
             {
                 if (observed["Configuration"] == null || ArchiveStore.Fingerprint(observed["Configuration"]!) != ArchiveStore.Fingerprint(preview.Configuration)) throw new OperationException("实际转发配置与审阅结果不符。");
                 if (tcpForwarding == null) throw new OperationException("实际转发验收适配器不可用，未提交变更。");
+                JsonObject? groupProof = null;
+                if (TcpForwarding.Rules(preview.Configuration).Any(r => r.Flag("Enabled") && ForwardTargetGroups.Balanced(r)))
+                {
+                    var ready = await c.Run("tcp-forward-read.sh", new() { ["PROBE_GROUPS"] = "true", ["EXPECTED_HASH"] = observed.Text("Hash") }, false, ForwardTargetGroups.ProbeTimeout(preview.Configuration), "TCP_FORWARD_READ");
+                    groupProof = JsonNode.Parse(RemoteAssets.Marker(ready.Output, "FORWARD_GROUP_PROBE"))!.AsObject();
+                }
                 var result = await tcpForwarding.ValidateAsync(c.Plan, preview.Configuration, c.File("tcp-forward-validation/" + c.Id), new InlineProgress<string>(m => c.Report("实际 TCP 转发验收", m)), c.Cancellation);
                 if (TcpForwarding.Rules(preview.Configuration).Any(r => r.Flag("Enabled") && r["TargetGroup"] is JsonObject))
                 {
-                    var probe = await c.Run("tcp-forward-read.sh", new() { ["PROBE_GROUPS"] = "true", ["EXPECTED_HASH"] = observed.Text("Hash") }, false, 180, "TCP_FORWARD_READ");
-                    ForwardTargetGroups.AttachProof(preview.Configuration, result, JsonNode.Parse(RemoteAssets.Marker(probe.Output, "FORWARD_GROUP_PROBE"))!.AsObject(), observed.Text("Hash"), action == "Apply");
+                    if (groupProof == null)
+                    {
+                        var probe = await c.Run("tcp-forward-read.sh", new() { ["PROBE_GROUPS"] = "true", ["EXPECTED_HASH"] = observed.Text("Hash") }, false, ForwardTargetGroups.ProbeTimeout(preview.Configuration), "TCP_FORWARD_READ");
+                        groupProof = JsonNode.Parse(RemoteAssets.Marker(probe.Output, "FORWARD_GROUP_PROBE"))!.AsObject();
+                    }
+                    ForwardTargetGroups.AttachProof(preview.Configuration, result, groupProof, observed.Text("Hash"), action == "Apply");
                 }
                 TcpForwarding.RequireValidation(preview.Configuration, result);
                 var after = await Read();

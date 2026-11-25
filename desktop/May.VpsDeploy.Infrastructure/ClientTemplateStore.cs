@@ -93,7 +93,8 @@ public sealed class ClientTemplateStore(ArchiveStore store, IExternalToolRunner 
         var snapshot = document.DeepClone().AsObject(); var fingerprint = ArchiveStore.Fingerprint(snapshot); var rendered = await Render(snapshot, token);
         if (!JsonNode.DeepEquals(snapshot["Cores"], CoreIdentities(snapshot.Text("Clients")))) throw new OperationException("新修订须绑定当前配套核心；请重新从模板库创建修订。");
         RequireArtifacts(snapshot);
-        if (snapshot.Number("Revision") == 2 && snapshot.Text("ParentFingerprint") != "" && !File.Exists(VersionFile(snapshot.Text("Id"), 1)))
+        var builtin = BuiltIn();
+        if (snapshot.Number("Revision") == builtin.Number("Revision") + 1 && snapshot.Text("ParentFingerprint") != "" && !File.Exists(VersionFile(snapshot.Text("Id"), builtin.Number("Revision"))))
         {
             var parent = BuiltIn();
             if (parent.Text("Id") == snapshot.Text("Id") && ArchiveStore.Fingerprint(parent) == snapshot.Text("ParentFingerprint")) await SaveVersionAsync(parent, token);
@@ -109,7 +110,7 @@ public sealed class ClientTemplateStore(ArchiveStore store, IExternalToolRunner 
             var previous = same.SingleOrDefault(d => d.Number("Revision") == revision - 1);
             if (previous == null || revision != same.Max(d => d.Number("Revision")) + 1 || previous.Text("Fingerprint") != snapshot.Text("ParentFingerprint")) throw new OperationException("模板父版本或修订顺序变化，请重新打开最新版本编辑。");
         }
-        else if (revision != 1) throw new OperationException("新模板必须从修订1开始。");
+        else if (revision != 1 && fingerprint != ArchiveStore.Fingerprint(builtin)) throw new OperationException("新模板必须从修订1开始。");
         token.ThrowIfCancellationRequested();
         store.WriteSecret(file, new() { ["Schema"] = 1, ["Fingerprint"] = fingerprint, ["Document"] = snapshot, ["Hashes"] = rendered["Hashes"]!.DeepClone(), ["Dependencies"] = rendered["Dependencies"]!.DeepClone() });
     }

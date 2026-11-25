@@ -182,8 +182,10 @@ public sealed partial class MainWindow : Window, IUserInteraction
                 if (status.CanContinue) followup.Children.Add(Action(status.ContinueKind == OperationKind.ResumeImport ? "继续接入" : "继续部署", () => Submit(new(status.ContinueKind, relative, new())), true));
                 if (status.NeedsRecovery)
                 {
+                    var addressPending = InstanceState(relative)["AddressChangeTransaction"] as JsonObject;
                     var wireguardPending = WireGuardTunnels.List(store).Any(r => WireGuardTunnels.Pending(r) && WireGuardTunnels.Instances(r["Configuration"]!.AsObject()).Contains(relative));
-                    if (wireguardPending) followup.Children.Add(Action("恢复两端隧道", () => WireGuardSheet(relative, plan), true));
+                    if (addressPending != null) followup.Children.Add(Action("恢复换址", () => Submit(new(OperationKind.InstanceAddress, addressPending.Text("OwnerInstance"), new JsonObject { ["Action"] = "Recover", ["Id"] = addressPending.Text("Id") })), true));
+                    else if (wireguardPending) followup.Children.Add(Action("恢复两端隧道", () => WireGuardSheet(relative, plan), true));
                     else followup.Children.Add(Action("核对恢复状态", () => Submit(new(OperationKind.Recover, relative, new())), true));
                 }
                 details.Children.Add(Card(followup));
@@ -191,6 +193,7 @@ public sealed partial class MainWindow : Window, IUserInteraction
             if (status.Managed && !status.NeedsRecovery)
             {
             details.Children.Add(GroupLabel("日常维护"));
+            details.Children.Add(SettingsGroup(SettingRow("实例地址与依赖", "换址前核对原主机身份，联动白名单、线路及客户端来源", Symbol.World, Action("修改地址", () => InstanceAddressSheet(relative, plan)))));
             details.Children.Add(SettingsGroup(SettingRow("证书与运维资源", "到期状态、共享使用者和变更影响", Symbol.Library, Action("查看资源", () => { resourceFilter["Instance"] = relative; resourceFilter["Kind"] = ""; resourcePage = 0; SelectPage("resources"); return Task.CompletedTask; }))));
             var forwarding = TcpForwarding.Rules(plan["TcpForwarding"] as JsonObject).ToArray();
             details.Children.Add(SettingsGroup(SettingRow("独立 TCP 端口转发", forwarding.Length == 0 ? "按需激活、来源白名单与实际转发验收" : forwarding.Count(r => r.Flag("Enabled")) + " 条已启用 · " + forwarding.Length + " 条已保存；实际状态需核对", Symbol.Forward, Action("管理转发", () => TcpForwardSheet(relative, plan)))));

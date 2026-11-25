@@ -57,7 +57,7 @@ public sealed partial class MainWindow
                             var resolver = Field("代理出口查询的 DNS 地址", check, "ResolverAddress"); resolver.Tag = "UdpForward.Resolver." + index;
                             var resolverPort = Field("DNS UDP 端口", check, "ResolverPort", numeric: true); resolverPort.Tag = "UdpForward.ResolverPort." + index;
                             fields.Children.Add(Fields(resolver, resolverPort));
-                            fields.Children.Add(Text("只使用所选节点的原生 SS／SS2022 UDP 参数，凭据不发送到转发服务器。不支持额外链式、插件或 UDP-over-TCP；不以 TCP 成功代替 UDP，不代表 QUIC 等其他业务已验收。", 13, true));
+                            fields.Children.Add(Text("单目标验收不发送代理凭据到转发服务器。加密 UDP 主备须在下方明确授权私有保存探测凭据；仅支持原生 SS／SS2022，不支持额外链式、插件或 UDP-over-TCP，不代表任意 QUIC 业务已验收。", 13, true));
                         }
                         var query = Field("查询域名（应返回有效记录）", check, "QueryName"); query.Tag = "UdpForward.Query." + index;
                         query.TextChanged += (_, _) => UpdateForwardGroupHealth(rule);
@@ -71,7 +71,7 @@ public sealed partial class MainWindow
                     var type = validation.Text("Type");
                     rule["Validation"] = type == "Echo" ? new JsonObject { ["Type"] = "Echo" } : new JsonObject { ["Type"] = type, ["QueryName"] = type == "Shadowsocks" ? "example.com" : "", ["QueryType"] = "A" };
                     if (type == "Shadowsocks") { var check = rule["Validation"]!.AsObject(); check["ResolverAddress"] = "1.1.1.1"; check["ResolverPort"] = 53; check["SchemeId"] = ""; check["NodeId"] = ""; check["NodeFingerprint"] = ""; }
-                    UpdateForwardGroupHealth(rule); RefreshValidation();
+                    UpdateForwardGroupHealth(rule); Refresh();
                 };
                 RefreshValidation();
                 var remove = Action("移除此规则", () => { rules.RemoveAt(index); Refresh(); return Task.CompletedTask; }); remove.Tag = "UdpForward.Remove." + i;

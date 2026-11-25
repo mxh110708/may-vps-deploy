@@ -7,6 +7,8 @@ public sealed partial class WorkflowEngine
     private async Task ConfigureUdpForwarding(Context c)
     {
         var preview = UdpForwarding.Prepare(store, c.Request); var action = c.Request.Options.Text("Action");
+        var healthIdentity = ArchiveStore.Fingerprint(ForwardProxyHealth.Document(store, preview.Configuration));
+        string Health() { var value = ForwardProxyHealth.Document(store, preview.Configuration); if (ArchiveStore.Fingerprint(value) != healthIdentity) throw new OperationException("协议健康来源或固定核心在执行中变化，请重新审阅。"); return value.ToJsonString(); }
         async Task<JsonObject> Read()
         {
             var response = await c.Run("udp-forward-read.sh", new() { ["ARCHIVED_HASH"] = preview.ExpectedHash }, marker: "UDP_FORWARD_READ");
@@ -20,7 +22,7 @@ public sealed partial class WorkflowEngine
             if ((await Read()).Text("Hash") != preview.ExpectedHash) throw new OperationException("UDP 转发实际资源与归档不同，未写入服务器。", code: "UdpForwardRemoteDrift");
             if (action != "Check")
             {
-                await c.Run("udp-forward-read.sh", new() { ["CANDIDATE_JSON"] = preview.Configuration.ToJsonString(), ["ARCHIVED_HASH"] = preview.ExpectedHash }, marker: "UDP_FORWARD_READ");
+                await c.Run("udp-forward-read.sh", new() { ["CANDIDATE_JSON"] = preview.Configuration.ToJsonString(), ["ARCHIVED_HASH"] = preview.ExpectedHash, ["PROXY_HEALTH"] = Health() }, timeout: 180, marker: "UDP_FORWARD_READ");
                 if (c.Plan.Text("Firewall.Mode") != "PreserveExisting") await c.Run("firewall-preflight.sh", FirewallParameters(c.Plan, true), marker: "FIREWALL_SCOPE_OK");
             }
         });
@@ -30,7 +32,7 @@ public sealed partial class WorkflowEngine
             await c.TrackStep("udp-forward-apply", async () =>
             {
                 if (action == "Remove") c.Plan.Remove("UdpForwarding"); else c.Plan["UdpForwarding"] = preview.Configuration.DeepClone(); c.Save();
-                await c.Run("udp-forward-apply.sh", new() { ["ACTION"] = action, ["CONFIG_JSON"] = preview.Configuration.ToJsonString(), ["EXPECTED_HASH"] = preview.ExpectedHash }, true, 120, "UDP_FORWARD_APPLIED");
+                await c.Run("udp-forward-apply.sh", new() { ["ACTION"] = action, ["CONFIG_JSON"] = preview.Configuration.ToJsonString(), ["EXPECTED_HASH"] = preview.ExpectedHash, ["PROXY_HEALTH"] = Health() }, true, 180, "UDP_FORWARD_APPLIED");
                 await Firewall(c, true);
             });
         }
@@ -46,11 +48,21 @@ public sealed partial class WorkflowEngine
             {
                 if (observed["Configuration"] == null || ArchiveStore.Fingerprint(observed["Configuration"]!) != ArchiveStore.Fingerprint(preview.Configuration)) throw new OperationException("实际 UDP 转发配置与审阅不符。");
                 if (udpForwarding == null) throw new OperationException("UDP 应用验收适配器不可用，未提交变更。");
+                JsonObject? groupProof = null;
+                if (UdpForwarding.Rules(preview.Configuration).Any(r => r.Flag("Enabled") && ForwardTargetGroups.Balanced(r)))
+                {
+                    var ready = await c.Run("udp-forward-read.sh", new() { ["PROBE_GROUPS"] = "true", ["EXPECTED_HASH"] = observed.Text("Hash") }, false, ForwardTargetGroups.ProbeTimeout(preview.Configuration), "UDP_FORWARD_READ");
+                    groupProof = JsonNode.Parse(RemoteAssets.Marker(ready.Output, "FORWARD_GROUP_PROBE"))!.AsObject();
+                }
                 var result = await udpForwarding.ValidateAsync(c.Plan, preview.Configuration, c.File("udp-forward-validation/" + c.Id), new InlineProgress<string>(m => c.Report("实际 UDP 转发验收", m)), c.Cancellation);
                 if (UdpForwarding.Rules(preview.Configuration).Any(r => r.Flag("Enabled") && r["TargetGroup"] is JsonObject))
                 {
-                    var probe = await c.Run("udp-forward-read.sh", new() { ["PROBE_GROUPS"] = "true", ["EXPECTED_HASH"] = observed.Text("Hash") }, false, 180, "UDP_FORWARD_READ");
-                    ForwardTargetGroups.AttachProof(preview.Configuration, result, JsonNode.Parse(RemoteAssets.Marker(probe.Output, "FORWARD_GROUP_PROBE"))!.AsObject(), observed.Text("Hash"), action == "Apply");
+                    if (groupProof == null)
+                    {
+                        var probe = await c.Run("udp-forward-read.sh", new() { ["PROBE_GROUPS"] = "true", ["EXPECTED_HASH"] = observed.Text("Hash") }, false, ForwardTargetGroups.ProbeTimeout(preview.Configuration), "UDP_FORWARD_READ");
+                        groupProof = JsonNode.Parse(RemoteAssets.Marker(probe.Output, "FORWARD_GROUP_PROBE"))!.AsObject();
+                    }
+                    ForwardTargetGroups.AttachProof(preview.Configuration, result, groupProof, observed.Text("Hash"), action == "Apply");
                 }
                 UdpForwarding.RequireValidation(c.Plan, preview.Configuration, result);
                 foreach (var rule in UdpForwarding.Rules(preview.Configuration).Where(r => r.Flag("Enabled") && r.Text("Validation.Type") == "Shadowsocks")) _ = UdpForwarding.ProxyNode(store, rule, c.Request.InstanceRelativePath);

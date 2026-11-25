@@ -25,7 +25,8 @@ public sealed partial class MainWindow
             var fork = Action("另存为新模板", () => { action = "Fork"; dialog!.Hide(); return Task.CompletedTask; }); fork.Tag = "ClientTemplates.Fork";
             var inspect = Action("检查依赖", () => { action = "Inspect"; dialog!.Hide(); return Task.CompletedTask; }); inspect.Tag = "ClientTemplates.Inspect";
             var restore = Action("应用记录与恢复", () => { action = "Restore"; dialog!.Hide(); return Task.CompletedTask; }); restore.Tag = "ClientTemplates.Restore";
-            dialog = OperationDialog("客户端模板库", Column(choice, detail, Row(fork, inspect), restore,
+            var remote = Action("远程模板与规则来源", () => { action = "Remote"; dialog!.Hide(); return Task.CompletedTask; }); remote.Tag = "ClientTemplates.Remote";
+            dialog = OperationDialog("客户端模板库", Column(choice, detail, Row(fork, inspect), Row(restore, remote),
                 Text(scheme == null ? "打开并保存方案后，才能应用模板。" : SchemeChanged ? "当前方案有未保存修改；先保存，再审阅应用。" : "将模板应用到已保存方案“" + scheme.Text("Name") + "”，节点、凭据、订阅及导出文件保留。", 14, true)), "预览应用差异");
             dialog.IsPrimaryButtonEnabled = scheme != null && !SchemeChanged; dialog.SecondaryButtonText = "新建修订";
             var result = await ShowDialog(dialog); var selected = Selected();
@@ -39,6 +40,7 @@ public sealed partial class MainWindow
                 await ShowDialog(OperationDialog("模板依赖", DialogScroll(rows), "完成")); continue;
             }
             if (action == "Restore") { await RestoreClientTemplate(); continue; }
+            if (action == "Remote") { await RemoteLibrarySourceManager(); continue; }
             return;
         }
     }

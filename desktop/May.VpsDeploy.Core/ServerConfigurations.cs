@@ -10,6 +10,7 @@ public static class ServerConfigurations
     public static string RandomKey(int bytes = 16) => Convert.ToBase64String(RandomNumberGenerator.GetBytes(bytes));
     public static JsonObject Xray(JsonObject plan, JsonObject secrets)
     {
+        var policy = OutboundAddressPolicy.Legacy(plan, "RealityEntry");
         var inbounds = new JsonArray();
         foreach (var (label, port) in new[] { ("primary", plan.Number("Ports.XrayPrimary")), ("backup", plan.Number("Ports.XrayBackup")) })
         {
@@ -20,17 +21,20 @@ public static class ServerConfigurations
                 inbounds.Add(Object(new { tag = $"reality-{label}-{family}", listen = address, port, protocol = "vless", settings = new { clients = new[] { new { id = secrets.Text("Xray.Uuid"), flow = "xtls-rprx-vision", email = "primary-client" } }, decryption = "none" }, streamSettings = new { network = "raw", security = "reality", realitySettings = new { show = false, target = plan.Text("Reality.TargetMode") == "LocalOwnedTls" ? "127.0.0.1:" + plan.Number("Reality.LocalHttpsPort", 8443) : plan.Text("Reality.Target") + ":443", xver = 0, serverNames = new[] { plan.Text("Reality.ServerName", plan.Text("Reality.Target")) }, privateKey = secrets.Text("Xray.RealityPrivateKey"), shortIds = new[] { secrets.Text("Xray.ShortId") } } } }));
             }
         }
-        return new JsonObject { ["log"] = Object(new { access = "none", error = "/var/log/xray/error.log", loglevel = "warning" }), ["inbounds"] = inbounds,
-            ["outbounds"] = new JsonArray(Object(new { tag = "direct", protocol = "freedom", settings = plan.Flag("Reality.ForceIpv4Egress", true) ? new { domainStrategy = "ForceIPv4" } : (object)new { } }), Object(new { tag = "block", protocol = "blackhole" })),
-            ["routing"] = new JsonObject { ["domainStrategy"] = "AsIs", ["rules"] = plan.Flag("Reality.ForceIpv4Egress", true) ? new JsonArray(Object(new { type = "field", ip = new[] { "::/0" }, outboundTag = "block" })) : new JsonArray() } };
+        var config = new JsonObject { ["log"] = Object(new { access = "none", error = "/var/log/xray/error.log", loglevel = "warning" }), ["inbounds"] = inbounds,
+            ["outbounds"] = new JsonArray(OutboundAddressPolicy.Direct(policy, "direct", true), Object(new { tag = "block", protocol = "blackhole" })),
+            ["routing"] = new JsonObject { ["domainStrategy"] = "AsIs", ["rules"] = OutboundAddressPolicy.Strict(policy) ? new JsonArray(Object(new { type = "field", inboundTag = inbounds.Select(i => i!.Text("tag")).ToArray(), network = "tcp,udp", ip = new[] { policy == "IPv4" ? "::/0" : "0.0.0.0/0" }, outboundTag = "block" })) : new JsonArray() } };
+        if (policy is "PreferIPv4" or "PreferIPv6") config["dns"] = new JsonObject { ["servers"] = new JsonArray("localhost"), ["queryStrategy"] = "UseIP" };
+        return config;
     }
     public static JsonObject AnyTls(JsonObject plan, JsonObject secrets)
     {
-        var direct = Object(new { type = "direct", tag = "direct", domain_resolver = new { server = "local", strategy = plan.Flag("AnyTls.ForceIpv4Egress", true) ? "ipv4_only" : "prefer_ipv4" } });
+        var policy = OutboundAddressPolicy.Legacy(plan, "AnyTlsEntry");
+        var direct = OutboundAddressPolicy.Direct(policy, "direct", false);
         var padding = plan.At("AnyTls.PaddingScheme")?.DeepClone() ?? new JsonArray("stop=8", "0=30-30", "1=100-400", "2=400-500,c,500-1000,c,500-1000,c,500-1000,c,500-1000", "3=9-9,500-1000", "4=500-1000", "5=500-1000", "6=500-1000", "7=500-1000");
         var inbound = Object(new { type = "anytls", tag = "anytls-in", listen = plan.Text("Server.IPv6") == "" ? "0.0.0.0" : "::", listen_port = plan.Number("Ports.AnyTlsPrimary"), users = new[] { new { name = "primary", password = secrets.Text("AnyTls.Password") } }, tls = new { enabled = true, server_name = plan.Text("AnyTls.ServerName"), min_version = "1.3", certificate_path = "/etc/mxh-tls/anytls/fullchain.pem", key_path = "/etc/mxh-tls/anytls/privkey.pem", ech = new { enabled = true, key_path = "/etc/sing-box-anytls/ech-key.pem" } } });
         inbound["padding_scheme"] = padding;
-        return new JsonObject { ["log"] = Object(new { level = "warn", timestamp = true }), ["dns"] = Object(new { servers = new[] { new { type = "local", tag = "local" } } }), ["inbounds"] = new JsonArray(inbound), ["outbounds"] = new JsonArray(direct), ["route"] = new JsonObject { ["final"] = "direct", ["rules"] = plan.Flag("AnyTls.ForceIpv4Egress", true) ? new JsonArray(Object(new { ip_version = 6, action = "reject" })) : new JsonArray() } };
+        return new JsonObject { ["log"] = Object(new { level = "warn", timestamp = true }), ["dns"] = Object(new { servers = new[] { new { type = "local", tag = "local" } } }), ["inbounds"] = new JsonArray(inbound), ["outbounds"] = new JsonArray(direct), ["route"] = new JsonObject { ["final"] = "direct", ["rules"] = OutboundAddressPolicy.Strict(policy) ? new JsonArray(Object(new { ip_version = policy == "IPv4" ? 6 : 4, action = "reject" })) : new JsonArray() } };
     }
     public static JsonObject Shadowsocks(JsonObject plan, JsonObject secrets)
     {

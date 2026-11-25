@@ -1,8 +1,10 @@
 # May VPS Deploy
 
-v0.9.42 汇总主线第33至38轮：托管证书、应用 UDP 分类、XHTTP 服务器下一跳、转发主备、线路诊断及客户端模板库。各项验收范围见[发行记录](docs/TESTING-0.9.42.zh-CN.md)；更新桌面应用不自动变更已部署服务。
+v0.9.43 汇总主线第39至44轮：实例换址、代理业务健康、多目标转发、可信 PROXY 接收、远程模板／规则来源和统一出站地址族策略。官方 sing-box 固定到 **1.14.4**，配套 May Core／May Route 到 **1.14.4-may.1**。各项验收边界见[发行记录](docs/TESTING-0.9.43.zh-CN.md)；软件更新不会自动变更 VPS 服务或本机代理。
 
-[第38轮模板库](docs/CLIENT-TEMPLATES-ROUND-38-2026-11-14.zh-CN.md)可为 Mihomo／May Route 保存固定修订，编辑参数与基础 DNS／规则，检查依赖，审阅应用差异并恢复原基础配置。方案保留节点、订阅和导出位置；新修订不会自动替换已使用版本。
+[第43轮](docs/REMOTE-LIBRARY-ROUND-43-2026-11-25.zh-CN.md)提供 HTTPS 获取、加密缓存、固定摘要、修订差异及使用者影响；审阅后保存到模板／规则库，现有使用者保留原版本。[第44轮](docs/OUTBOUND-ADDRESS-ROUND-44-2026-11-25.zh-CN.md)分别控制直连网站和代理下一跳的地址族，增加优先 IPv4／IPv6 与 TCP 建连回退，保留明确 IP 和 UDP 不重放边界。
+
+本版一并纳入[第39轮实例换址](docs/INSTANCE-ADDRESS-ROUND-39-2026-11-16.zh-CN.md)、[第40轮协议健康](docs/FORWARD-PROXY-HEALTH-ROUND-40-2026-11-16.zh-CN.md)、[第41轮多目标](docs/FORWARD-MULTI-TARGET-ROUND-41-2026-11-24.zh-CN.md)和[第42轮可信 PROXY 接收](docs/FORWARD-PROXY-RECEIVE-ROUND-42-2026-11-25.zh-CN.md)。此前各轮的隔离 Debian 验收按原记录阅读，不推断生产已应用。
 
 面向 Debian VPS 的 Windows 部署与维护工具。通过 WinUI 3 桌面界面管理实例、代理服务、跨实例线路、客户端配置及 May Monitor，把审阅、实际验收、私人归档和失败恢复放进同一操作流程。
 
@@ -12,9 +14,9 @@ v0.9.42 汇总主线第33至38轮：托管证书、应用 UDP 分类、XHTTP 服
 
 正式桌面控制端为 Windows 10 2004 及以上／Windows 11 amd64；远端运维验收面向 Debian 12／13 amd64。安装版自带 .NET、WinUI 及专用配置转换运行时，日常使用不需要另外安装 PowerShell、Python 或 .NET SDK。其他系统、架构与自定义服务器布局需要独立验证。
 
-当前文档以 **v0.9.42** 为基准；下载页面是获取新版本的入口。源码主分支可能包含尚未发行的文档或功能，不能用分支内容推断本机已安装版本。
+当前文档以 **v0.9.43** 为基准；下载页面是获取新版本的入口。源码主分支可能包含尚未发行的文档或功能，不能用分支内容推断本机已安装版本。
 
-本版[第二十八轮](docs/INBOUND-POLICY-ROUND-28-2026-11-02.zh-CN.md)将分类规则与多出站接入独立入站，增加引用保护、实际去向验收和局部恢复。例外仅分类 TCP，应用 UDP 保持默认出站；不自动改写已部署服务。
+本版[第二十八轮](docs/INBOUND-POLICY-ROUND-28-2026-11-02.zh-CN.md)将分类规则与多出站接入独立入站，增加引用保护、实际去向验收和局部恢复。v0.9.42 的[第34轮](docs/APPLICATION-UDP-ROUND-34-2026-11-13.zh-CN.md)已从初始 TCP 范围扩展到应用 UDP 分类；缺少域名时按实际 IP 或默认去向处理，不自动改写已部署服务。
 
 本版[第二十九轮](docs/SERVER-STREAM-NEXT-HOPS-ROUND-29-2026-11-02.zh-CN.md)增加 VLESS TLS／Reality、Trojan TLS、AnyTLS及按核心限定的WS／gRPC下一跳；保留ECH与会话参数，接通默认及分类去向的实际验收。具体投影、对端互通和恢复边界按支持矩阵核对。
 

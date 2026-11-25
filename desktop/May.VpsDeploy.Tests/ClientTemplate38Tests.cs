@@ -14,7 +14,7 @@ internal sealed partial class BoundaryTests
         var python = Environment.GetEnvironmentVariable("MAY_TEST_PYTHON") ?? "python";
         var assets = new ValidationAssets(new AppPaths(repository), "windows-amd64"); var tools = new ExternalToolRunner();
         var library = new ClientTemplateStore(f.Store, tools, assets, python); var built = library.BuiltIn(); var original = ArchiveStore.Fingerprint(built);
-        Check(library.List().Count == 1 && built.Number("Revision") == 1, "builtin catalog unavailable");
+        Check(library.List().Count == 1 && built.Number("Revision") == ArchiveStore.ReadJson(f.Paths.Resolve("config/client-templates.json")).Number("Revision"), "builtin catalog unavailable");
         foreach (var edit in new Action<JsonObject>[] { d => d["Unknown"] = true, d => d["Id"] = "../escape", d => d["Revision"] = 33,
             d => d["Parameters"]!["ClashMixedPort"] = 0, d => d["Parameters"]!["RouteMixedPort"] = 65536, d => d["Parameters"]!["RouteMixedPort"] = "2080",
             d => d["Parameters"]!["TunMtu"] = 1279, d => d["Parameters"]!["TunMtu"] = 9001, d => d["Parameters"]!["AllowLan"] = "true", d => d["Parameters"]!["Command"] = "ignored",
@@ -23,7 +23,7 @@ internal sealed partial class BoundaryTests
         Check(ArchiveStore.Fingerprint(built) == original, "validation mutated builtin");
         var dependencies = await library.InspectAsync(built, default); Check(dependencies["Dependencies"]!.AsArray().Any(d => d!.Text("Status") == "RemoteNotFetched") && dependencies["Dependencies"]!.AsArray().Count(d => d!.Text("Status") == "PinnedArtifactAvailable") == 3, "dependency inspection mixed static remote declarations with pinned local artifacts");
         var builtinChild = library.Draft(built, false); await library.SaveVersionAsync(builtinChild, default);
-        Check(ArchiveStore.Fingerprint(library.Read(built.Text("Id"), 1)) == original && File.Exists(f.Paths.Resolve("private/client-templates/versions/" + built.Text("Id") + "-1.private.json")), "deriving builtin revision lost its immutable parent snapshot");
+        Check(ArchiveStore.Fingerprint(library.Read(built.Text("Id"), built.Number("Revision"))) == original && File.Exists(f.Paths.Resolve("private/client-templates/versions/" + built.Text("Id") + "-" + built.Number("Revision") + ".private.json")), "deriving builtin revision lost its immutable parent snapshot");
         var clashOnly = library.Draft(built, true); clashOnly["Clients"] = "Clash"; clashOnly["Bases"]!.AsObject().Remove("SingBox"); library.BindCurrentCores(clashOnly); await library.SaveVersionAsync(clashOnly, default);
         Check(clashOnly["Cores"]!.AsObject().Count == 1 && clashOnly["Cores"]!["mihomo"] != null, "single-client template pinned unrelated client cores");
         var doc = library.Draft(built, true); doc["Name"] = "Synthetic template"; doc["Parameters"]!["ClashMixedPort"] = 19980; doc["Parameters"]!["RouteMixedPort"] = 19981; doc["Parameters"]!["TunMtu"] = 1400; doc["Parameters"]!["LogLevel"] = "warn"; doc["Parameters"]!["Mode"] = "global";

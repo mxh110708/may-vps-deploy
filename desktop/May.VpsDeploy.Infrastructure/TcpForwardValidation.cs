@@ -1,4 +1,5 @@
 using System.Net.Security;
+using System.Net;
 using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
@@ -44,6 +45,12 @@ public sealed class TcpForwardValidation(ArchiveStore store, ClientRouteDiagnost
                 else
                 {
                     using var client = new TcpClient(); await client.ConnectAsync(host, rule.Number("ListenPort"), limit.Token);
+                    if (rule["ProxyReceive"] != null)
+                    {
+                        var endpoint = (IPEndPoint)client.Client.LocalEndPoint!;
+                        var header = ForwardProxyReceive.Header(ForwardProxyReceive.ProbeProtocol(rule), IPAddress.Parse(rule.Text("ProxyReceive.ProbeSource")), endpoint.Port, ForwardProxyReceive.ProbeDestination(rule), rule.Number("ListenPort"));
+                        await client.GetStream().WriteAsync(header, limit.Token);
+                    }
                     if (kind == "Tls")
                     {
                         using var tls = new SslStream(client.GetStream(), false);
@@ -74,6 +81,7 @@ public sealed class TcpForwardValidation(ArchiveStore store, ClientRouteDiagnost
                 }
             }
             if (rule.ContainsKey("ProxyProtocol")) foreach (var check in item["Checks"]!.AsArray().OfType<JsonObject>()) check["ProxyProtocol"] = rule.Text("ProxyProtocol");
+            if (rule["ProxyReceive"] != null) foreach (var check in item["Checks"]!.AsArray().OfType<JsonObject>()) check["ProxyReceive"] = ForwardProxyReceive.ProbeEvidence(rule);
             result["Items"]!.AsArray().Add(item);
         }
         return result;

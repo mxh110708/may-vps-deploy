@@ -22,6 +22,10 @@ def encoded(value):
 
 
 class ForwardHost:
+    def auxiliary(self, config, candidate=False, payload=None):
+        return {}
+    def owned_extra(self, name):
+        return name in self.EXTRA_FILES or self.PREFIX in ('may-tcp-forward', 'may-udp-forward') and re.fullmatch(re.escape(self.DIRECTORY) + '/probe-[a-f0-9]{32}\\.json', name) is not None
     def __init__(self, root=Path('/'), run=subprocess.run, archived_hash=None):
         self.root, self.run, self.archived_hash = root, run, archived_hash
 
@@ -75,9 +79,11 @@ class ForwardHost:
             raise ValueError('Forwarding configuration exceeds its size limit.')
         config = self.normalize(json.loads(path.read_text()))
         files = self.material(config, self.proxy())
+        files.update(self.auxiliary(config))
         if set(self.units()) != {p for p in files if p.startswith('/etc/systemd/system/')} or set(p.name for p in self.path(self.DIRECTORY).iterdir()) != {Path(p).name for p in files if p.startswith(self.DIRECTORY + '/')}:
             raise ValueError('Unknown forwarding files or unit overrides; review required.')
         archived_units = False
+        archived_programs = False
         for target, content in files.items():
             actual = self.regular(target).read_bytes()
             # Installed program bytes are pinned by the controller's archived
@@ -85,6 +91,9 @@ class ForwardHost:
             # them without adopting an externally changed hash.
             if len(actual) > 131072:
                 raise ValueError('Forwarding files changed outside this application.')
+            if target in self.ARCHIVED_PROGRAMS and actual != content.encode():
+                if not re.fullmatch(r'[a-f0-9]{64}', self.archived_hash or ''): raise ValueError('Installed forwarding program requires its archived resource identity.')
+                archived_programs = True
             if target not in self.ARCHIVED_PROGRAMS and actual != content.encode():
                 if not (target.startswith('/etc/systemd/system/') and actual.startswith(content.splitlines()[0].encode() + b'\n') and re.fullmatch(r'[a-f0-9]{64}', self.archived_hash or '')):
                     raise ValueError('Forwarding files changed outside this application.')
@@ -108,12 +117,13 @@ class ForwardHost:
             raise ValueError('Forwarding activation state differs from the saved rules.')
         identity = self.identity(files)
         fingerprint = digest(encoded(dict(identity, Units=units)))
-        if archived_units and fingerprint != self.archived_hash:
+        if (archived_units or archived_programs) and fingerprint != self.archived_hash:
             raise ValueError('Installed forwarding units do not match the controller archive.')
-        return {'Hash': fingerprint, 'Configuration': config, 'Files': identity['Files'], 'Units': units, 'Table': identity['Table'], 'TemplateCurrent': not archived_units}
+        return {'Hash': fingerprint, 'Configuration': config, 'Files': identity['Files'], 'Units': units, 'Table': identity['Table'], 'TemplateCurrent': not (archived_units or archived_programs)}
 
     def preflight(self, config):
         observed = self.read()
+        self.auxiliary(config, candidate=True)
         if not self.path('/usr/sbin/nft').is_file():
             raise ValueError('Missing nftables; install it before forwarding maintenance.')
         self.proxy()
@@ -173,7 +183,7 @@ class ForwardHost:
         for group in ('Original', 'Applied'):
             for name in value.get(group, {}).get('Files', {}):
                 base = name.removesuffix('.may-new')
-                if base not in (self.CONFIG, self.ACL, *self.EXTRA_FILES) and base != self.unit_path(self.ACL_UNIT) and not re.fullmatch(r'/etc/systemd/system/' + re.escape(self.PREFIX) + r'-[a-f0-9]{32}\.(socket|service)', base):
+                if base not in (self.CONFIG, self.ACL) and not self.owned_extra(base) and base != self.unit_path(self.ACL_UNIT) and not re.fullmatch(r'/etc/systemd/system/' + re.escape(self.PREFIX) + r'-[a-f0-9]{32}\.(socket|service)', base):
                     raise ValueError('Unowned forwarding recovery path.')
         return value
 
@@ -198,7 +208,7 @@ class ForwardHost:
         temporary = path.with_name(path.name + '.may-new')
         with temporary.open('xb') as stream:
             stream.write(content.encode())
-        os.chmod(temporary, 0o600 if name in (self.CONFIG, self.ACL) else 0o644)
+        os.chmod(temporary, 0o600 if name in (self.CONFIG, self.ACL) or name.endswith('/proxy-health.json') or self.owned_extra(name) and '/probe-' in name else 0o644)
         os.replace(temporary, path)
 
     def activate(self, config):
@@ -216,6 +226,7 @@ class ForwardHost:
         if journal['Original'] != self.identity(previous['Files']):
             raise ValueError('Forwarding resources changed after the snapshot.')
         files = self.material(config, self.proxy()) if action == 'Apply' else {}
+        if action == 'Apply': files.update(self.auxiliary(config, candidate=True))
         paths = sorted(set(previous['Files']) | set(files))
         planned = {p: digest(files[p]) if p in files else None for p in paths}
         planned.update({p + '.may-new': digest(content) for p, content in files.items()})
@@ -243,6 +254,10 @@ class ForwardHost:
     def rollback_check(self, backup):
         journal = self.journal(backup)
         paths = sorted(set(journal['Original']['Files']) | set(journal.get('Applied', {}).get('Files', {})))
+        for name in paths:
+            if name.endswith('/proxy-health.json') or '/probe-' in name and self.owned_extra(name.removesuffix('.may-new')):
+                p = self.regular(name, True)
+                if p.exists() and (p.stat().st_uid != 0 or p.stat().st_mode & 0o077): raise ValueError('Private probe file ownership changed; recovery stopped.')
         actual = self.identity(paths)
         if set(self.units()) - set(paths):
             raise ValueError('Unknown forwarding resources appeared during maintenance.')

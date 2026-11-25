@@ -126,6 +126,17 @@ def material(config, python):
 
 
 def canonical_table(text):
+    def source(match):
+        networks = []
+        for value in match[2].strip('{} ').split(','):
+            value = value.strip()
+            if '-' in value:
+                first, last = value.split('-', 1)
+                networks.extend(ipaddress.summarize_address_range(ipaddress.ip_address(first.strip()), ipaddress.ip_address(last.strip())))
+            else:
+                networks.append(ipaddress.ip_network(value, strict=False))
+        return match[1] + ','.join(str(n) for n in ipaddress.collapse_addresses(networks))
+    text = re.sub(r'(\bip6?\s+saddr\s+)(\{[^}\n]+\}|[0-9a-fA-F.:/]+(?:-[0-9a-fA-F.:]+)?)', source, text)
     text = '\n'.join(line for line in text.splitlines() if not line.lstrip().startswith('#'))
     text = re.sub(r'table inet ' + TABLE + r'\s*\{\s*\}\s*', '', text)
     text = re.sub(r'flush table inet ' + TABLE + r'\s*', '', text)
@@ -144,7 +155,8 @@ class Host(ForwardHost):
     PREFIX, DIRECTORY = 'may-udp-forward', '/etc/may-udp-forward'
     JOURNAL = 'udp-forward-state.json'
     CONFIG, ACL, ACL_UNIT, TABLE = CONFIG, ACL, ACL_UNIT, TABLE
-    EXTRA_FILES, SOCKET_TYPE = (WORKER, GROUP_WORKER), socket.SOCK_DGRAM
+    EXTRA_FILES, SOCKET_TYPE = (WORKER, GROUP_WORKER, '/etc/may-udp-forward/proxy-health.json'), socket.SOCK_DGRAM
+    def auxiliary(self, config, candidate=False, payload=None): return proxy_material(self, config, candidate, payload if payload is not None else getattr(self, 'proxy_candidate', None) if candidate else None)
     ARCHIVED_PROGRAMS = (WORKER, GROUP_WORKER)
     normalize, material = staticmethod(normalize), staticmethod(material)
     unit_name, unit_path = staticmethod(unit_name), staticmethod(unit_path)

@@ -45,7 +45,7 @@ function Restore-RemoteAsset($Asset,[string]$Kind) {
     $destination=Get-AssetDestination $Asset.file
     if($Asset.sha256 -notmatch '^[0-9a-f]{64}$'){throw '资产校验值无效。'}
     if($Kind -eq 'Core' -and $Asset.core -eq 'may-core'){
-        if($Asset.file -notmatch '^may-core-1\.14\.2-may\.xhttp20\.[0-9]+-windows-amd64\.zip$' -or
+        if($Asset.file -notmatch '^may-core-[0-9]+\.[0-9]+\.[0-9]+-may\.(?:xhttp20\.)?[0-9]+-windows-amd64\.zip$' -or
             $Asset.source_revision -notmatch '^[0-9a-f]{40}$' -or $Asset.source_tree_sha256 -notmatch '^[0-9a-f]{64}$' -or
             $Asset.source_archive_sha256 -notmatch '^[0-9a-f]{64}$' -or $Asset.source_archive -notmatch '^may-core-[A-Za-z0-9.-]+-source\.zip$' -or
             $Asset.capabilities -notcontains 'vless-xhttp-round20'){throw 'May Core 源代码与能力清单不完整。'}
@@ -53,7 +53,12 @@ function Restore-RemoteAsset($Asset,[string]$Kind) {
             $target=Get-AssetDestination $item.file
             if(Test-AssetHash $target $item.sha256){continue}
             $local=if($SourceDirectory){Join-Path $SourceDirectory $item.file}else{''}
-            if(-not $local -or -not(Test-Path -LiteralPath $local)){throw '缺少匹配的 May Core 及源码快照；请提供固定资产或按构建说明重建，不能用上游 sing-box 替代。'}
+            if(-not $local -or -not(Test-Path -LiteralPath $local)){
+                if($Offline -or $Asset.source_repository -ne 'https://github.com/mxh110708/may-route-core' -or $Asset.release_tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+-may\.[0-9]+$'){throw '缺少匹配的 May Core 及源码快照；请提供固定资产或从固定发行恢复，不能用上游 sing-box 替代。'}
+                $local=Join-Path $work $item.file
+                $url='https://github.com/mxh110708/may-route-core/releases/download/'+$Asset.release_tag+'/'+$item.file
+                Invoke-WebRequest -Uri $url -OutFile $local -TimeoutSec 180
+            }
             Install-VerifiedAsset $local $item.file $item.sha256
         }
         return

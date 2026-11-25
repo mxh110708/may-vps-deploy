@@ -4,7 +4,13 @@ using May.VpsDeploy.Core;
 using May.VpsDeploy.Infrastructure;
 
 var repository = Path.GetFullPath(args.Length == 0 ? Path.Combine(AppContext.BaseDirectory, "../../../../../") : args[0]);
-if (args.Contains("--client-templates-only")) await new BoundaryTests(repository).RunClientTemplate38Tests();
+if (args.Contains("--address-policy-fixtures")) BoundaryTests.Address44Fixtures();
+else if (args.Contains("--remote-library-only")) await new BoundaryTests(repository).RunRemoteLibrary43Tests();
+else if (args.Contains("--outbound-address-only")) await new BoundaryTests(repository).RunOutboundAddress44Tests();
+else if (args.Contains("--forward-proxy-receive-only")) await new BoundaryTests(repository).RunForwardProxy42Tests();
+else if (args.Contains("--forward-proxy-health-only")) await new BoundaryTests(repository).RunForwardProxy40Tests();
+else if (args.Contains("--instance-address-only")) await new BoundaryTests(repository).RunInstanceAddress39Tests();
+else if (args.Contains("--client-templates-only")) await new BoundaryTests(repository).RunClientTemplate38Tests();
 else if (args.Contains("--diagnostics-only")) await new BoundaryTests(repository).RunRouteDiagnostic37Tests();
 else if (args.Contains("--server-xhttp-only")) await new BoundaryTests(repository).RunServerXhttp35Tests();
 else if (args.Contains("--server-xhttp-split-only")) await new BoundaryTests(repository).RunServerXhttp35SplitTests();
@@ -45,6 +51,7 @@ else if (args.Contains("--xhttp-runtime-only")) await new BoundaryTests(reposito
 else if (args.Contains("--xhttp-only")) await new BoundaryTests(repository).RunXhttpTests();
 else if (args.Contains("--xhttp-model-only")) await new BoundaryTests(repository).RunXhttpTests(modelOnly: true);
 else if (args.Contains("--xhttp-vm")) await new BoundaryTests(repository).RunXhttpVmTests(args[Array.IndexOf(args, "--xhttp-vm") + 1]);
+else if (args.Contains("--forward-multi-target-only")) await new BoundaryTests(repository).RunForwardMulti41Tests();
 else if (args.Contains("--forward-targets-only")) await new BoundaryTests(repository).RunForwardTarget36Tests();
 else if (args.Contains("--tcp-forward-only")) await new BoundaryTests(repository).RunTcpForwardTests();
 else if (args.Contains("--tcp-chain-only")) await new BoundaryTests(repository).RunTcpChainTests();
@@ -114,6 +121,7 @@ internal sealed partial class BoundaryTests(string repository)
         }
         if (Includes("clients"))
         {
+            using (var remote = new Fixture(repository)) await RemoteLibrary43Experience(remote);
             using (var templates = new Fixture(repository)) await ClientTemplate38Experience(templates);
             using (var diagnostic = new Fixture(repository)) { await RouteDiagnostic37Model(diagnostic); await RouteDiagnostic37Segments(diagnostic); await RouteDiagnostic37Profiles(diagnostic); }
             await RouteDiagnostic37ChainPlan();
@@ -144,7 +152,8 @@ internal sealed partial class BoundaryTests(string repository)
         }
         if (Includes("chains"))
         {
-            await ForwardTarget36Model(); await ForwardTarget36Workflows();
+            await ForwardProxy42Model(); await ForwardProxy42Workflows(); await ForwardProxy42Validation();
+            await ForwardTarget36Model(); await ForwardTarget36Workflows(); await ForwardProxy40Model(); await ForwardProxy40Workflows(); await ForwardMulti41Model(); await ForwardMulti41Workflows();
             await Chain30Coverage();
             using (var forwardedNodes = new Fixture(repository)) await ForwardedNodeExperience(forwardedNodes);
             using (var forwarding = new Fixture(repository)) { await TcpForwardExperience(forwarding); await TcpForwardValidationLoopback(forwarding); }
@@ -187,6 +196,7 @@ internal sealed partial class BoundaryTests(string repository)
         }
         if (Includes("operations"))
         {
+            await InstanceAddress39Model(); await InstanceAddress39Workflow(); await InstanceAddress39MultiHost(); InstanceAddress39Underlays(); await InstanceAddress39Programs();
             await Resource31Coverage();
             await Certificate33Coverage();
             await MonitoringArchiveExperience(f);

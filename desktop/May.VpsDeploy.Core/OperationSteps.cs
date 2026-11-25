@@ -4,10 +4,11 @@ namespace May.VpsDeploy.Core;
 
 public static class OperationSteps
 {
-    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate or OperationKind.ServerOutbound or OperationKind.TcpForward or OperationKind.UdpForward or OperationKind.MayMonitor or OperationKind.TcpChain or OperationKind.Inbounds or OperationKind.WireGuardTunnel or OperationKind.ManagedCertificate;
+    public static bool HasDeploymentProgress(OperationKind kind) => kind is OperationKind.Deploy or OperationKind.Resume or OperationKind.InstallComponent or OperationKind.MeasureNetwork or OperationKind.TuneNetwork or OperationKind.BbrKernel or OperationKind.CheckComponentUpdate or OperationKind.ServerOutbound or OperationKind.TcpForward or OperationKind.UdpForward or OperationKind.MayMonitor or OperationKind.TcpChain or OperationKind.Inbounds or OperationKind.WireGuardTunnel or OperationKind.ManagedCertificate or OperationKind.InstanceAddress;
     public static IReadOnlyList<PlannedTaskStep> Create(OperationRequest request, JsonObject plan)
     {
         var steps = new List<PlannedTaskStep>();
+        if (request.Kind == OperationKind.InstanceAddress) return request.Options.Text("Action") == "Recover" ? [new("address-recovery", "恢复换址事务", "核对原任务归属、精确写入内容及各实例恢复结果。")] : new[] { ("identity", "核对原 SSH 主机身份"), ("preflight", "检查受管依赖和实际状态"), ("backup", "保存各实例恢复点"), ("bridge", "同时放行新旧来源"), ("apply", "同步受管目标及本地来源"), ("validation", "验收真实 TCP／UDP 路径"), ("finalize", "移除旧来源并复验"), ("commit", "提交归档与事务") }.Select(s => new PlannedTaskStep("address-" + s.Item1, s.Item2, "仅处理本次审阅范围，结果不明时先核对事务状态。")).ToArray();
         if (request.Kind == OperationKind.CheckComponentUpdate) return [new("component-release-check", "查询并核对官方稳定版", "锁定具体发行资产与摘要，只查询版本，不安装软件。")];
         void Add(string id, string title, string description) => steps.Add(new(id, title, description));
         if (request.Kind == OperationKind.ManagedCertificate)

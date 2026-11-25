@@ -60,6 +60,17 @@ def table(text):
     return match.group()
 def canonical(text):
     text = re.sub(r'(?m)^\s*#.*$', '', table(text))
+    def source(match):
+        networks = []
+        for value in match[2].strip('{} ').split(','):
+            value = value.strip()
+            if '-' in value:
+                first, last = value.split('-', 1)
+                networks.extend(ipaddress.summarize_address_range(ipaddress.ip_address(first.strip()), ipaddress.ip_address(last.strip())))
+            else:
+                networks.append(ipaddress.ip_network(value, strict=False))
+        return match[1] + ','.join(str(n) for n in ipaddress.collapse_addresses(networks))
+    text = re.sub(r'(\bip6?\s+saddr\s+)(\{[^}\n]+\}|[0-9a-fA-F.:/]+(?:-[0-9a-fA-F.:]+)?)', source, text)
     text = re.sub(r'priority filter\b', 'priority 0', text)
     text = re.sub(r'priority dstnat\b', 'priority -100', text)
     text = re.sub(r'meta nfproto 2\b', 'meta nfproto ipv4', text)

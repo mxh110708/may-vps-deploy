@@ -10,7 +10,7 @@ import time
 
 
 class Relay:
-    def __init__(self, listeners, target, timeout=120, maximum=256, idle=60, allowed=('127.0.0.0/8', '::1/128'), target_selector=None, target_healthy=None, stop=None):
+    def __init__(self, listeners, target, timeout=120, maximum=256, idle=60, allowed=('127.0.0.0/8', '::1/128'), target_selector=None, target_healthy=None, stop=None, source_selector=None):
         address = ipaddress.ip_address(target[0])
         if address.is_unspecified or address.is_multicast or '%' in str(address) or getattr(address, 'ipv4_mapped', None):
             raise ValueError('A unicast UDP target is required.')
@@ -18,6 +18,7 @@ class Relay:
             raise ValueError('UDP worker limits are invalid.')
         self.target, self.timeout, self.maximum, self.idle = target, timeout, maximum, idle
         self.target_selector, self.target_healthy, self.stop = target_selector, target_healthy, stop
+        self.source_selector = source_selector
         self.family = socket.AF_INET if address.version == 4 else socket.AF_INET6
         self.allowed = tuple(ipaddress.ip_network(source, strict=False) for source in allowed)
         if not 1 <= len(self.allowed) <= 32:
@@ -80,13 +81,17 @@ class Relay:
                             if not reply_control:
                                 continue  # Never guess a different reply source.
                             key = (listener.fileno(), peer, tuple(reply_control))
+                            # Retire an unhealthy association before sending this packet.
+                            # Never retry a packet that was already sent to its old target.
+                            if key in self.sessions and self.target_healthy is not None and not self.target_healthy(self.sessions[key]['target']):
+                                self.close_session(key)
                             if key not in self.sessions:
                                 source = ipaddress.ip_address(peer[0])
                                 if not source.is_loopback and not any(source in network for network in self.allowed):
                                     continue
                                 if len(self.sessions) >= self.maximum:
                                     continue  # Preserve established sessions.
-                                selected = self.target_selector() if self.target_selector is not None else self.target
+                                selected = self.source_selector(peer) if self.source_selector is not None else self.target_selector() if self.target_selector is not None else self.target
                                 if selected is None: continue
                                 try:
                                     upstream = socket.socket(socket.AF_INET6 if ipaddress.ip_address(selected[0]).version == 6 else socket.AF_INET, socket.SOCK_DGRAM)

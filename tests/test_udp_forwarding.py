@@ -115,7 +115,7 @@ class Ownership(unittest.TestCase):
         before = self.apply()
         worker = self.host.path(UDP.WORKER)
         worker.write_bytes(b'external-worker')
-        self.assertNotEqual(self.host.read()['Hash'], before['Hash'])
+        with self.assertRaises(ValueError): self.host.read()
         with self.assertRaises(ValueError):
             self.host.apply(before['Configuration'], before['Hash'], 'Apply', BACKUP)
         with self.assertRaises(ValueError):
@@ -129,18 +129,22 @@ class Ownership(unittest.TestCase):
         old_source = UDP.UDP_WORKER_SOURCE
         try:
             UDP.UDP_WORKER_SOURCE += '\n# newer synthetic app worker\n'
+            self.host.archived_hash = before['Hash']
             self.assertEqual(self.host.read()['Hash'], before['Hash'])
             self.snapshot()
             changed = self.host.apply(before['Configuration'], before['Hash'], 'Apply', BACKUP)
             self.assertNotEqual(changed['Hash'], before['Hash'])
             self.restore()
-            self.assertEqual(self.host.read(), before)
+            restored = self.host.read()
+            self.assertEqual(restored['Hash'], before['Hash'])
+            self.assertEqual(restored['Configuration'], before['Configuration'])
+            self.assertFalse(restored['TemplateCurrent'])
             self.assertEqual(self.host.path(UDP.WORKER).read_text(), old_source)
         finally:
             UDP.UDP_WORKER_SOURCE = old_source
 
     def test_recovery_bundle_does_not_depend_on_repository_files(self):
-        program = ''.join(name + ' = ' + json.dumps(getattr(UDP, name)) + '\n' for name in ['UDP_WORKER_SOURCE', 'TCP_PROXY_WORKER_SOURCE', 'FORWARD_GROUP_SOURCE', 'FORWARD_GROUP_WORKER_SOURCE']) + (ROOT / 'scripts/forwarding-host.py').read_text() + '\n' + (ROOT / 'scripts/udp-forwarding.py').read_text()
+        program = ''.join(name + ' = ' + json.dumps(getattr(UDP, name)) + '\n' for name in ['UDP_WORKER_SOURCE', 'TCP_PROXY_WORKER_SOURCE', 'FORWARD_GROUP_SOURCE', 'FORWARD_GROUP_WORKER_SOURCE', 'PROXY_HEALTH_SOURCE']) + (ROOT / 'scripts/forwarding-host.py').read_text() + '\n' + (ROOT / 'scripts/udp-forwarding.py').read_text()
         namespace = {'__name__': 'synthetic_pinned_program'}
         exec(compile(program, 'pinned-udp-program', 'exec'), namespace)
         self.assertEqual(namespace['material'](config(), '/usr/bin/python3')[UDP.WORKER], UDP.UDP_WORKER_SOURCE)

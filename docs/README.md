@@ -4,6 +4,12 @@
 
 本版汇总主线第33至38轮；使用入口、参数、依赖和恢复范围见下方专项教程，汇总验证见[发行记录](TESTING-0.9.42.zh-CN.md)。历史各轮的真实回环、Debian 整机和公网证据分别保留，不因发行而扩大。
 
+2026-11-16 的[能力盘点与 FlyX 对照](CAPABILITIES-AND-FLYX-2026-11-16.zh-CN.md)记录当前剩余差距；[第39轮实例换址](INSTANCE-ADDRESS-ROUND-39-2026-11-16.zh-CN.md)已完成工作区源码和隔离验收，纳入 v0.9.43。[主线路线图](DEPLOY-ROADMAP-2026-10-24.zh-CN.md)保留第39至44轮实现与验收范围；[第40轮](FORWARD-PROXY-HEALTH-ROUND-40-2026-11-16.zh-CN.md)同样为已完成并纳入 v0.9.43。
+
+[第41轮多目标策略](FORWARD-MULTI-TARGET-ROUND-41-2026-11-24.zh-CN.md)已完成同一入口的轮询、来源 IP 哈希及健康摘除与隔离验收，纳入 v0.9.43。
+
+[第42轮可信 PROXY 接收](FORWARD-PROXY-RECEIVE-ROUND-42-2026-11-25.zh-CN.md)已完成受信中转、原来源透传、TLS 目标及恢复的源码与隔离验收，纳入 v0.9.43。
+
 ## 推荐阅读顺序
 
 1. [项目首页](../README.md)：职责、平台、能力和未完成边界。
@@ -15,6 +21,10 @@
 
 | 主题 | 文档 |
 | --- | --- |
+| 可信 PROXY 接收 | [第42轮：中转信任、客户端来源、实际路径与恢复](FORWARD-PROXY-RECEIVE-ROUND-42-2026-11-25.zh-CN.md)，当前源码，未发行。 |
+| 多目标转发策略 | [第41轮：轮询、来源 IP 哈希、健康摘除与会话固定](FORWARD-MULTI-TARGET-ROUND-41-2026-11-24.zh-CN.md)，当前源码，未发行。 |
+| 协议健康与加密 UDP 主备 | [第40轮：授权、真实业务健康、资源与恢复](FORWARD-PROXY-HEALTH-ROUND-40-2026-11-16.zh-CN.md)，当前源码，未发行。 |
+| 实例换址 | [第39轮：原身份、依赖、分阶段同步与统一恢复](INSTANCE-ADDRESS-ROUND-39-2026-11-16.zh-CN.md)，当前源码，未发行。 |
 | 模板版本与恢复 | [第38轮：参数、基础配置、依赖、应用差异与恢复](CLIENT-TEMPLATES-ROUND-38-2026-11-14.zh-CN.md) |
 | 线路诊断 | [第37轮：分段、协议、出口、旁证与质量历史](ROUTE-DIAGNOSTICS-ROUND-37-2026-11-14.zh-CN.md) |
 | 转发主备 | [第36轮：显式顺序、健康确认与稳定恢复](FORWARD-TARGET-GROUPS-ROUND-36-2026-11-13.zh-CN.md) |
@@ -39,3 +49,5 @@
 [历史索引](HISTORY.md)保留各轮协议、转发、监控、资源及迁移记录；[CHANGELOG](../CHANGELOG.md)保留版本沿革。[重构前首页](HISTORICAL-README-2026-10-27.zh-CN.md)只作历史参考。[旧命令行手册](CLI-REFERENCE.zh-CN.md)不描述当前桌面导航。
 
 当前文档不包含真实实例、密码、Token 或私人目录材料。字段／格式合法、模拟判断、真实协议和长测分别证明不同事情；不能因为教程改成稳定版本就宣称补做过验证。
+
+第43轮[远程模板与规则来源](REMOTE-LIBRARY-ROUND-43-2026-11-25.zh-CN.md)、第44轮[统一出站地址族](OUTBOUND-ADDRESS-ROUND-44-2026-11-25.zh-CN.md)及[本版发行验证](TESTING-0.9.43.zh-CN.md)。

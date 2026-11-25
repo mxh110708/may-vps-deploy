@@ -1,6 +1,6 @@
 # Third-party test cores
 
-This directory contains pinned Windows amd64 command-line cores used only for local configuration and real-protocol acceptance tests. May VPS Deploy verifies each archive with SHA-256 before extracting it into the ignored `.cache/client-cores/` directory. The official archives remain unmodified; the separately named May Core is a development source build.
+This directory contains pinned Windows amd64 command-line cores used only for local configuration and real-protocol acceptance tests. May VPS Deploy verifies each archive with SHA-256 before extracting it into the ignored `.cache/client-cores/` directory. The official archives remain unmodified; the separately named May Core is a separately published, source-pinned build.
 
 ## Mihomo
 
@@ -13,24 +13,24 @@ This directory contains pinned Windows amd64 command-line cores used only for lo
 ## sing-box
 
 - Project: <https://github.com/SagerNet/sing-box>
-- Official client validation release: `v1.14.2`; it does not contain May's XHTTP extension.
-- Current client archive: `sing-box-1.14.2-windows-amd64.zip`.
+- Official client validation release: `v1.14.4`; it does not contain May's XHTTP extension.
+- Current client archive: `sing-box-1.14.4-windows-amd64.zip`.
 - Obsolete Windows validation ZIPs are not included. Linux 1.14.0 is downloaded only into ignored temporary directories when running the upgrade regression.
 - License: GNU General Public License v3.0 or later with the upstream name-use restriction; the upstream license is included inside the official archive.
-- Corresponding source: <https://github.com/SagerNet/sing-box/tree/v1.14.2> (tag archive: <https://github.com/SagerNet/sing-box/archive/refs/tags/v1.14.2.zip>).
+- Corresponding source: <https://github.com/SagerNet/sing-box/tree/v1.14.4> (tag archive: <https://github.com/SagerNet/sing-box/archive/refs/tags/v1.14.4.zip>).
 
 The corresponding download URLs and SHA-256 digests are recorded in `checksums.json` and `config/versions.json`. These archives are command-line cores, not GUI applications. Runtime validation never reads Clash Verge AppData and never changes the system proxy or TUN state.
 
-## May Core XHTTP development snapshot
+## May Core with native XHTTP
 
-- Project: <https://github.com/mxh110708/may-route-core>.
-- Version: `1.14.2-may.xhttp20.0`, an unreleased working-tree snapshot; not an official sing-box release or a clean released commit.
-- Binary archive: `may-core-1.14.2-may.xhttp20.0-windows-amd64.zip`.
-- Complete corresponding source: `may-core-1.14.2-may.xhttp20.0-source.zip`, including a per-file `SOURCE-FILES.sha256` manifest.
-- License: the root sing-box GPLv3-or-later license and upstream name-use restriction remain in place. XHTTP wire helpers adapt MetaCubeX/mihomo `v1.19.32`; the binary and source archives include their attribution and GPLv3 license.
-- `checksums.json` pins both archives, binary hash, base revision, actual source-tree digest, Go toolchain, build tags and link options. `scripts/Build-MayXhttpValidationAsset.ps1` builds from the copied source snapshot.
+- Published release: `1.14.4-may.1`, https://github.com/mxh110708/may-route-core/releases/tag/v1.14.4-may.1.
+- Source commit: `5c4415cfd3ba448326c9564d9f934809cd74d4b3`, based on official sing-box v1.14.4.
+- Binary: `may-core-1.14.4-may.1-windows-amd64.zip`, unchanged release bytes. Its executable is named `sing-box.exe`; Deploy extracts it under its separate `may-core.exe` cache identity.
+- Complete CLI source: `may-core-1.14.4-may.1-source.zip`, including the per-file `SOURCE-FILES.sha256` and `SOURCE-SNAPSHOT.json`. Non-CLI Android/Apple/Desktop gitlinks are explicitly excluded in that snapshot.
+- Both archives, binary, source manifest, Go 1.26.10 and build flags are pinned in `checksums.json`. Every source-manifest file was checked against its archived digest during synchronization.
+- GPLv3-or-later and upstream name-use restrictions remain. The XHTTP helpers retain MetaCubeX/mihomo attribution and GPL license in both archives.
 
-Only native configurations containing XHTTP select this core. Ordinary native configurations still use official sing-box. No GUI installer or second persistent proxy service is included.
+Only native configurations containing XHTTP select this core. Ordinary native validation uses official sing-box. No Route GUI installer or additional persistent proxy service is bundled.
 
 ## Mihomo GeoData
 

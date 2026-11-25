@@ -15,19 +15,22 @@ public static partial class InboundRendering
     public static string Unit(string id) => "may-inbound-" + InboundCatalog.Id(id) + ".service";
     public static JsonObject ResolveOutbound(ArchiveStore store, string instance, JsonObject outbound)
     {
-        if (outbound.Text("Kind") == "Direct") return new JsonObject { ["type"] = "direct", ["tag"] = "egress", ["domain_resolver"] = new JsonObject { ["server"] = "local", ["strategy"] = outbound.Text("Family") switch { "IPv4" => "ipv4_only", "IPv6" => "ipv6_only", _ => "prefer_ipv4" } } };
+        if (outbound.Text("Kind") == "Direct") return OutboundAddressPolicy.Direct(outbound.Text("Family"), "egress", false);
         var reference = outbound["Source"]!;ClientSourceBarrier.RequireAvailable(store,"Scheme",reference.Text("SchemeId")); var scheme = store.ReadSecret(ServerOutboundRouting.SchemeFile(store.Paths, reference.Text("SchemeId")));
         try
         {
             var node = scheme["Nodes"]!.AsArray().OfType<JsonObject>().SingleOrDefault(n => n.Text("Id") == reference.Text("NodeId")) ?? throw new OperationException("出站来源节点已移除。");
-            if (ArchiveStore.Fingerprint(node) != reference.Text("Fingerprint")) throw new OperationException("出站来源已变化，请重新选择并审阅。");
+            if (!InstanceAddressChanges.Preparing.Value && ArchiveStore.Fingerprint(node) != reference.Text("Fingerprint")) throw new OperationException("出站来源已变化，请重新选择并审阅。");
             if (node.Text("ManagedOrigin.Instance") == instance || node.Text("InboundOrigin.Instance") == instance || node.Text("ForwardedOrigin.Instance") == instance) throw new OperationException("入站不能将本实例的受管节点再次作为自身出站。");
-            ManagedNodeSources.Verify(store, new JsonArray(node["ManagedOrigin"]?.DeepClone()).WithoutNulls());
-            ForwardedNodeSources.VerifyNodes(store, [node]);
-            InboundSources.VerifyNodes(store, [node]);
+            if (!InstanceAddressChanges.Preparing.Value)
+            {
+                ManagedNodeSources.Verify(store, new JsonArray(node["ManagedOrigin"]?.DeepClone()).WithoutNulls());
+                ForwardedNodeSources.VerifyNodes(store, [node]);
+                InboundSources.VerifyNodes(store, [node]);
+            }
             if (node["sing_box"] is not JsonObject native || native.Text("type") is not ("shadowsocks" or "vless" or "trojan" or "anytls" or "hysteria2" or "tuic") || native.Text("detour") != "" || native.Text("network") == "udp") throw new OperationException("出站须为直接可连接的受支持原生代理节点。");
-            if (ServerOutboundRouting.IsQuic(native) || ServerOutboundRouting.IsStream(native)) { var next = ServerOutboundRouting.NextHop(node, allowForwarded: ServerOutboundRouting.IsStream(native)); next["tag"] = "egress"; return next; }
-            var result = native.DeepClone().AsObject(); result["tag"] = "egress"; return result;
+            if (ServerOutboundRouting.IsQuic(native) || ServerOutboundRouting.IsStream(native)) { var next = ServerOutboundRouting.NextHop(node, allowForwarded: ServerOutboundRouting.IsStream(native), allowDomain: true); next["tag"] = "egress"; OutboundAddressPolicy.Endpoint(next.Text("server"), outbound.Text("ConnectionFamily", "Auto")); return next; }
+            var result = native.DeepClone().AsObject(); result["tag"] = "egress"; OutboundAddressPolicy.Endpoint(result.Text("server"), outbound.Text("ConnectionFamily", "Auto")); return result;
         }
         finally { scheme.Clear(); }
     }
@@ -81,7 +84,7 @@ public static partial class InboundRendering
         ValidateOutboundLoop(plan, model, actual);
         if (inbound.Text("Protocol") == "Reality") return InboundRoutingPolicy.Apply(store, plan, model, inbound, XrayReality(inbound, credentials, options.AsObject(), outbound, actual));
         if (inbound.Text("Protocol") == "VLESS") return InboundRoutingPolicy.Apply(store, plan, model, inbound, ApplyManagedCertificate(XrayXhttp(inbound, credentials, outbound, actual), model, inbound));
-        var rules = new JsonArray(); if (outbound.Text("Family") != "Auto") rules.Add(new JsonObject { ["ip_version"] = outbound.Text("Family") == "IPv4" ? 6 : 4, ["action"] = "reject" });
+        var rules = new JsonArray(); if (OutboundAddressPolicy.Strict(outbound.Text("Family"))) rules.Add(new JsonObject { ["ip_version"] = outbound.Text("Family") == "IPv4" ? 6 : 4, ["action"] = "reject" });
         return InboundRoutingPolicy.Apply(store, plan, model, inbound, ApplyManagedCertificate(new JsonObject { ["log"] = new JsonObject { ["level"] = "warn", ["timestamp"] = true }, ["dns"] = new JsonObject { ["servers"] = new JsonArray(new JsonObject { ["type"] = "local", ["tag"] = "local" }) }, ["inbounds"] = new JsonArray(input), ["outbounds"] = new JsonArray(actual), ["route"] = new JsonObject { ["final"] = "egress", ["rules"] = rules } }, model, inbound));
     }
     private static JsonObject ApplyManagedCertificate(JsonObject configuration, JsonObject model, JsonObject inbound)
@@ -99,8 +102,8 @@ public static partial class InboundRendering
     {
         var clients = new JsonArray(inbound.Strings("UserIds").Select(id => (JsonNode)new JsonObject { ["id"] = credentials.Text("Users." + id + ".Value"), ["email"] = id, ["flow"] = "xtls-rprx-vision" }).ToArray());
         var input = new JsonObject { ["tag"] = inbound.Text("Id"), ["listen"] = inbound.Text("Listener.Address"), ["port"] = inbound.Number("Listener.Port"), ["protocol"] = "vless", ["settings"] = new JsonObject { ["clients"] = clients, ["decryption"] = "none" }, ["streamSettings"] = new JsonObject { ["network"] = "raw", ["security"] = "reality", ["realitySettings"] = new JsonObject { ["show"] = false, ["target"] = options.Text("HandshakeServer") + ":" + options.Number("HandshakePort"), ["xver"] = 0, ["serverNames"] = new JsonArray(options.Text("ServerName")), ["privateKey"] = credentials.Text("Inbounds." + inbound.Text("Id") + ".RealityPrivateKey"), ["shortIds"] = new JsonArray(options.Text("ShortId")) } } };
-        var output = outbound.Text("Kind") == "Direct" ? new JsonObject { ["tag"] = "egress", ["protocol"] = "freedom", ["settings"] = new JsonObject { ["domainStrategy"] = outbound.Text("Family") switch { "IPv4" => "ForceIPv4", "IPv6" => "ForceIPv6", _ => "AsIs" } } } : ServerOutboundRouting.XrayNextHop(native);
-        var rules = new JsonArray(); if (outbound.Text("Family") != "Auto") rules.Add(new JsonObject { ["type"] = "field", ["ip"] = new JsonArray(outbound.Text("Family") == "IPv4" ? "::/0" : "0.0.0.0/0"), ["outboundTag"] = "block" });
+        var output = outbound.Text("Kind") == "Direct" ? OutboundAddressPolicy.Direct(outbound.Text("Family"), "egress", true) : ServerOutboundRouting.XrayNextHop(native);
+        var rules = new JsonArray(); if (OutboundAddressPolicy.Strict(outbound.Text("Family"))) rules.Add(new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray(inbound.Text("Id")), ["ip"] = new JsonArray(outbound.Text("Family") == "IPv4" ? "::/0" : "0.0.0.0/0"), ["outboundTag"] = "block" });
         return new JsonObject { ["log"] = new JsonObject { ["access"] = "none", ["loglevel"] = "warning" }, ["inbounds"] = new JsonArray(input), ["outbounds"] = new JsonArray(output, new JsonObject { ["tag"] = "block", ["protocol"] = "blackhole" }), ["routing"] = new JsonObject { ["domainStrategy"] = "AsIs", ["rules"] = rules } };
     }
     private static JsonArray Lines(string value) => new(value.Replace("\r\n", "\n").Trim().Split('\n').Select(line => (JsonNode?)JsonValue.Create(line)).ToArray());
@@ -172,7 +175,7 @@ public static partial class InboundRendering
                         password = credentials.Text("Inbounds." + id + ".ServerKey") + ":" + password; clash["type"] = "ss"; clash["cipher"] = options.Text("Method"); clash["password"] = password;
                         sing["type"] = "shadowsocks"; sing["method"] = options.Text("Method"); sing["password"] = password; break;
                 }
-                var node = new JsonObject { ["Id"] = ArchiveStore.Digest(Encoding.UTF8.GetBytes(instance + ":" + id + ":" + userId + ":" + family))[..32], ["name"] = name, ["kind"] = "entry", ["region_group"] = "US-West-LA Entry", ["transit_group"] = "US-West-LA Entry", ["clash"] = clash, ["sing_box"] = sing, ["Egress"] = new JsonObject { ["Family"] = outbound.Text("Family") == "Auto" ? "Unknown" : outbound.Text("Family"), ["ExpectedAddress"] = outbound.Text("ExpectedAddress") } };
+                var node = new JsonObject { ["Id"] = ArchiveStore.Digest(Encoding.UTF8.GetBytes(instance + ":" + id + ":" + userId + ":" + family))[..32], ["name"] = name, ["kind"] = "entry", ["region_group"] = "US-West-LA Entry", ["transit_group"] = "US-West-LA Entry", ["clash"] = clash, ["sing_box"] = sing, ["Egress"] = new JsonObject { ["Family"] = OutboundAddressPolicy.Dual(outbound.Text("Family")) ? "Unknown" : outbound.Text("Family"), ["ExpectedAddress"] = outbound.Text("ExpectedAddress") } };
                 node["InboundOrigin"] = new JsonObject { ["Instance"] = instance, ["InboundId"] = id, ["UserId"] = userId, ["Family"] = family, ["ResourceFingerprint"] = resource, ["ConnectionFingerprint"] = ClientNodeImport.ConnectionFingerprint(node) }; yield return node;
             }
         }

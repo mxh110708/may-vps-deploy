@@ -14,8 +14,8 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
     public ReviewedOperation Review(OperationRequest request)
     {
         var snapshot = request.Snapshot(); OperationPolicy.Validate(snapshot);
-        WireGuardTunnels.GuardOperation(store, snapshot);
-        TcpChains.GuardOperation(store, snapshot);
+        InstanceAddressChanges.GuardOperation(store, snapshot);
+        if (snapshot.Kind != OperationKind.InstanceAddress) { WireGuardTunnels.GuardOperation(store, snapshot); TcpChains.GuardOperation(store, snapshot); }
         var planHash = ArchiveFingerprint(snapshot);
         JsonObject? kernelCatalog = null;
         if (snapshot.Kind == OperationKind.BbrKernel && snapshot.Options.Text("Action") == "Install")
@@ -30,6 +30,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         if (snapshot.Kind == OperationKind.WireGuardTunnel) summary = WireGuardTunnels.Prepare(store, snapshot).Summary;
         if (snapshot.Kind == OperationKind.TcpChain) summary = TcpChains.Prepare(store, snapshot).Summary;
         if (snapshot.Kind == OperationKind.ManagedCertificate) summary = ManagedCertificates.Prepare(store, snapshot);
+        if (snapshot.Kind == OperationKind.InstanceAddress) summary = InstanceAddressChanges.Prepare(store, snapshot).Summary;
         if (snapshot.Kind == OperationKind.Inbounds) { var preview = InboundCatalog.Prepare(store, snapshot); summary = preview.Summary; preview.Credentials.Clear(); preview.Payload["Configurations"]!.AsObject().Clear(); }
         return new(snapshot, Fingerprint(snapshot), planHash, summary);
     }
@@ -39,6 +40,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
     });
     private string ArchiveFingerprint(OperationRequest request)
     {
+        if (request.Kind == OperationKind.InstanceAddress) return InstanceAddressChanges.Prepare(store, request).Fingerprint;
         var directory = store.Paths.Instance(request.InstanceRelativePath); var files = new JsonObject();
         var pendingForward = SafePath.Resolve(directory, "operation-pending.dotnet.json");
         var forwardRecovery = request.Kind == OperationKind.Recover && File.Exists(pendingForward) && ArchiveStore.ReadJson(pendingForward).Strings("Components").Any(c => c is "TcpForwarding" or "UdpForwarding");
@@ -108,6 +110,12 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
             foreach (var rule in UdpForwarding.Rules(request.Options["Configuration"] as JsonObject).Where(r => r.Flag("Enabled") && r.Text("Validation.Type") == "Shadowsocks"))
                 files["UdpForwardSource:" + rule.Text("Id")] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, rule.Text("Validation.SchemeId")));
         }
+        if (request.Kind is OperationKind.TcpForward or OperationKind.UdpForward)
+        {
+            files["ProxyHealthProgram"] = ClientSchemes.SourceFingerprint(store.Paths.Resolve("scripts/forward-proxy-health.py"));
+            files["ProxyHealthVersions"] = ClientSchemes.SourceFingerprint(store.Paths.Resolve("config/versions.json"));
+            foreach (var rule in TcpForwarding.Rules(request.Options["Configuration"] as JsonObject).Where(ForwardProxyHealth.Selected)) files["ProxyHealthSource:" + rule.Text("Id")] = ClientSchemes.SourceFingerprint(ServerOutboundRouting.SchemeFile(store.Paths, rule.Text("Validation.SchemeId")));
+        }
         if (request.Kind == OperationKind.MayMonitor || request.Kind==OperationKind.Recover&&request.Options.ContainsKey("MayAgentConfiguration"))
         {
             foreach (var asset in new[] { "config/may-monitor.json", "scripts/may-monitor-lifecycle.py", "assets/remote/may-monitor-lifecycle.sh" }) files[asset] = ClientSchemes.SourceFingerprint(store.Paths.Resolve(asset));
@@ -155,8 +163,8 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         try
         {
             using var instanceLock = LockParticipants(current);
-            WireGuardTunnels.GuardOperation(store, current);
-            TcpChains.GuardOperation(store, current);
+            InstanceAddressChanges.GuardOperation(store, current);
+            if (current.Kind != OperationKind.InstanceAddress) { WireGuardTunnels.GuardOperation(store, current); TcpChains.GuardOperation(store, current); }
             var planHash = ArchiveFingerprint(current);
             if (planHash != review.PlanFingerprint) throw new OperationException("实例归档在审阅后发生变化，请重新读取并审阅。");
             Current = new(Guid.NewGuid().ToString("N"), current.Kind, DateTimeOffset.UtcNow, null, TaskOutcome.Running, "准备", InstanceRelativePath: current.InstanceRelativePath, TargetLabel: OperationPolicy.TargetLabel(current));
@@ -184,7 +192,7 @@ public sealed class TaskCoordinator(ArchiveStore store, IOperationWorkflow workf
         var locks = new ParticipantLocks();
         try
         {
-            var instances = request.Kind == OperationKind.WireGuardTunnel ? WireGuardTunnels.Instances(request.Options["Configuration"]!.AsObject()) : request.Kind == OperationKind.TcpChain ? TcpChains.Participants(store, request) : [request.InstanceRelativePath];
+            var instances = request.Kind == OperationKind.InstanceAddress ? InstanceAddressChanges.Participants(store, request) : request.Kind == OperationKind.WireGuardTunnel ? WireGuardTunnels.Instances(request.Options["Configuration"]!.AsObject()) : request.Kind == OperationKind.TcpChain ? TcpChains.Participants(store, request) : [request.InstanceRelativePath];
             foreach (var instance in instances.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase)) locks.Items.Add(store.LockInstance(instance));
             return locks;
         }
@@ -204,6 +212,7 @@ public static class OperationPolicy
     public static void Validate(OperationRequest request)
     {
         if (!Enum.IsDefined(request.Kind)) throw new OperationException("未知任务类型。");
+        if (request.Kind == OperationKind.InstanceAddress) InstanceAddressChanges.Validate(request);
         if (request.Kind == OperationKind.WireGuardTunnel) WireGuardTunnels.Validate(request);
         if (request.Kind == OperationKind.TcpChain) TcpChains.Validate(request);
         if (request.Kind == OperationKind.ManagedCertificate) ManagedCertificates.Validate(request);

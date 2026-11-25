@@ -117,8 +117,10 @@ internal sealed partial class BoundaryTests
                     var probe = new JsonObject { ["ConfigurationHash"] = hash, ["Groups"] = new JsonArray(TcpForwarding.Rules(Configuration).Where(r => r.Flag("Enabled") && r["TargetGroup"] is JsonObject).Select(r => (JsonNode?)new JsonObject
                     {
                         ["RuleId"] = r.Text("Id"), ["RuleFingerprint"] = GroupProofDrift ? new string('f', 64) : ForwardTargetGroups.Fingerprint(r), ["HealthType"] = r.Text("TargetGroup.Health.Type"),
-                        ["Targets"] = new JsonArray(ForwardTargetGroups.Targets(r).Select((target, index) => (JsonNode?)new JsonObject { ["Index"] = index, ["Address"] = target.Address, ["Port"] = target.Port, ["Passed"] = GroupHealthy[index] }).ToArray())
+                        ["Targets"] = new JsonArray(ForwardTargetGroups.Targets(r).Select((target, index) => (JsonNode?)new JsonObject { ["Index"] = index, ["TargetId"] = ForwardTargetGroups.Balanced(r) ? ForwardTargetGroups.TargetIds(r).ElementAt(index) : "", ["Address"] = target.Address, ["Port"] = target.Port, ["Passed"] = GroupHealthy[index] }).ToArray())
                     }).ToArray()) };
+                    foreach (var group in probe["Groups"]!.AsArray().OfType<JsonObject>().Where(g => g.Text("HealthType") == "Proxy"))
+                        foreach (var target in group["Targets"]!.AsArray()) target!["Evidence"] = new JsonObject { ["Scope"] = "ProxyHttpsEgress", ["TcpReachable"] = true, ["ProxyAuthenticated"] = true, ["HttpsVerified"] = true, ["EgressAddress"] = "198.51.100.40", ["UdpResponseMatched"] = transport == "udp" };
                     return new(0, "VPSDEPLOY_FORWARD_GROUP_PROBE_B64=" + Convert.ToBase64String(Encoding.UTF8.GetBytes(probe.ToJsonString())) + "\nVPSDEPLOY_" + marker + "_READ\n", "");
                 }
                 Inner.Commands.Add(asset); var state = new JsonObject { ["Hash"] = ReadDrift ? new string('f', 64) : Configuration == null ? "Absent" : ArchiveStore.Fingerprint(Configuration), ["Configuration"] = Configuration?.DeepClone() };

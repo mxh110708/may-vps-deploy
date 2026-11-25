@@ -54,6 +54,7 @@ public static class UdpForwarding
         }
         var normalized = TcpForwarding.Normalize(common);
         foreach (var rule in Rules(normalized)) foreach (var (key, value) in extras[rule.Text("Id")]) rule[key] = value!.DeepClone();
+        if (Rules(normalized).Count(ForwardProxyHealth.Selected) > 4) throw new OperationException("每个组件最多 4 个协议健康组。");
         return normalized;
     }
     public static JsonObject Options(JsonObject state, string action, JsonObject? configuration = null) => new()
@@ -101,6 +102,7 @@ public static class UdpForwarding
         if (action == "Check" && ArchiveStore.Fingerprint(config) != ArchiveStore.Fingerprint(plan["UdpForwarding"] ?? Empty())) throw new OperationException("只读检查只能核对已保存的 UDP 转发配置。");
         if (Rules(config).Any(r => r.Text("Validation.Type") == "TcpChain")) throw new OperationException("跨实例 UDP 规则只能由跨实例编排统一管理。");
         ValidateCandidate(plan, config);
+        _ = ForwardProxyHealth.Document(store, config);
         foreach (var rule in Rules(config))
         {
             if (rule.Flag("Enabled") && rule.Text("Validation.Type") == "Shadowsocks") _ = ProxyNode(store, rule, request.InstanceRelativePath);

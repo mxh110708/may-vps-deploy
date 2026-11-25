@@ -83,12 +83,13 @@ public static class ForwardedNodeSources
         JsonObject? udp = null;
         if (sing.Text("type") == "shadowsocks")
         {
-            if (rule["TargetGroup"] == null && originalSing.Text("network") != "tcp" && originalClash.Flag("udp", true) && udpRuleId != "" && plan["UdpForwarding"] is JsonObject udpConfig)
+            if (!ForwardTargetGroups.Balanced(rule) && (rule["TargetGroup"] == null || ForwardProxyHealth.Selected(rule)) && originalSing.Text("network") != "tcp" && originalClash.Flag("udp", true) && udpRuleId != "" && plan["UdpForwarding"] is JsonObject udpConfig)
             {
                 var normalized = UdpForwarding.Normalize(udpConfig);
                 var matches = UdpForwarding.Rules(normalized).Where(r => (udpRuleId == null || r.Text("Id") == udpRuleId)
                     && r.Flag("Enabled") && Includes(r, family) && r.Number("ListenPort") == rule.Number("ListenPort")
                     && r.Text("TargetAddress") == rule.Text("TargetAddress") && r.Number("TargetPort") == rule.Number("TargetPort")
+                    && MatchingForwardGroups(rule, r)
                     && r.Text("Validation.Type") == "Shadowsocks" && r.Text("Validation.SchemeId") == rule.Text("Validation.SchemeId")
                     && r.Text("Validation.NodeId") == rule.Text("Validation.NodeId") && r.Text("Validation.NodeFingerprint") == rule.Text("Validation.NodeFingerprint")).ToArray();
                 if (matches.Length == 1)
@@ -109,6 +110,8 @@ public static class ForwardedNodeSources
         node["ForwardedOrigin"] = origin;
         return node;
     }
+    private static bool MatchingForwardGroups(JsonObject tcp, JsonObject udp) => tcp["TargetGroup"] == null ? udp["TargetGroup"] == null :
+        !ForwardTargetGroups.Balanced(tcp) && !ForwardTargetGroups.Balanced(udp) && ForwardProxyHealth.Selected(tcp) && ForwardProxyHealth.Selected(udp) && tcp.Text("TargetGroup.BackupAddress") == udp.Text("TargetGroup.BackupAddress") && tcp.Number("TargetGroup.BackupPort") == udp.Number("TargetGroup.BackupPort") && JsonNode.DeepEquals(tcp.At("TargetGroup.Health"), udp.At("TargetGroup.Health"));
 
     public static void VerifyOrigins(ArchiveStore store, JsonArray origins)
     {

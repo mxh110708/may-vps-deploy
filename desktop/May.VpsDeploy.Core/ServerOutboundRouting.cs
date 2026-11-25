@@ -79,9 +79,9 @@ public static partial class ServerOutboundRouting
         // Independent inbounds already accept validated forwarding sources and
         // native SS parameters. Fixed-role restrictions are a separate scope.
         if (native.Text("type") == "shadowsocks") return true;
-        try { NextHop(node, allowForwarded: IsStream(native)); return true; } catch (OperationException) { return false; }
+        try { NextHop(node, allowForwarded: IsStream(native), allowDomain: true); return true; } catch (OperationException) { return false; }
     }
-    public static JsonObject NextHop(JsonObject node, bool allowForwarded = false)
+    public static JsonObject NextHop(JsonObject node, bool allowForwarded = false, bool allowDomain = false)
     {
         if (node["ForwardedOrigin"] != null && !allowForwarded) throw new OperationException("本轮服务器落地须选择原始代理节点，不能引用转发节点。");
         if (node["sing_box"] is not JsonObject native) throw new OperationException("下一跳缺少完整 sing-box 原生参数。");
@@ -90,9 +90,9 @@ public static partial class ServerOutboundRouting
         else if (IsStream(native)) StreamParameters(native);
         else if (native.Text("type") != "shadowsocks" || native.Any(p => !new[] { "type", "tag", "server", "server_port", "method", "password" }.Contains(p.Key)) || !Methods.Contains(native.Text("method"))) throw new OperationException("下一跳不在当前核心支持范围，或含有插件、客户端 detour 等未知参数；不会删除字段后继续应用。");
         if (native.Number("server_port") is < 1 or > 65535 || native.Text("type") != "vless" && (native.Text("password").Length is < 1 or > 4096 || native.Text("password").Any(char.IsControl))) throw new OperationException("下一跳的端口或鉴权参数无效。");
-        Address(native.Text("server"));
+        if (allowDomain && !IPAddress.TryParse(native.Text("server"), out _)) DeploymentPlans.Domain(native.Text("server")); else Address(native.Text("server"));
         var name = node.Text("name"); if (name.Length is < 1 or > 120 || name.Any(char.IsControl)) throw new OperationException("下一跳名称无效。");
-        var result = native.DeepClone().AsObject(); result["tag"] = Tag; result["server"] = Address(native.Text("server")).ToString();
+        var result = native.DeepClone().AsObject(); result["tag"] = Tag; result["server"] = IPAddress.TryParse(native.Text("server"), out var serverIp) ? serverIp.ToString() : native.Text("server");
         if (result.Text("type") == "hysteria2" && result["server_ports"] != null) result["server_ports"] = Hysteria2Ports.Native(Hysteria2Ports.FromNative(result["server_ports"]));
         return result;
     }
@@ -115,7 +115,7 @@ public static partial class ServerOutboundRouting
             if (previous.Number("Version") != 1 || ownedOutput.Length != 1 || ArchiveStore.Fingerprint(ownedOutput[0]) != previous.Text("OutboundFingerprint") || !OwnedRulesMatch(role, ownedRules, previous, ["anytls-in"], plan)) throw new OperationException("受管服务器出站已漂移，未覆盖或删除。", code: "ServerOutboundDrift");
             outputs.Remove(ownedOutput[0]); foreach (var rule in ownedRules) rules.Remove(rule);
         }
-        if (outputs.Count != 1 || outputs[0]?.Text("tag") != "direct" || outputs[0]?.Text("type") != "direct" || rules.Count > 1 || rules.Any(r => r is not JsonObject o || o.Count != 2 || o.Number("ip_version") != 6 || o.Text("action") != "reject")) throw new OperationException("当前服务器出口或规则超出受支持布局，保留原配置。");
+        if (outputs.Count != 1 || outputs[0]?.Text("tag") != "direct" || outputs[0]?.Text("type") != "direct" || rules.Count > 1 || rules.Any(r => r is not JsonObject o || o.Count != 2 || o.Number("ip_version") is not (4 or 6) || o.Text("action") != "reject")) throw new OperationException("当前服务器出口或规则超出受支持布局，保留原配置。");
         JsonObject? metadata = null;
         if (node == null)
         {
