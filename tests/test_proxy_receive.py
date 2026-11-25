@@ -211,7 +211,11 @@ class ReceiveRuntime(unittest.TestCase):
             # that close on Windows; the fixture does not test resumption.
             context.num_tickets = 0
             target = listener(); self.addCleanup(target.close)
-            backend = self.relay(target, receive=policy(ClientSources=['127.0.0.2/32'], ProbeSource='127.0.0.2'))
+            # Darwin does not bind an unconfigured 127/8 alias. Use its existing
+            # loopback address while still checking the exact source/destination
+            # tuples; Windows and Linux additionally verify a distinct source IP.
+            client_address = '127.0.0.1' if sys.platform == 'darwin' else '127.0.0.2'
+            backend = self.relay(target, receive=policy(ClientSources=[client_address+'/32'], ProbeSource=client_address))
             entry = listener(); self.addCleanup(entry.close); stop = threading.Event()
             forward = threading.Thread(target=worker.run, args=([entry], '127.0.0.1', backend.getsockname()[1], 'v1'), kwargs=dict(stop=stop, idle=.3)); forward.start()
             seen = []; errors = []
@@ -227,7 +231,7 @@ class ReceiveRuntime(unittest.TestCase):
             server = threading.Thread(target=serve); server.start()
             try:
                 with socket.socket() as client:
-                    client.settimeout(5); client.bind(('127.0.0.2', 0)); client.connect(entry.getsockname()); original_source = client.getsockname()
+                    client.settimeout(5); client.bind((client_address, 0)); client.connect(entry.getsockname()); original_source = client.getsockname()
                     with ssl.create_default_context(cafile=str(path/'cert.pem')).wrap_socket(client, server_hostname='target.example.test') as tls:
                         tls.sendall(b'GET / HTTP/1.1\r\nHost: target.example.test\r\n\r\n'); self.assertTrue(tls.recv(4096).endswith(b'OK'))
                 server.join(5); self.assertEqual(errors, [])
