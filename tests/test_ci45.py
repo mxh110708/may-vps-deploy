@@ -67,7 +67,7 @@ class Selection(unittest.TestCase):
     def test_global_and_unknown_changes_request_full(self):
         for path in (".github/workflows/ci.yml", "scripts/ci/plan.py", "requirements-test.txt",
                      "desktop/global.json", "desktop/May.VpsDeploy.Core/packages.lock.json",
-                     "config/versions.json", "AGENTS.md", "docs/AGENTS.md", "new-unclassified-file", "desktop/new-project/a.cs"):
+                     "config/versions.json", "AGENTS.md", "docs/AGENTS.md", "scripts/Test-NoSecrets.ps1", "new-unclassified-file", "desktop/new-project/a.cs"):
             with self.subTest(path=path):
                 p = plan.classify([path])
                 self.assertTrue(p["full"])

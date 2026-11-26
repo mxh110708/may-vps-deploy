@@ -235,6 +235,16 @@ $module=Get-Module VpsDeploy.Core
         if($LASTEXITCODE -ne 0){throw 'fixture git init failed'}
         & (Join-Path $root 'scripts/Test-NoSecrets.ps1') -ProjectRoot $repo
         Check $true 'ignored local runtime secrets are not treated as public files'
+        $hiddenNote=Join-Path $repo '.public-note.md'
+        [IO.File]::WriteAllText($hiddenNote,'synthetic public note')
+        if($IsWindows){[IO.File]::SetAttributes($hiddenNote,[IO.FileAttributes]::Hidden)}
+        & (Join-Path $root 'scripts/Test-NoSecrets.ps1') -ProjectRoot $repo
+        Check $true 'Git-listed hidden public files are readable on every platform'
+        if($IsWindows){[IO.File]::SetAttributes($hiddenNote,[IO.FileAttributes]::Normal)}
+        [IO.File]::WriteAllText($hiddenNote,('ghp_'+('x'*40)))
+        if($IsWindows){[IO.File]::SetAttributes($hiddenNote,[IO.FileAttributes]::Hidden)}
+        Fails {& (Join-Path $root 'scripts/Test-NoSecrets.ps1') -ProjectRoot $repo} 'hidden public text remains subject to secret checks'
+        [IO.File]::Delete($hiddenNote)
         & git -c core.excludesFile= -C $repo add -f -- private/generated.private.json
         if($LASTEXITCODE -ne 0){throw 'fixture git add failed'}
         Fails {& (Join-Path $root 'scripts/Test-NoSecrets.ps1') -ProjectRoot $repo} 'staged private archive is rejected'

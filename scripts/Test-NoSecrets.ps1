@@ -33,7 +33,7 @@ if($useGit){
         if($relative -match $privatePaths){$findings.Add([pscustomobject]@{Rule='Private/runtime file in public tree'; File=$relative})}
         $path=[IO.Path]::GetFullPath((Join-Path $ProjectRoot $relative))
         if(-not $path.StartsWith($ProjectRoot+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'Git 文件路径越界。'}
-        if(Test-Path -LiteralPath $path -PathType Leaf){$file=Get-Item -LiteralPath $path;if($file.Extension -in $textExtensions){$file}}
+        if(Test-Path -LiteralPath $path -PathType Leaf){$file=Get-Item -LiteralPath $path -Force;if($file.Extension -in $textExtensions){$file}}
     })
 }else{
     # Source ZIPs have no index; apply the documented runtime boundary, not a guessed parent repository.

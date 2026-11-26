@@ -46,7 +46,7 @@ def classify(paths, full=False, reason=None):
             continue
         elif (path.startswith((".github/", "scripts/ci/", "vendor/", "assets/kernel/"))
               or name in ("Directory.Build.props", "global.json", "packages.lock.json")
-              or path.startswith("requirements-") or path in (".gitignore", ".gitattributes")
+              or path.startswith("requirements-") or path in (".gitignore", ".gitattributes", "scripts/Test-NoSecrets.ps1")
               or name.endswith(".csproj") or path.startswith("config/")):
             full = True
         elif path.startswith("desktop/May.VpsDeploy.Desktop/"):
