@@ -78,6 +78,8 @@ jobs:
   contracts:
     name: Debian ${{ matrix.debian }} contracts
     runs-on: ubuntu-latest
+    env:
+      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
     strategy:
       fail-fast: true
       matrix: ${{ fromJSON(needs.plan.outputs.debian_matrix) }}
@@ -113,10 +115,11 @@ jobs:
         test -x /usr/lib/systemd/systemd-socket-proxyd
     - uses: actions/cache@v4
       with:
-        path: ~/.cache/pip
+        path: ${{ env.PIP_CACHE_DIR }}
         key: debian-${{ matrix.debian }}-pip-${{ hashFiles('requirements-test.txt', 'requirements-client-merge.txt') }}
     - name: Contract Python environment
       run: |-
+        install -d -m 0755 "$PIP_CACHE_DIR"
         python3 -m venv .tmp/client-test-runtime
         .tmp/client-test-runtime/bin/python -m pip install --disable-pip-version-check -r requirements-test.txt
     - name: Remote contracts and root-owned recovery fixtures
