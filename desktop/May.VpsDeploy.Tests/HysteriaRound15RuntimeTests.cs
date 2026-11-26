@@ -27,7 +27,7 @@ internal sealed partial class BoundaryTests
         await using var server = await HysteriaCore.Start(assets.ResolveCore("sing-box"), tools, config, directory, "server", ct);
         await using var first = new HysteriaUdpRelay(inbound.Number("Listener.Port")); await using var second = new HysteriaUdpRelay(inbound.Number("Listener.Port"));
         var node = InboundRendering.Nodes(f.Store, f.Relative(plan), plan, model, secrets).Single(); node["sing_box"]!["server"] = "127.0.0.1"; node["clash"]!["server"] = "127.0.0.1"; node["sing_box"]!["server_port"] = first.Port; node["clash"]!["port"] = first.Port;
-        var measurements = new JsonArray(); var owned = new List<int>();
+        var measurements = new JsonArray(); var owned = new List<TestProcessIdentity>();
         foreach (var coreName in new[] { "sing-box", "mihomo" }.Where(c => Environment.GetEnvironmentVariable("MAY_R15_CORE") is not {} selected || selected == c))
         {
             foreach (var hopping in new[] { false, true })
@@ -35,7 +35,7 @@ internal sealed partial class BoundaryTests
                 var candidate = node.DeepClone().AsObject();
                 if (hopping) Hysteria2Ports.Apply(candidate["clash"]!.AsObject(), candidate["sing_box"]!.AsObject(), first.Port + "," + second.Port, 5);
                 var beforeFirst = first.Forwarded; var beforeSecond = second.Forwarded;
-                await using var client = await Round15Client.Start(coreName, assets.ResolveCore(coreName), candidate, cert, directory, ct); owned.Add(client.Process.Id);
+                await using var client = await Round15Client.Start(coreName, assets.ResolveCore(coreName), candidate, cert, directory, ct); owned.Add(new TestProcessIdentity(client.Process));
                 using var handler = new HttpClientHandler { Proxy = new WebProxy("http://127.0.0.1:" + client.Port), UseProxy = true, ServerCertificateCustomValidationCallback = (_, certificate, _, _) => certificate?.GetCertHashString() == cert.GetCertHashString() };
                 using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
                 var target = "https://127.0.0.1:" + origin.Port;
@@ -80,14 +80,14 @@ internal sealed partial class BoundaryTests
                 var candidate = node.DeepClone().AsObject(); candidate["sing_box"]!["password"] = bad == "password" ? "wrong-synthetic-password" : node.Text("sing_box.password"); candidate["clash"]!["password"] = candidate.Text("sing_box.password");
                 if (bad == "sni") { candidate["sing_box"]!["tls"]!["server_name"] = "wrong.example.test"; candidate["clash"]!["sni"] = "wrong.example.test"; }
                 if (bad == "obfs") { candidate["sing_box"]!["obfs"]!["password"] = "wrong-synthetic-obfuscation"; candidate["clash"]!["obfs-password"] = "wrong-synthetic-obfuscation"; }
-                await using var client = await Round15Client.Start(coreName, assets.ResolveCore(coreName), candidate, cert, directory, ct); owned.Add(client.Process.Id);
+                await using var client = await Round15Client.Start(coreName, assets.ResolveCore(coreName), candidate, cert, directory, ct); owned.Add(new TestProcessIdentity(client.Process));
                 using var handler = new HttpClientHandler { Proxy = new WebProxy("http://127.0.0.1:" + client.Port), UseProxy = true, ServerCertificateCustomValidationCallback = (_, certificate, _, _) => certificate?.GetCertHashString() == cert.GetCertHashString() };
                 using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(3) }; var requests = origin.Requests; var rejected = false;
                 try { await http.GetStringAsync("https://127.0.0.1:" + origin.Port, ct); } catch (Exception e) when (e is HttpRequestException or OperationCanceledException) { rejected = true; }
                 Check(rejected && origin.Requests == requests, coreName + " accepted invalid Hysteria " + bad);
             }
         }
-        Check(owned.All(id => { try { using var p = Process.GetProcessById(id); return p.HasExited; } catch (ArgumentException) { return true; } }), "Round 15 left an owned client process running");
+        Check(owned.All(identity => identity.Exited), "Round 15 left an owned client process running");
         var evidence = Environment.GetEnvironmentVariable("MAY_R15_EVIDENCE"); if (!string.IsNullOrEmpty(evidence)) ArchiveStore.WriteJson(Path.GetFullPath(evidence), new JsonObject { ["SyntheticOnly"] = true, ["Scope"] = "Windows loopback; same serial HTTPS workload, two-second stream warmup excluded from RSS samples; short observation only", ["Measurements"] = measurements, ["ClientsStopped"] = true });
         secrets.Clear();
     }

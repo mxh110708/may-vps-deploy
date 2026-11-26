@@ -85,6 +85,7 @@ else if (args.Contains("--monitor-read-only")) await new BoundaryTests(repositor
 else if (args.Contains("--may-monitor-only")) await new BoundaryTests(repository).RunMayMonitorTests();
 else if(args.Contains("--monitor-maintenance-only"))await new BoundaryTests(repository).RunMonitorMaintenanceTests();
 else if (args.Contains("--monitor-access-only")) await new BoundaryTests(repository).RunMonitorAccessTests();
+else if (args.Contains("--process-identity-only")) new BoundaryTests(repository).RunProcessIdentityTests();
 else if (args.Contains("--group")) await new BoundaryTests(repository).Run(args[Array.IndexOf(args, "--group") + 1]);
 else await new BoundaryTests(repository).Run();
 
@@ -113,7 +114,7 @@ internal sealed partial class BoundaryTests(string repository)
         using var f = new Fixture(repository);
         if (Includes("foundation"))
         {
-            MixedPortBoundaries();
+            MixedPortBoundaries(); ProcessIdentityBoundaries();
             Paths(f); Fonts(f); await Coordinator(f); Publisher(f); SinglePublisher(f); Profiles(f); MultiPurpose(f); Keys(f); await Workflows(f); await DesktopDeployment(f); await Credentials(f); await Workbench(f); await Trust(f); await DeploymentExperience(f); await MaintenanceExperience(f);
             CloudflareCredentialExperience(f);
             ClientLayoutUpgradeExperience(f);

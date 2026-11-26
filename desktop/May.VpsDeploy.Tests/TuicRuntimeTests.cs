@@ -19,11 +19,11 @@ internal sealed partial class BoundaryTests
         using var unrelatedKey = RSA.Create(2048); var unrelatedRequest = new CertificateRequest("CN=unrelated.example.test", unrelatedKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1); unrelatedRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true)); using var unrelatedCa = unrelatedRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(2));
         await using var origin = await HysteriaHttpsTarget.Start(repository, f, ca, key, ct); await using var dns = new TuicDnsTarget();
         var plan = f.Plan("Tuic-runtime"); f.SaveInstance(plan); var model = InboundCatalog.Empty(); var credentials = InboundCatalog.EmptyCredentials(); var inbound = InboundCatalog.AddInbound(model, credentials, "TuicV5"); var certificate = InboundCatalog.ImportCertificate(model, credentials, "TLS", ca.ExportCertificatePem(), key.ExportPkcs8PrivateKeyPem()); inbound["CertificateId"] = certificate.Text("Id"); inbound["Options"]!["ServerName"] = "tuic.example.test"; inbound["Listener"]!["Port"] = UdpPort();
-        var second = InboundCatalog.AddUser(model, credentials, "Second", "TuicV5"); inbound["UserIds"]!.AsArray().Add(second.Text("Id")); var directory = f.Paths.Resolve("private/tuic-runtime"); Directory.CreateDirectory(directory); var measurements = new JsonArray(); var processes = new List<int>();
+        var second = InboundCatalog.AddUser(model, credentials, "Second", "TuicV5"); inbound["UserIds"]!.AsArray().Add(second.Text("Id")); var directory = f.Paths.Resolve("private/tuic-runtime"); Directory.CreateDirectory(directory); var measurements = new JsonArray(); var processes = new List<TestProcessIdentity>();
         foreach (var congestion in new[] { "cubic", "new_reno", "bbr" })
         {
             inbound["Options"]!["CongestionControl"] = congestion; var config = InboundRendering.Configuration(f.Store, plan, model, credentials, inbound); config["inbounds"]![0]!["listen"] = "127.0.0.1";
-            await using var server = await HysteriaCore.Start(assets.ResolveCore("sing-box"), tools, config, directory, "server-" + congestion, ct); processes.Add(server.Process.Id);
+            await using var server = await HysteriaCore.Start(assets.ResolveCore("sing-box"), tools, config, directory, "server-" + congestion, ct); processes.Add(new TestProcessIdentity(server.Process));
             await using var relay = new HysteriaUdpRelay(inbound.Number("Listener.Port"));
             foreach (var mode in new[] { "native", "quic" })
             {
@@ -32,7 +32,7 @@ internal sealed partial class BoundaryTests
                 foreach (var core in new[] { "sing-box", "mihomo" })
                 {
                     var node = nodes[0].DeepClone().AsObject(); node["sing_box"]!["server"] = "127.0.0.1"; node["clash"]!["server"] = "127.0.0.1"; node["sing_box"]!["server_port"] = relay.Port; node["clash"]!["port"] = relay.Port;
-                    await using var client = await Round15Client.Start(core, assets.ResolveCore(core), node, ca, directory, ct); processes.Add(client.Process.Id);
+                    await using var client = await Round15Client.Start(core, assets.ResolveCore(core), node, ca, directory, ct); processes.Add(new TestProcessIdentity(client.Process));
                     using var http = TuicHttp(client.Port, ca); var target = "https://127.0.0.1:" + origin.Port; var before = dns.Packets;
                     Check(await http.GetStringAsync(target, ct) == "198.51.100.22", core + " TUIC HTTPS did not authenticate");
                     var udpResult = await ClientProxyUdp.ProbeAsync(client.Port, new(IPAddress.Loopback, dns.Port), ct);
@@ -72,12 +72,12 @@ internal sealed partial class BoundaryTests
                 if (variant == "uuid") { var wrong = Guid.NewGuid().ToString(); node["sing_box"]!["uuid"] = wrong; node["clash"]!["uuid"] = wrong; }
                 if (variant == "password") { node["sing_box"]!["password"] = "wrong-synthetic-password"; node["clash"]!["password"] = "wrong-synthetic-password"; }
                 if (variant == "sni") { node["sing_box"]!["tls"]!["server_name"] = "wrong.example.test"; node["clash"]!["sni"] = "wrong.example.test"; }
-                await using var client = await Round15Client.Start(core, assets.ResolveCore(core), node, variant == "trust" ? unrelatedCa : ca, directory, ct); processes.Add(client.Process.Id); using var http = TuicHttp(client.Port, ca); var before = origin.Requests;
+                await using var client = await Round15Client.Start(core, assets.ResolveCore(core), node, variant == "trust" ? unrelatedCa : ca, directory, ct); processes.Add(new TestProcessIdentity(client.Process)); using var http = TuicHttp(client.Port, ca); var before = origin.Requests;
                 if (variant == "second") Check(await http.GetStringAsync("https://127.0.0.1:" + origin.Port, ct) == "198.51.100.22" && (await ClientProxyUdp.ProbeAsync(client.Port, new(IPAddress.Loopback, dns.Port), ct)).Flag("ResponseMatched"), "Second TUIC user was not independently authenticated");
                 else { var rejected = false; try { await http.GetStringAsync("https://127.0.0.1:" + origin.Port, ct); } catch (Exception error) when (error is HttpRequestException or OperationCanceledException) { rejected = true; } Check(rejected && origin.Requests == before, "TUIC accepted wrong " + variant); }
             }
         }
-        Check(processes.All(id => { try { using var process = Process.GetProcessById(id); return process.HasExited; } catch (ArgumentException) { return true; } }), "TUIC fixture left its owned core running");
+        Check(processes.All(identity => identity.Exited), "TUIC fixture left its owned core running");
         if (Environment.GetEnvironmentVariable("MAY_R16_EVIDENCE") is {} path) ArchiveStore.WriteJson(Path.GetFullPath(path), new JsonObject { ["SyntheticOnly"] = true, ["Scope"] = "Windows loopback; cubic; same 18-chunk HTTPS workload; first two seconds excluded from RSS; short observation only", ["Measurements"] = measurements, ["CoresStopped"] = true }); credentials.Clear();
     }
     private static HttpClient TuicHttp(int port, X509Certificate2 ca) => new(new HttpClientHandler { Proxy = new WebProxy("http://127.0.0.1:" + port), UseProxy = true, ServerCertificateCustomValidationCallback = (_, cert, _, _) => cert?.GetCertHashString() == ca.GetCertHashString() }) { Timeout = TimeSpan.FromSeconds(7) };
