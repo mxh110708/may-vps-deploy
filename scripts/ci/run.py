@@ -17,7 +17,7 @@ TEST_PROJECT = "desktop/May.VpsDeploy.Tests/May.VpsDeploy.Tests.csproj"
 TEST_DLL = "desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll"
 # Same ordered phases as the ordinary C# chains suite, in separate owned children.
 CHAIN_PHASES = ("forwarding-models", "adjacent-tunnels", "forwarding-paths",
-                "underlays", "shared-chains", "wireguard-inbounds")
+                "underlays", "shared-ipv4", "shared-ipv6", "shared-recovery", "wireguard-inbounds")
 
 
 def selected_groups(value):

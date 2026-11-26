@@ -234,7 +234,7 @@ class GatesAndRunner(unittest.TestCase):
         phases = [(name, command, timeout) for name, command, timeout in steps if "--chain-phase" in command]
         self.assertEqual([command[-1] for name, command, timeout in phases],
                          ["forwarding-models", "adjacent-tunnels", "forwarding-paths",
-                          "underlays", "shared-chains", "wireguard-inbounds"])
+                          "underlays", "shared-ipv4", "shared-ipv6", "shared-recovery", "wireguard-inbounds"])
         self.assertTrue(all(timeout == 240 for name, command, timeout in phases))
         self.assertFalse(any("--group" in command for name, command, timeout in steps))
 

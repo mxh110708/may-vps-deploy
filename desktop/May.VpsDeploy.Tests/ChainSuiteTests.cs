@@ -5,7 +5,8 @@ internal sealed partial class BoundaryTests
     // The normal suite and CI phases share the same cases and order. Keep the
     // phase names aligned with scripts/ci/run.py; no case is CI-only.
     private static readonly string[] ChainPhases =
-        ["forwarding-models", "adjacent-tunnels", "forwarding-paths", "underlays", "shared-chains", "wireguard-inbounds"];
+        ["forwarding-models", "adjacent-tunnels", "forwarding-paths", "underlays",
+         "shared-ipv4", "shared-ipv6", "shared-recovery", "wireguard-inbounds"];
 
     public async Task RunChainPhase(string phase)
     {
@@ -36,8 +37,14 @@ internal sealed partial class BoundaryTests
             case "underlays":
                 await Chain24Coverage();
                 break;
-            case "shared-chains":
-                await SharedChainCoverage();
+            case "shared-ipv4":
+                await SharedChainFamily("IPv4");
+                break;
+            case "shared-ipv6":
+                await SharedChainFamily("IPv6");
+                break;
+            case "shared-recovery":
+                await SharedChainRecovery();
                 break;
             case "wireguard-inbounds":
                 await WireGuardCoverage();

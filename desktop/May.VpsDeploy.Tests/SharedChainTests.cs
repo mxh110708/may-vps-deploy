@@ -12,10 +12,20 @@ internal sealed partial class BoundaryTests
 
     private async Task SharedChainCoverage()
     {
-        foreach (var family in new[] { "IPv4", "IPv6" })
-            foreach (var protocol in new[] { "vless", "hysteria2", "tuic" })
-                foreach (var layout in new[] { "both", "front", "relay", "roles", "landing" })
-                    await SharedChainCase(family, protocol, layout, "none");
+        await SharedChainFamily("IPv4");
+        await SharedChainFamily("IPv6");
+        await SharedChainRecovery();
+    }
+
+    private async Task SharedChainFamily(string family)
+    {
+        foreach (var protocol in new[] { "vless", "hysteria2", "tuic" })
+            foreach (var layout in new[] { "both", "front", "relay", "roles", "landing" })
+                await SharedChainCase(family, protocol, layout, "none");
+    }
+
+    private async Task SharedChainRecovery()
+    {
         foreach (var fault in new[] { "validation", "survivor", "cancel", "apply-ack", "commit-ack", "compensation-ack", "rollback", "owner" })
             await SharedChainCase("IPv6", "hysteria2", "both", fault);
         await SharedChainCase("IPv4", "vless", "both", "legacy");
