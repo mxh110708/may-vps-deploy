@@ -44,7 +44,7 @@ internal sealed partial class BoundaryTests
                 // Exercise both native configs emitted by a URI, including an
                 // explicit verified fingerprint/ALPN on selected cases.
                 if (!early) { candidate["sing_box"]!["tls"]!["utls"] = new JsonObject { ["enabled"] = true, ["fingerprint"] = "firefox" }; candidate["clash"]!["client-fingerprint"] = "firefox"; candidate["sing_box"]!["tls"]!["alpn"] = new JsonArray(transport == "ws" ? "http/1.1" : "h2"); candidate["clash"]!["alpn"] = new JsonArray(transport == "ws" ? "http/1.1" : "h2"); }
-                await using (var client = await Round15Client.Start(clientName, assets.ResolveCore(clientName), candidate, cert, directory, ct))
+                await using (var client = await Round15Client.Start(clientName, assets.ResolveCore(clientName), candidate, cert, directory, ct, trace: true))
                 {
                     processes.Add(new TestProcessIdentity(client.Process)); using var http = TuicHttp(client.Port, cert); var before = origin.Requests;
                     try
@@ -56,7 +56,7 @@ internal sealed partial class BoundaryTests
                         while (Volatile.Read(ref origin.Requests) <= before && DateTimeOffset.UtcNow < until) await Task.Delay(10, ct);
                         Check(body == "198.51.100.22" && Volatile.Read(ref origin.Requests) > before, clientName + " failed authenticated " + protocol + "/" + transport + (early ? " early data" : ""));
                     }
-                    catch (HttpRequestException) { Console.WriteLine("Round 18 synthetic client diagnostic: " + await client.StopAndRead() + "\nServer: " + await running.StopAndRead() + "\nGate: " + gate?.LastError + " Path: " + gate?.LastPath); throw; }
+                    catch (HttpRequestException) { Console.WriteLine("Round 18 synthetic client diagnostic (" + clientName + " " + protocol + "/" + transport + ", early=" + early + "): " + await client.StopAndRead() + "\nServer: " + await running.StopAndRead() + "\nGate: " + gate?.LastError + " SNI: " + gate?.LastSni + " Path: " + gate?.LastPath); throw; }
                     Check((await ClientProxyUdp.ProbeAsync(client.Port, new(IPAddress.Loopback, dns.Port), ct)).Flag("ResponseMatched"), clientName + " did not carry real UDP via " + protocol + "/" + transport);
                     if (gate != null) Check(gate.LastPath == node.Text("sing_box.transport.path") && gate.LastHost == "front.example.test" && gate.LastSni == "stream.example.test" && (!early || gate.EarlyHeaders > 0), clientName + " changed on-wire WebSocket path/Host/SNI/early-data header");
                 }

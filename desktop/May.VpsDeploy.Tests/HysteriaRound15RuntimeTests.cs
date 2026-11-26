@@ -97,13 +97,13 @@ internal sealed partial class BoundaryTests
         private Task<string> Error => error;
         public async Task<string> StopAndRead() { if (!process.HasExited) process.Kill(true); await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); var text = await output + "\n" + await error; return text[^Math.Min(1800, text.Length)..]; }
         public int Port => port;
-        public static async Task<Round15Client> Start(string name, string executable, JsonObject node, X509Certificate2 certificate, string directory, CancellationToken ct)
+        public static async Task<Round15Client> Start(string name, string executable, JsonObject node, X509Certificate2 certificate, string directory, CancellationToken ct, bool trace = false)
         {
             var port = MixedPort(); JsonObject config; var controller = TcpPort(); var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
             if (name == "sing-box")
             {
                 var outbound = node["sing_box"]!.DeepClone().AsObject(); outbound["tag"] = "review"; if (outbound["tls"] is JsonObject tls && !tls.Flag("reality.enabled")) tls["certificate"] = new JsonArray(certificate.ExportCertificatePem());
-                config = new JsonObject { ["log"] = new JsonObject { ["disabled"] = Environment.GetEnvironmentVariable("MAY_HYSTERIA_TRACE") != "1", ["level"] = "debug" }, ["inbounds"] = new JsonArray(new JsonObject { ["type"] = "mixed", ["listen"] = "127.0.0.1", ["listen_port"] = port }), ["outbounds"] = new JsonArray(outbound), ["route"] = new JsonObject { ["final"] = "review" } };
+                config = new JsonObject { ["log"] = new JsonObject { ["disabled"] = !trace && Environment.GetEnvironmentVariable("MAY_HYSTERIA_TRACE") != "1", ["level"] = "debug" }, ["inbounds"] = new JsonArray(new JsonObject { ["type"] = "mixed", ["listen"] = "127.0.0.1", ["listen_port"] = port }), ["outbounds"] = new JsonArray(outbound), ["route"] = new JsonObject { ["final"] = "review" } };
             }
             else
             {
@@ -111,7 +111,7 @@ internal sealed partial class BoundaryTests
                 // global custom roots. Reload our own disposable configuration
                 // once after startup so its proxy uses the synthetic CA pool.
                 var outbound = node["clash"]!.DeepClone().AsObject(); outbound["name"] = "review";
-                config = new JsonObject { ["mixed-port"] = port, ["bind-address"] = "127.0.0.1", ["allow-lan"] = false, ["mode"] = "rule", ["log-level"] = Environment.GetEnvironmentVariable("MAY_HYSTERIA_TRACE") == "1" ? "debug" : "error", ["external-controller"] = "127.0.0.1:" + controller, ["secret"] = token, ["tls"] = new JsonObject { ["custom-certifactes"] = new JsonArray(certificate.ExportCertificatePem()) }, ["proxies"] = new JsonArray(outbound), ["rules"] = new JsonArray("MATCH,review") };
+                config = new JsonObject { ["mixed-port"] = port, ["bind-address"] = "127.0.0.1", ["allow-lan"] = false, ["mode"] = "rule", ["log-level"] = trace || Environment.GetEnvironmentVariable("MAY_HYSTERIA_TRACE") == "1" ? "debug" : "error", ["external-controller"] = "127.0.0.1:" + controller, ["secret"] = token, ["tls"] = new JsonObject { ["custom-certifactes"] = new JsonArray(certificate.ExportCertificatePem()) }, ["proxies"] = new JsonArray(outbound), ["rules"] = new JsonArray("MATCH,review") };
             }
             var subdirectory = SafePath.Resolve(directory, Guid.NewGuid().ToString("N")); Directory.CreateDirectory(subdirectory); var file = SafePath.Resolve(subdirectory, "client.private.json"); ArchiveStore.WriteJson(file, config);
             var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
