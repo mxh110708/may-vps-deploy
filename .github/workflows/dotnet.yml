@@ -54,7 +54,7 @@ jobs:
       if: always()
       with:
         name: timing-core-linux
-        path: .tmp/ci/dotnet.json
+        path: .tmp/ci/platform.json
         if-no-files-found: ignore
         retention-days: 14
     name: Linux platform compatibility
@@ -138,7 +138,7 @@ jobs:
       if: always()
       with:
         name: timing-core-macos
-        path: .tmp/ci/dotnet.json
+        path: .tmp/ci/platform.json
         if-no-files-found: ignore
         retention-days: 14
     name: macOS platform compatibility
