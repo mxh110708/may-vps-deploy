@@ -1,119 +1,133 @@
 name: Shared .NET core
-on:
-  push:
-  pull_request:
+'on':
+  workflow_call:
+    inputs:
+      groups:
+        required: true
+        type: string
+      windows-matrix:
+        required: true
+        type: string
+      macos:
+        required: true
+        type: boolean
 permissions:
   contents: read
 jobs:
-  core:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
-      MAY_TEST_SSH_PYTHON: python
+      NUGET_PACKAGES: ${{ github.workspace }}/.cache/nuget
+      MAY_CI_GROUPS: ${{ inputs.groups }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: 10.0.400
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-      - run: python -m pip install --disable-pip-version-check paramiko==5.0.0
-      - run: python -m pip install --disable-pip-version-check -r requirements-test.txt
-      - run: python tests/test_client_output_review.py
-      - run: python tests/test_client_template_library.py
-      - run: python tests/test_tcp_forwarding.py
-      - run: python tests/test_udp_forwarding.py
-      - run: python tests/test_wireguard.py
-      - run: python tests/test_chain30.py
-      - name: Public certificate observations on OpenSSL 3 hosts
-        if: runner.os != 'macOS'
-        run: python tests/test_resource_certificates.py
-      - name: Managed certificate lifecycle and recovery
-        if: runner.os != 'macOS'
-        run: python tests/test_managed_certificates.py
-      - run: python tests/test_inbound_policy.py
-      - run: python tests/test_application_udp.py
-      - run: python tests/test_server_xhttp.py
-      - run: python tests/test_forward_target_groups.py
-      - run: python tests/test_forward_multi_target.py
-      - run: python tests/test_proxy_receive.py
-      - run: python tests/test_forward_proxy_health.py
-      - name: Linux private protocol health resources and recovery
-        if: runner.os == 'Linux'
-        run: sudo "$(command -v python)" tests/test_forward_proxy_health.py
-      - run: python tests/test_instance_address.py
-      - name: Linux address resource ownership and scoped restore
-        if: runner.os == 'Linux'
-        run: sudo "$(command -v python)" tests/test_instance_address.py
-      - run: python tests/test_server_stream_next_hops.py
-      - run: dotnet restore desktop/May.VpsDeploy.Tests/May.VpsDeploy.Tests.csproj --locked-mode
-      - run: dotnet build desktop/May.VpsDeploy.Tests/May.VpsDeploy.Tests.csproj -c Release --no-restore
-      - name: Foundation and archive boundaries
-        timeout-minutes: 6
-        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --group foundation
-      - name: Client sources, output and server paths
-        timeout-minutes: 6
-        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --group clients
-      - name: XHTTP model and lifecycle
-        timeout-minutes: 6
-        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --group xhttp
-      - name: Forwarding, chains, WireGuard and inbounds
-        timeout-minutes: 8
-        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --group chains
-      - name: Hysteria2 and TUIC
-        timeout-minutes: 6
-        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --group quic
-      - name: QUIC next hops and UDP forwarding
-        timeout-minutes: 6
-        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --group udp
-      - name: Stream next hops and private probe transport
-        timeout-minutes: 8
-        env:
-          MAY_TEST_PYTHON: python
-        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --server-stream-only
-      - name: Prepare fixed Windows Xray for XHTTP runtime
-        if: runner.os == 'Windows'
-        timeout-minutes: 3
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $directory = Join-Path $env:RUNNER_TEMP 'may-xray-26.3.27'
-          New-Item -ItemType Directory -Path $directory | Out-Null
-          $archive = Join-Path $directory 'Xray-windows-64.zip'
-          Invoke-WebRequest -Uri 'https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-windows-64.zip' -OutFile $archive -TimeoutSec 120
-          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'd004c39288ce9ada487c6f398c7c545f7d749e44bdfdd59dbc9f865afba4e1ad') { throw 'Fixed Xray archive digest mismatch.' }
-          $coreDirectory = Join-Path $directory 'core'
-          Expand-Archive -LiteralPath $archive -DestinationPath $coreDirectory
-          $executable = Join-Path $coreDirectory 'xray.exe'
-          if ((Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash -ne '15c2d007954ac53ba69b80ec91242786b3c0b71d52649165b4ca1d5cc96ef8f1') { throw 'Fixed Xray executable digest mismatch.' }
-          "MAY_TEST_XRAY=$executable" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      - name: XHTTP next-hop parameters, actual paths and recovery
-        timeout-minutes: 8
-        env:
-          MAY_TEST_PYTHON: python
-        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --server-xhttp-only
-      - name: Address-family model and explicit-IP boundaries
-        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --outbound-address-only
-      - name: Fixed-core DNS, TCP address fallback and UDP no replay
-        if: runner.os == 'Windows'
-        timeout-minutes: 3
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Import-Module ./src/VpsDeploy.Core.psm1 -Force
-          $core = Get-VpsBundledClientCore -ProjectRoot $PWD -Core sing-box
-          python tests/outbound-address-runtime44.py --sing-box $core --xray $env:MAY_TEST_XRAY --output (Join-Path $env:RUNNER_TEMP 'address44.json')
-          if ($LASTEXITCODE -ne 0) { throw 'Address-family runtime acceptance failed.' }
-      - name: Monitoring, maintenance, recovery and transports
-        timeout-minutes: 6
-        run: dotnet desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll "${{ github.workspace }}" --group operations
-      - if: runner.os == 'Windows'
-        run: dotnet restore desktop/May.VpsDeploy.Windows.Tests/May.VpsDeploy.Windows.Tests.csproj --locked-mode
-      - if: runner.os == 'Windows'
-        run: dotnet run --project desktop/May.VpsDeploy.Windows.Tests/May.VpsDeploy.Windows.Tests.csproj -c Release --no-restore -- "${{ github.workspace }}"
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.400
+        cache: true
+        cache-dependency-path: desktop/**/packages.lock.json
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+        cache: pip
+        cache-dependency-path: |-
+          requirements-test.txt
+          requirements-client-merge.txt
+    - run: python -m pip install --disable-pip-version-check -r requirements-test.txt paramiko==5.0.0
+    - name: Run dotnet
+      run: python scripts/ci/run.py --suite dotnet
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: timing-core-linux
+        path: .tmp/ci/dotnet.json
+        if-no-files-found: ignore
+        retention-days: 14
+    name: Linux shared behavior
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+      NUGET_PACKAGES: ${{ github.workspace }}/.cache/nuget
+      MAY_CI_GROUPS: ${{ toJSON(matrix.groups) }}
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.400
+        cache: true
+        cache-dependency-path: desktop/**/packages.lock.json
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+        cache: pip
+        cache-dependency-path: |-
+          requirements-test.txt
+          requirements-client-merge.txt
+    - uses: actions/cache@v4
+      with:
+        path: |-
+          .cache/client-cores
+          .cache/dotnet-client-cores
+          .cache/ci-xray
+        key: verified-test-cores-${{ runner.os }}-${{ hashFiles('vendor/test-cores/windows-amd64/*.json', 'config/versions.json', 'scripts/ci/Initialize-ClientCores.ps1') }}
+    - run: python -m pip install --disable-pip-version-check -r requirements-test.txt paramiko==5.0.0
+    - name: Run dotnet
+      run: python scripts/ci/run.py --suite dotnet
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: timing-core-windows-${{ matrix.shard }}
+        path: .tmp/ci/dotnet.json
+        if-no-files-found: ignore
+        retention-days: 14
+    name: Windows ${{ matrix.shard }}
+    strategy:
+      fail-fast: true
+      max-parallel: 3
+      matrix: ${{ fromJSON(inputs.windows-matrix) }}
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 18
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+      NUGET_PACKAGES: ${{ github.workspace }}/.cache/nuget
+      MAY_CI_GROUPS: ${{ inputs.groups }}
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.400
+        cache: true
+        cache-dependency-path: desktop/**/packages.lock.json
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+        cache: pip
+        cache-dependency-path: |-
+          requirements-test.txt
+          requirements-client-merge.txt
+    - run: python -m pip install --disable-pip-version-check -r requirements-test.txt paramiko==5.0.0
+    - name: Run dotnet
+      run: python scripts/ci/run.py --suite dotnet
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: timing-core-macos
+        path: .tmp/ci/dotnet.json
+        if-no-files-found: ignore
+        retention-days: 14
+    name: macOS full compatibility
+    if: inputs.macos

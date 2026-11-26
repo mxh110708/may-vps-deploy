@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [string]$ProjectRoot
+    [Parameter(Mandatory)] [string]$ProjectRoot,
+    [switch]$SkipPortableRegressions
 )
 
 Set-StrictMode -Version Latest
@@ -349,8 +350,10 @@ Assert-True ($sshTransition -match 'sort -n -u' -and $sshTransition -match 'ssh_
 Assert-True ($sshTransition -match 'Primary and rescue SSH ports must be different') 'remote SSH transition rejects a duplicate rescue port'
 $sshCutoverModule = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot 'modules\110-SshCutover.ps1')
 Assert-True ($sshCutoverModule -match 'BootstrapSshReused' -and $sshCutoverModule -match '未创建第三个 SSH 端口') 'final SSH module preserves a reused provider port without creating a third entry'
-$ciText = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot '.github\workflows\ci.yml')
-Assert-True ($ciText -match "debian: \['12', '13'\]" -and $ciText -match 'VPS remote contract') 'CI checks Debian 12 and 13 remote-script contracts while Windows remains the control-plane job'
+if (-not $SkipPortableRegressions) {
+    & python (Join-Path $ProjectRoot 'tests/test_ci45.py')
+    Assert-True ($LASTEXITCODE -eq 0) 'CI behavior selection, both Debian versions and required-check gates'
+}
 
 Write-Host '== Bootstrap authentication arguments ==' -ForegroundColor Cyan
 $sshArgumentContext = [pscustomobject]@{
@@ -1748,7 +1751,7 @@ Write-Host "All tests passed: $passed assertions" -ForegroundColor Green
 & (Join-Path $ProjectRoot 'tests/Test-PowerShell74Bootstrap.ps1') -ProjectRoot $ProjectRoot
 & (Join-Path $ProjectRoot 'tests/Test-AppUpdate.ps1') -ProjectRoot $ProjectRoot
 if($IsWindows){& (Join-Path $ProjectRoot 'tests/Test-Gui.ps1') -ProjectRoot $ProjectRoot}
-if($pythonCommandForClient){
+if($pythonCommandForClient -and -not $SkipPortableRegressions){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_instance_address.py')
     if ($LASTEXITCODE -ne 0) { throw 'Instance address transaction regressions failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_certbot_source.py')
@@ -1796,7 +1799,7 @@ if($pythonCommandForClient){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_tunnel_public_access.py')
     if ($LASTEXITCODE -ne 0) { throw 'Tunnel public access probe regressions failed.' }
 }
-if($pythonCommandForClient){
+if($pythonCommandForClient -and -not $SkipPortableRegressions){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_client_sources.py')
     if ($LASTEXITCODE -ne 0) { throw 'Native QUIC client source extraction regression failed.' }
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_wireguard.py')
@@ -1814,7 +1817,7 @@ if($pythonCommandForClient){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_server_stream_next_hops.py')
     if ($LASTEXITCODE -ne 0) { throw 'Server stream next-hop and private probe input regression failed.' }
 }
-if($bash -and $pythonCommandForClient){
+if($bash -and $pythonCommandForClient -and -not $SkipPortableRegressions){
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_tcp_forwarding.py')
     if($LASTEXITCODE -ne 0){throw 'TCP forwarding ownership and recovery tests failed.'}
     & $pythonCommandForClient.Source (Join-Path $ProjectRoot 'tests/test_udp_forwarding.py')

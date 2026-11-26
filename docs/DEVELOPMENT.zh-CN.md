@@ -1,5 +1,7 @@
 # 开发与验证
 
+第45轮将 CI 改为按完整 Git 差异选择检查，公共 Python 契约集中到 Debian 12／13，Windows 核心分为三个独立作业；安装生命周期独立触发，完整最低版本／macOS 矩阵通过手动或必要的完整验收运行。入口、标签复用、缓存、失败门禁及耗时边界见[CI 调度与测试分层](CI-ROUND-45-2026-11-26.zh-CN.md)。本地完整验证默认范围保持不变。
+
 第38轮使用 `--client-templates-only`、`tests/test_client_template_library.py` 和后台原生 `suite.client-templates`；模板来源、事务、恢复与实际候选生成纳入 `--group clients`，Python 检查纳入主校验与 CI。测试等待原生文本／点击事件，不注入全局输入，不显示测试窗口；见[模板库](CLIENT-TEMPLATES-ROUND-38-2026-11-14.zh-CN.md)。
 
 第37轮使用 `--diagnostics-only`；模型、来源、分段、监测绑定及历史测试纳入 `--group clients`，真实回环工作台检查接入既有客户端线路回归。原生后台入口为 `suite.diagnostics`；界面合成传输必须受现有隔离会话约束，见[诊断工作台](ROUTE-DIAGNOSTICS-ROUND-37-2026-11-14.zh-CN.md)。
@@ -55,7 +57,7 @@ foreach ($group in $groups) {
 
 先构建测试项目。需要真实本机协议用例时设置 `MAY_TEST_PYTHON` 与固定 Xray 的 `MAY_TEST_XRAY`；SSH/SFTP 专项使用 `MAY_TEST_SSH_PYTHON`。后台运行器须给各组独立超时并关闭自己的子进程，不能将超时、缺失本机依赖或仅模型通过记为真实协议通过。原生 WinUI 使用已有后台测试接口，禁止弹出测试窗口。
 
-CI将 `server-stream` 组等价拆为 `--server-stream-only` 与 `--server-xhttp-only` 两步。Windows在后者之前下载固定Xray 26.3.27，分别核对归档和可执行文件摘要再设置 `MAY_TEST_XRAY`；不会从latest获取或在缺少依赖时把真实XHTTP检查记为通过。其他主机保留各专项中明确声明的Windows核心限制。
+CI将 `server-stream` 组等价拆为 `--server-stream-only` 与 `--server-xhttp-only` 两步。Windows 分组准备固定 Xray 26.3.27，分别核对缓存归档和可执行文件摘要，再把 `MAY_TEST_XRAY` 交给同一 runner 的测试子进程；第44轮地址族模型和真实核心路径另列。其他主机保留各专项中明确声明的 Windows 核心限制。
 
 PowerShell 主入口的完整离线回归：
 

@@ -48,8 +48,45 @@ def write_json(path, value):
     return path
 
 
+def owns_udp_listener(process, listening_port):
+    """Observe the owned child's socket, without sending/retrying a business packet."""
+    inodes = set()
+    try:
+        for descriptor in Path(f'/proc/{process.pid}/fd').iterdir():
+            try:
+                target = os.readlink(descriptor)
+            except OSError:
+                continue
+            if target.startswith('socket:[') and target.endswith(']'):
+                inodes.add(target[8:-1])
+        for table in ('udp', 'udp6'):
+            try:
+                rows = Path(f'/proc/{process.pid}/net/{table}').read_text().splitlines()[1:]
+            except OSError:
+                continue
+            for row in rows:
+                fields = row.split()
+                if len(fields) > 9 and fields[9] in inodes and int(fields[1].rsplit(':', 1)[1], 16) == listening_port:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def wait_udp_listener(process, listening_port, timeout=8):
+    deadline = time.monotonic() + timeout
+    while True:
+        if process.poll() is not None:
+            raise AssertionError('core exited before its UDP listener became ready')
+        if owns_udp_listener(process, listening_port):
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError('owned core UDP listener did not become ready')
+        time.sleep(.025)
+
+
 @contextlib.contextmanager
-def running(binary, config, root, listening_port):
+def running(binary, config, root, listening_port, udp_port=None):
     log = root / (config.stem + '-runtime.log')
     with log.open('w') as output:
         args = [str(binary), 'run', '-c', str(config)] if binary.name != 'mihomo' else [str(binary), '-d', str(root), '-f', str(config)]
@@ -66,6 +103,8 @@ def running(binary, config, root, listening_port):
                     if time.monotonic() > deadline:
                         raise AssertionError('core not ready: ' + log.read_text()[-2000:])
                     time.sleep(.05)
+            if udp_port is not None:
+                wait_udp_listener(process, udp_port)
             yield
         except BaseException:
             output.flush()
@@ -243,7 +282,7 @@ def anytls_fixture(binary,root):
 
 def exercise_ss(binary, root, server, client, http_port, echo_port, mihomo=None, ipv6=False):
     server_path = write_json(root / 'server-run.json', server)
-    with running(binary, server_path, root, server['inbounds'][0]['listen_port']):
+    with running(binary, server_path, root, server['inbounds'][0]['listen_port'], udp_port=server['inbounds'][0]['listen_port']):
         # The server owns both TCP and UDP at its chosen number. Allocate
         # client ports only after both have been bound, otherwise an ephemeral
         # UDP probe may select the not-yet-bound server port (seen on Debian 13).
@@ -252,7 +291,7 @@ def exercise_ss(binary, root, server, client, http_port, echo_port, mihomo=None,
             {'type': 'mixed', 'listen': '127.0.0.1', 'listen_port': tcp_port},
             {'type': 'direct', 'listen': '127.0.0.1', 'listen_port': udp_port, 'network': 'udp', 'override_address': '::1' if ipv6 else '127.0.0.1', 'override_port': echo_port}]
         client_path = write_json(root / 'client-run.json', client)
-        with running(binary, client_path, root, tcp_port):
+        with running(binary, client_path, root, tcp_port, udp_port=udp_port):
             socks_http(tcp_port, http_port, ipv6)
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
                 sock.settimeout(5); sock.sendto(b'MXH_UDP_OK', ('127.0.0.1', udp_port))

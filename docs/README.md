@@ -1,8 +1,8 @@
 # May VPS Deploy 文档
 
-当前教程基线：**v0.9.42**，Windows WinUI 3 → Debian 12／13 amd64。中文为主，[English overview](../README.en.md) 和 [English walkthrough](USER-GUIDE.en.md) 提供英文说明。
+当前发行基线：**v0.9.43**，Windows WinUI 3 → Debian 12／13 amd64。中文为主，[English overview](../README.en.md) 和 [English walkthrough](USER-GUIDE.en.md) 提供英文说明。
 
-本版汇总主线第33至38轮；使用入口、参数、依赖和恢复范围见下方专项教程，汇总验证见[发行记录](TESTING-0.9.42.zh-CN.md)。历史各轮的真实回环、Debian 整机和公网证据分别保留，不因发行而扩大。
+本版汇总主线第39至44轮，保留此前已发布能力；汇总验证见[发行记录](TESTING-0.9.43.zh-CN.md)。第45轮 [CI 调度与测试分层](CI-ROUND-45-2026-11-26.zh-CN.md)为后续源码改动，不改变应用版本。各轮真实回环、Debian 整机和公网证据分别保留，不因发行而扩大。
 
 2026-11-16 的[能力盘点与 FlyX 对照](CAPABILITIES-AND-FLYX-2026-11-16.zh-CN.md)记录当前剩余差距；[第39轮实例换址](INSTANCE-ADDRESS-ROUND-39-2026-11-16.zh-CN.md)已完成工作区源码和隔离验收，纳入 v0.9.43。[主线路线图](DEPLOY-ROADMAP-2026-10-24.zh-CN.md)保留第39至44轮实现与验收范围；[第40轮](FORWARD-PROXY-HEALTH-ROUND-40-2026-11-16.zh-CN.md)同样为已完成并纳入 v0.9.43。
 
@@ -21,10 +21,11 @@
 
 | 主题 | 文档 |
 | --- | --- |
-| 可信 PROXY 接收 | [第42轮：中转信任、客户端来源、实际路径与恢复](FORWARD-PROXY-RECEIVE-ROUND-42-2026-11-25.zh-CN.md)，当前源码，未发行。 |
-| 多目标转发策略 | [第41轮：轮询、来源 IP 哈希、健康摘除与会话固定](FORWARD-MULTI-TARGET-ROUND-41-2026-11-24.zh-CN.md)，当前源码，未发行。 |
-| 协议健康与加密 UDP 主备 | [第40轮：授权、真实业务健康、资源与恢复](FORWARD-PROXY-HEALTH-ROUND-40-2026-11-16.zh-CN.md)，当前源码，未发行。 |
-| 实例换址 | [第39轮：原身份、依赖、分阶段同步与统一恢复](INSTANCE-ADDRESS-ROUND-39-2026-11-16.zh-CN.md)，当前源码，未发行。 |
+| CI 调度与测试 | [第45轮：检查选择、测试归属、缓存、标签复用和耗时](CI-ROUND-45-2026-11-26.zh-CN.md)，本地源码与隔离检查。 |
+| 可信 PROXY 接收 | [第42轮：中转信任、客户端来源、实际路径与恢复](FORWARD-PROXY-RECEIVE-ROUND-42-2026-11-25.zh-CN.md)，纳入 v0.9.43。 |
+| 多目标转发策略 | [第41轮：轮询、来源 IP 哈希、健康摘除与会话固定](FORWARD-MULTI-TARGET-ROUND-41-2026-11-24.zh-CN.md)，纳入 v0.9.43。 |
+| 协议健康与加密 UDP 主备 | [第40轮：授权、真实业务健康、资源与恢复](FORWARD-PROXY-HEALTH-ROUND-40-2026-11-16.zh-CN.md)，纳入 v0.9.43。 |
+| 实例换址 | [第39轮：原身份、依赖、分阶段同步与统一恢复](INSTANCE-ADDRESS-ROUND-39-2026-11-16.zh-CN.md)，纳入 v0.9.43。 |
 | 模板版本与恢复 | [第38轮：参数、基础配置、依赖、应用差异与恢复](CLIENT-TEMPLATES-ROUND-38-2026-11-14.zh-CN.md) |
 | 线路诊断 | [第37轮：分段、协议、出口、旁证与质量历史](ROUTE-DIAGNOSTICS-ROUND-37-2026-11-14.zh-CN.md) |
 | 转发主备 | [第36轮：显式顺序、健康确认与稳定恢复](FORWARD-TARGET-GROUPS-ROUND-36-2026-11-13.zh-CN.md) |

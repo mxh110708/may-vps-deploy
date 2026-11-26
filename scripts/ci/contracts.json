@@ -1,0 +1,151 @@
+[
+  {
+    "path": "scripts/check-kernel-prebuilt.py"
+  },
+  {
+    "path": "tests/test_academic_client_policy.py"
+  },
+  {
+    "path": "tests/test_application_udp.py"
+  },
+  {
+    "path": "tests/test_bbr_kernel.py"
+  },
+  {
+    "path": "tests/test_certbot_source.py"
+  },
+  {
+    "path": "tests/test_chain30.py"
+  },
+  {
+    "path": "tests/test_client_compatibility.py"
+  },
+  {
+    "path": "tests/test_client_output_review.py"
+  },
+  {
+    "path": "tests/test_client_sources.py"
+  },
+  {
+    "path": "tests/test_client_template_library.py"
+  },
+  {
+    "path": "tests/test_component_installation.py",
+    "bash": true
+  },
+  {
+    "path": "tests/test_component_releases.py"
+  },
+  {
+    "path": "tests/test_forward_multi_target.py"
+  },
+  {
+    "path": "tests/test_forward_proxy_health.py"
+  },
+  {
+    "path": "tests/test_forward_target_groups.py"
+  },
+  {
+    "path": "tests/test_google_client_policy.py"
+  },
+  {
+    "path": "tests/test_health_audit.py"
+  },
+  {
+    "path": "tests/test_hysteria_hopping.py"
+  },
+  {
+    "path": "tests/test_import_contracts.py",
+    "bash": true
+  },
+  {
+    "path": "tests/test_inbound_host.py"
+  },
+  {
+    "path": "tests/test_inbound_policy.py"
+  },
+  {
+    "path": "tests/test_initial_release_pin.py"
+  },
+  {
+    "path": "tests/test_instance_address.py"
+  },
+  {
+    "path": "tests/test_kernel_prebuild.py"
+  },
+  {
+    "path": "tests/test_komari_lifecycle.py",
+    "bash": true
+  },
+  {
+    "path": "tests/test_linux_core_readiness.py"
+  },
+  {
+    "path": "tests/test_linux_core_upgrade.py"
+  },
+  {
+    "path": "tests/test_managed_certificates.py"
+  },
+  {
+    "path": "tests/test_may_monitor_lifecycle.py"
+  },
+  {
+    "path": "tests/test_may_monitor_maintenance.py"
+  },
+  {
+    "path": "tests/test_monitor_observation.py"
+  },
+  {
+    "path": "tests/test_network_audit.py"
+  },
+  {
+    "path": "tests/test_network_runtime.py"
+  },
+  {
+    "path": "tests/test_proxy_receive.py"
+  },
+  {
+    "path": "tests/test_remote_transactions.py",
+    "bash": true
+  },
+  {
+    "path": "tests/test_resource_certificates.py"
+  },
+  {
+    "path": "tests/test_review_repairs.py",
+    "bash": true
+  },
+  {
+    "path": "tests/test_scoped_rollback.py",
+    "bash": true
+  },
+  {
+    "path": "tests/test_server_hops.py",
+    "bash": true
+  },
+  {
+    "path": "tests/test_server_outbound.py",
+    "bash": true
+  },
+  {
+    "path": "tests/test_server_quic_probe.py"
+  },
+  {
+    "path": "tests/test_server_stream_next_hops.py"
+  },
+  {
+    "path": "tests/test_server_xhttp.py"
+  },
+  {
+    "path": "tests/test_tcp_forwarding.py"
+  },
+  {
+    "path": "tests/test_tunnel_public_access.py"
+  },
+  {
+    "path": "tests/test_udp_forwarding.py"
+  },
+  {
+    "path": "tests/test_wireguard.py"
+  }
+]

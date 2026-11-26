@@ -1,175 +1,354 @@
 name: checks
-
-on:
+'on':
   push:
-  pull_request:
-
+    branches:
+    - main
+    tags:
+    - v*
+  pull_request: null
+  workflow_dispatch: null
 permissions:
   contents: read
-
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'workflow_dispatch' && 'full' || 'auto' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/') }}
 jobs:
-  debian-remote-contract:
-    name: Debian ${{ matrix.debian }} VPS remote contract
+  plan:
+    name: Select required checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      full: ${{ steps.plan.outputs.full }}
+      reuse_run_id: ${{ steps.plan.outputs.reuse_run_id }}
+      core: ${{ steps.plan.outputs.core }}
+      core_groups: ${{ steps.plan.outputs.core_groups }}
+      windows_matrix: ${{ steps.plan.outputs.windows_matrix }}
+      macos: ${{ steps.plan.outputs.macos }}
+      legacy: ${{ steps.plan.outputs.legacy }}
+      powershell_matrix: ${{ steps.plan.outputs.powershell_matrix }}
+      contracts: ${{ steps.plan.outputs.contracts }}
+      debian_matrix: ${{ steps.plan.outputs.debian_matrix }}
+      shell: ${{ steps.plan.outputs.shell }}
+      desktop: ${{ steps.plan.outputs.desktop }}
+      installer: ${{ steps.plan.outputs.installer }}
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+        fetch-depth: 2
+    - id: plan
+      name: Complete diff or trusted same-commit full validation
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: python scripts/ci/plan.py
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: ci-plan
+        path: .tmp/ci/plan.json
+        if-no-files-found: ignore
+        retention-days: 14
+  quick:
+    name: Syntax, documentation and secrets
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - uses: actions/cache@v4
+      with:
+        path: .cache/ci-tools
+        key: actionlint-1.7.12-${{ runner.os }}-${{ hashFiles('scripts/ci/tools.py') }}
+    - name: Workflow syntax and expressions
+      run: python scripts/ci/tools.py
+    - name: Run quick
+      run: python scripts/ci/run.py --suite quick
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: timing-quick
+        path: .tmp/ci/quick.json
+        if-no-files-found: ignore
+        retention-days: 14
+  contracts:
+    name: Debian ${{ matrix.debian }} contracts
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
-      matrix:
-        debian: ['12', '13']
+      fail-fast: true
+      matrix: ${{ fromJSON(needs.plan.outputs.debian_matrix) }}
     container: debian:${{ matrix.debian }}-slim
     steps:
-      - name: Install checkout prerequisites
-        shell: bash
-        run: |
-          apt-get update -qq
-          apt-get install -y -qq --no-install-recommends ca-certificates git
-      - uses: actions/checkout@v5
-      - name: Validate Debian VPS package and OpenSSH contract
-        shell: bash
-        run: |
-          set -euo pipefail
-          export DEBIAN_FRONTEND=noninteractive
-          apt-get update -qq
-          apt-get install -y -qq --no-install-recommends \
-            bash ca-certificates curl dnsutils iproute2 jq nftables nginx openssh-server \
-            openssl python3 python3-venv python3-certbot-dns-cloudflare sudo systemd-timesyncd tar unzip util-linux
-          . /etc/os-release
-          [[ "$ID" == 'debian' && "$VERSION_ID" == '${{ matrix.debian }}' ]]
-          install -d -m 0755 /run/sshd
-          sshd -t
-          for command in bash curl dig ip jq nft nginx sshd openssl python3 sudo tar unzip flock; do
-            command -v "$command" >/dev/null
-          done
-          for file in assets/remote/*.sh; do
-            bash -n "$file"
-          done
-          python3 tests/test_remote_transactions.py --bash /bin/bash
-          python3 tests/test_server_outbound.py --bash /bin/bash
-          python3 tests/test_server_hops.py --bash /bin/bash
-          test -x /usr/lib/systemd/systemd-socket-proxyd
-          python3 tests/test_tcp_forwarding.py
-          python3 tests/test_inbound_host.py
-          python3 tests/test_udp_forwarding.py
-          python3 tests/test_wireguard.py
-          python3 tests/test_komari_lifecycle.py --bash /bin/bash
-          # Only temporary files and fake service/account runners; the Debian
-          # container supplies root for checking real uid/gid permission rules.
-          python3 tests/test_may_monitor_lifecycle.py
-          python3 tests/test_may_monitor_maintenance.py
-          python3 tests/test_monitor_observation.py
-          python3 tests/test_health_audit.py
-          python3 tests/test_network_runtime.py
-          python3 tests/test_network_audit.py
-          python3 tests/test_bbr_kernel.py
-          python3 tests/test_kernel_prebuild.py
-          python3 tests/test_component_releases.py
-          python3 tests/test_initial_release_pin.py
-          python3 tests/test_tunnel_public_access.py
-          python3 tests/test_certbot_source.py
-          python3 -m venv .tmp/client-test-runtime
-          .tmp/client-test-runtime/bin/python -m pip install --disable-pip-version-check -r requirements-test.txt
-          .tmp/client-test-runtime/bin/python tests/test_review_repairs.py --bash /bin/bash
-          .tmp/client-test-runtime/bin/python tests/test_google_client_policy.py
-          .tmp/client-test-runtime/bin/python tests/test_academic_client_policy.py
-          .tmp/client-test-runtime/bin/python tests/test_client_sources.py
-          python3 tests/test_scoped_rollback.py --bash /bin/bash
-          python3 tests/test_component_installation.py --bash /bin/bash
-          python3 tests/test_import_contracts.py --bash /bin/bash
-          python3 tests/test_linux_core_upgrade.py
-          python3 scripts/check-kernel-prebuilt.py
-
-  powershell:
-    name: Windows client checks (Python ${{ matrix.python }}, PowerShell ${{ matrix.powershell }})
+    - name: Install checkout prerequisites
+      shell: bash
+      run: |
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends ca-certificates git
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - name: Validate Debian packages and OpenSSH
+      shell: bash
+      run: |
+        set -euo pipefail
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends \
+          bash ca-certificates curl dnsutils iproute2 jq nftables nginx openssh-server \
+          openssl python3 python3-venv python3-certbot-dns-cloudflare sudo systemd-timesyncd tar unzip util-linux
+        . /etc/os-release
+        [[ "$ID" == 'debian' && "$VERSION_ID" == '${{ matrix.debian }}' ]]
+        install -d -m 0755 /run/sshd
+        sshd -t
+        for command in bash curl dig ip jq nft nginx sshd openssl python3 sudo tar unzip flock; do
+          command -v "$command" >/dev/null
+        done
+        for file in assets/remote/*.sh; do
+          bash -n "$file"
+        done
+        test -x /usr/lib/systemd/systemd-socket-proxyd
+    - uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: debian-${{ matrix.debian }}-pip-${{ hashFiles('requirements-test.txt', 'requirements-client-merge.txt') }}
+    - name: Contract Python environment
+      run: |-
+        python3 -m venv .tmp/client-test-runtime
+        .tmp/client-test-runtime/bin/python -m pip install --disable-pip-version-check -r requirements-test.txt
+    - name: Remote contracts and root-owned recovery fixtures
+      run: .tmp/client-test-runtime/bin/python scripts/ci/run.py --suite contracts
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: timing-debian-${{ matrix.debian }}
+        path: .tmp/ci/contracts.json
+        if-no-files-found: ignore
+        retention-days: 14
+    needs: plan
+    if: needs.plan.outputs.contracts == 'true'
+    timeout-minutes: 6
+  legacy:
+    name: CLI Python ${{ matrix.python }} PowerShell ${{ matrix.powershell }}
     runs-on: windows-latest
     strategy:
-      matrix:
-        python: ['3.9', '3.13']
-        powershell: ['runner', '7.4.20']
+      fail-fast: true
+      matrix: ${{ fromJSON(needs.plan.outputs.powershell_matrix) }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python }}
-          cache: pip
-          cache-dependency-path: |
-            requirements-client-merge.txt
-            requirements-test.txt
-      - name: Prepare isolated minimum PowerShell
-        if: matrix.powershell != 'runner'
-        shell: pwsh
-        run: |
-          $runtime = ./scripts/Initialize-PowerShell74.ps1 -Destination (Join-Path $env:RUNNER_TEMP 'may-powershell-7.4.20')
-          $runtime | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-      - name: Verify selected PowerShell
-        shell: pwsh
-        env:
-          EXPECTED_POWERSHELL: ${{ matrix.powershell }}
-        run: |
-          $PSVersionTable.PSVersion
-          if ($env:EXPECTED_POWERSHELL -ne 'runner' -and $PSVersionTable.PSVersion.ToString() -ne $env:EXPECTED_POWERSHELL) { throw 'Wrong PowerShell runtime selected.' }
-      - name: Install pinned client-config dependency
-        shell: pwsh
-        run: python -m pip install --disable-pip-version-check -r ./requirements-test.txt
-      - name: Run project tests
-        shell: pwsh
-        run: pwsh -NoProfile -STA -File ./tests/Run-Tests.ps1 -ProjectRoot $PWD
-      - name: Validate bundled client cores and generated configs
-        shell: pwsh
-        run: |
-          Import-Module ./src/VpsDeploy.Core.psm1 -Force
-          $mihomo = Get-VpsBundledClientCore -ProjectRoot $PWD -Core mihomo
-          $singBox = Get-VpsBundledClientCore -ProjectRoot $PWD -Core sing-box
-          if (-not (Test-Path $mihomo)) { throw 'bundled Mihomo validation failed' }
-          ./tests/Test-SingBoxConfig.ps1 -ProjectRoot $PWD -SingBoxPath $singBox
-          ./tests/Test-ClientCompatibility.ps1 -ProjectRoot $PWD
-      - uses: actions/setup-dotnet@v5
-        if: matrix.python == '3.13' && matrix.powershell == 'runner'
-        with:
-          dotnet-version: 10.0.400
-      - name: Build native EXE and validate installer lifecycle
-        if: matrix.python == '3.13' && matrix.powershell == 'runner'
-        shell: pwsh
-        run: pwsh -NoProfile -STA -File ./tests/Test-DesktopInstaller.ps1 -ProjectRoot $PWD
-
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python }}
+        cache: pip
+        cache-dependency-path: |-
+          requirements-test.txt
+          requirements-client-merge.txt
+    - uses: actions/cache@v4
+      if: matrix.powershell != 'runner'
+      with:
+        path: ${{ runner.temp }}/may-powershell-7.4.20.zip
+        key: powershell74-${{ runner.os }}-${{ hashFiles('tests/fixtures/powershell74-runtime.json') }}
+    - name: Prepare isolated minimum PowerShell
+      if: matrix.powershell != 'runner'
+      shell: pwsh
+      run: |
+        $runtime = ./scripts/Initialize-PowerShell74.ps1 -Destination (Join-Path $env:RUNNER_TEMP 'may-powershell-7.4.20')
+        $runtime | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+    - name: Verify selected PowerShell
+      shell: pwsh
+      env:
+        EXPECTED_POWERSHELL: ${{ matrix.powershell }}
+      run: |
+        $PSVersionTable.PSVersion
+        if ($env:EXPECTED_POWERSHELL -ne 'runner' -and $PSVersionTable.PSVersion.ToString() -ne $env:EXPECTED_POWERSHELL) { throw 'Wrong PowerShell runtime selected.' }
+    - name: Install pinned client-config dependency
+      shell: pwsh
+      run: python -m pip install --disable-pip-version-check -r ./requirements-test.txt
+    - uses: actions/cache@v4
+      with:
+        path: |-
+          .cache/client-cores
+          .cache/dotnet-client-cores
+          .cache/ci-xray
+        key: verified-test-cores-${{ runner.os }}-${{ hashFiles('vendor/test-cores/windows-amd64/*.json', 'config/versions.json', 'scripts/ci/Initialize-ClientCores.ps1') }}
+    - name: PowerShell behavior and fixed client checks
+      run: python scripts/ci/run.py --suite legacy
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: timing-cli-${{ matrix.python }}-${{ matrix.powershell }}
+        path: .tmp/ci/legacy.json
+        if-no-files-found: ignore
+        retention-days: 14
+    needs: plan
+    if: needs.plan.outputs.legacy == 'true'
+    timeout-minutes: 8
+  core:
+    name: Shared core
+    needs: plan
+    if: needs.plan.outputs.core == 'true'
+    uses: ./.github/workflows/dotnet.yml
+    with:
+      groups: ${{ needs.plan.outputs.core_groups }}
+      windows-matrix: ${{ needs.plan.outputs.windows_matrix }}
+      macos: ${{ needs.plan.outputs.macos == 'true' }}
+  desktop:
+    name: WinUI compile
+    needs: plan
+    if: needs.plan.outputs.desktop == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 8
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/.cache/nuget
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.400
+        cache: true
+        cache-dependency-path: desktop/**/packages.lock.json
+    - name: Run desktop
+      run: python scripts/ci/run.py --suite desktop
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: timing-desktop
+        path: .tmp/ci/desktop.json
+        if-no-files-found: ignore
+        retention-days: 14
+  installer:
+    name: Isolated installer lifecycle
+    needs: plan
+    if: needs.plan.outputs.installer == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 18
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/.cache/nuget
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.400
+        cache: true
+        cache-dependency-path: desktop/**/packages.lock.json
+    - uses: actions/cache@v4
+      with:
+        path: .cache/desktop-build
+        key: desktop-dependencies-${{ runner.os }}-${{ hashFiles('config/desktop-assets.json') }}
+    - name: Run installer
+      run: python scripts/ci/run.py --suite installer
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: timing-installer
+        path: .tmp/ci/installer.json
+        if-no-files-found: ignore
+        retention-days: 14
   shell:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - name: Bash syntax
-        shell: bash
-        run: |
-          set -euo pipefail
-          for file in assets/remote/*.sh; do
-            bash -n "$file"
-          done
-      - name: ShellCheck
-        shell: bash
-        run: shellcheck --severity=warning assets/remote/*.sh
-      - name: Validate restricted nftables template
-        shell: bash
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq nftables
-          sudo env \
-            VPS_PARAM_TCP_PORTS='30124,31235' \
-            VPS_PARAM_RESTRICTED_PORT='33456' \
-            VPS_PARAM_ALLOWED_IPV4S='192.0.2.30,192.0.2.31' \
-            VPS_PARAM_ALLOWED_IPV6S='2001:db8::30' \
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - name: Bash syntax
+      shell: bash
+      run: |
+        set -euo pipefail
+        for file in assets/remote/*.sh; do
+          bash -n "$file"
+        done
+    - name: ShellCheck
+      shell: bash
+      run: shellcheck --severity=warning assets/remote/*.sh
+    - name: Validate restricted nftables template
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq nftables
+        sudo env \
+          VPS_PARAM_TCP_PORTS='30124,31235' \
+          VPS_PARAM_RESTRICTED_PORT='33456' \
+          VPS_PARAM_ALLOWED_IPV4S='192.0.2.30,192.0.2.31' \
+          VPS_PARAM_ALLOWED_IPV6S='2001:db8::30' \
+          VPS_PARAM_CHECK_ONLY='true' \
+          bash -c 'source assets/remote/firewall-tools.sh; source assets/remote/nftables-apply.sh'
+    - name: Validate conservative adaptive network template
+      shell: bash
+      run: |
+        for role in RealityEntry AnyTlsEntry; do
+          env \
+            VPS_PARAM_ROLE="$role" \
+            VPS_PARAM_MEMORY_KIB='1048576' \
+            VPS_PARAM_MODE='AdaptiveConservative' \
+            VPS_PARAM_BANDWIDTH_MBPS='100' \
+            VPS_PARAM_REFERENCE_RTT_MS='160' \
+            VPS_PARAM_BUFFER_TARGET_BYTES='4000000' \
+            VPS_PARAM_BUFFER_CAP_BYTES='8388608' \
+            VPS_PARAM_QUEUE_FLOOR='1024' \
+            VPS_PARAM_PROFILE='entry-small-adaptive' \
             VPS_PARAM_CHECK_ONLY='true' \
-            bash -c 'source assets/remote/firewall-tools.sh; source assets/remote/nftables-apply.sh'
-      - name: Validate conservative adaptive network template
-        shell: bash
-        run: |
-          for role in RealityEntry AnyTlsEntry; do
-            env \
-              VPS_PARAM_ROLE="$role" \
-              VPS_PARAM_MEMORY_KIB='1048576' \
-              VPS_PARAM_MODE='AdaptiveConservative' \
-              VPS_PARAM_BANDWIDTH_MBPS='100' \
-              VPS_PARAM_REFERENCE_RTT_MS='160' \
-              VPS_PARAM_BUFFER_TARGET_BYTES='4000000' \
-              VPS_PARAM_BUFFER_CAP_BYTES='8388608' \
-              VPS_PARAM_QUEUE_FLOOR='1024' \
-              VPS_PARAM_PROFILE='entry-small-adaptive' \
-              VPS_PARAM_CHECK_ONLY='true' \
-              bash assets/remote/network-tuning.sh | grep -Fx 'VPSDEPLOY_NETWORK_CHECK_OK'
-          done
+            bash assets/remote/network-tuning.sh | grep -Fx 'VPSDEPLOY_NETWORK_CHECK_OK'
+        done
+    name: Bash and firewall syntax
+    needs: plan
+    if: needs.plan.outputs.shell == 'true'
+    timeout-minutes: 3
+  result:
+    name: CI result
+    needs:
+    - plan
+    - quick
+    - contracts
+    - legacy
+    - core
+    - desktop
+    - installer
+    - shell
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+    - name: Every selected check must succeed
+      env:
+        MAY_CI_NEEDS: ${{ toJSON(needs) }}
+      run: python scripts/ci/result.py --gate
+    - name: Queue and execution timings
+      if: always()
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: python scripts/ci/result.py --timings
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: timing-workflow
+        path: .tmp/ci/workflow-timing.json
+        if-no-files-found: ignore
+        retention-days: 14
+  full-validation:
+    name: Full validation receipt
+    needs:
+    - plan
+    - result
+    if: needs.plan.outputs.full == 'true' && needs.result.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+    - name: Full validation succeeded for this commit
+      env:
+        VALIDATED_SHA: ${{ github.sha }}
+      run: echo "Full validation completed for $VALIDATED_SHA"
