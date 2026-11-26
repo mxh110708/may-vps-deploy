@@ -43,7 +43,19 @@ internal sealed partial class BoundaryTests
                 var candidate = node.DeepClone().AsObject();
                 // Exercise both native configs emitted by a URI, including an
                 // explicit verified fingerprint/ALPN on selected cases.
-                if (!early) { candidate["sing_box"]!["tls"]!["utls"] = new JsonObject { ["enabled"] = true, ["fingerprint"] = "firefox" }; candidate["clash"]!["client-fingerprint"] = "firefox"; candidate["sing_box"]!["tls"]!["alpn"] = new JsonArray(transport == "ws" ? "http/1.1" : "h2"); candidate["clash"]!["alpn"] = new JsonArray(transport == "ws" ? "http/1.1" : "h2"); }
+                if (!early)
+                {
+                    // The pinned uTLS Firefox preset fails when a server selects
+                    // its secondary key share (upstream utls#402). Hosted Windows
+                    // Schannel hits that path; use Chrome for the recording gate
+                    // and retain real Firefox handshakes against the Go gRPC peer.
+                    // https://github.com/refraction-networking/utls/issues/402
+                    var fingerprint = transport == "ws" ? "chrome" : "firefox";
+                    candidate["sing_box"]!["tls"]!["utls"] = new JsonObject { ["enabled"] = true, ["fingerprint"] = fingerprint };
+                    candidate["clash"]!["client-fingerprint"] = fingerprint;
+                    candidate["sing_box"]!["tls"]!["alpn"] = new JsonArray(transport == "ws" ? "http/1.1" : "h2");
+                    candidate["clash"]!["alpn"] = new JsonArray(transport == "ws" ? "http/1.1" : "h2");
+                }
                 await using (var client = await Round15Client.Start(clientName, assets.ResolveCore(clientName), candidate, cert, directory, ct, trace: true))
                 {
                     processes.Add(new TestProcessIdentity(client.Process)); using var http = TuicHttp(client.Port, cert); var before = origin.Requests;
