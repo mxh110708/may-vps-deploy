@@ -143,7 +143,9 @@ public sealed partial class MainWindow
             case "ui.capture":
             {
                 var name = args.Text("name", "page.png"); if (!name.EndsWith(".png", StringComparison.Ordinal)) throw new OperationException("截图输出必须为 PNG。");
-                var target = await ReadyTestCaptureTarget();
+                shell.UpdateLayout();
+                // Popup visuals are outside the root tree. Render the active dialog itself when present.
+                UIElement target = activeTestDialog == null ? shell : Find<Border>(activeTestDialog).Where(b => b.ActualWidth >= 250 && b.ActualHeight > 100).OrderByDescending(b => b.ActualWidth * b.ActualHeight).FirstOrDefault() ?? (UIElement)activeTestDialog;
                 await Capture(testSession.Artifact(name), target); return new() { ["artifact"] = name, ["dialog"] = activeTestDialog != null };
             }
             case "suite.client-routes":
@@ -256,33 +258,6 @@ public sealed partial class MainWindow
         var nav = navigation.FirstOrDefault(pair => pair.Value == element); if (nav.Key != null) return nav.Key;
         return element switch { TextBox t => t.Header?.ToString() ?? "", PasswordBox p => p.Header?.ToString() ?? "", ComboBox c => c.Header?.ToString() ?? "", Button b => b.Content as string ?? b.Name, CheckBox c => c.Content as string ?? c.Name, ToggleButton t => t.Content as string ?? t.Name, ToggleSwitch t => t.Header?.ToString() ?? "", TextBlock t => t.Text, _ => element.Name };
     }
-    private async Task<UIElement> ReadyTestCaptureTarget()
-    {
-        // The dialog marker is set before ShowAsync finishes attaching its
-        // popup tree. Wait for a renderable layout; do not retry a failed capture.
-        static bool Ready(FrameworkElement element) => element.IsLoaded && element.XamlRoot != null
-            && element.Visibility == Visibility.Visible && element.ActualWidth > 0 && element.ActualHeight > 0;
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        while (watch.Elapsed < TimeSpan.FromSeconds(2))
-        {
-            shell.UpdateLayout();
-            if (activeTestDialog == null)
-            {
-                if (Ready(shell)) return shell;
-            }
-            else
-            {
-                // Popup visuals are outside the shell's root tree.
-                var border = Find<Border>(activeTestDialog).Where(b => Ready(b) && b.ActualWidth >= 250 && b.ActualHeight > 100)
-                    .OrderByDescending(b => b.ActualWidth * b.ActualHeight).FirstOrDefault();
-                if (border != null) return border;
-                if (Ready(activeTestDialog)) return activeTestDialog;
-            }
-            await Task.Delay(20);
-        }
-        throw new OperationException("等待测试画面加载和布局超时。", code: "TestLayoutNotReady");
-    }
-
     private IEnumerable<FrameworkElement> TestElements()
     {
         IEnumerable<FrameworkElement> Walk(DependencyObject root, bool visible)

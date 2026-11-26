@@ -59,22 +59,8 @@ try{
  Assert-Desktop ($runtimeProof.winui_loaded -and $runtimeProof.runtime_paths_local -and -not $runtimeProof.wpf_loaded -and -not $runtimeProof.powershell_loaded) 'real WinUI 3 and private .NET runtime loaded without PowerShell or WPF'
  Remove-Item -LiteralPath $proof
  if(Test-Path -LiteralPath ($proof+'.startup.txt')){Remove-Item -LiteralPath ($proof+'.startup.txt')}
- @{synthetic_only=$true}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $app 'qa-ui-review.fixture.json') -Encoding utf8
- $storageProof=Join-Path $app '.tmp/storage-ui/runtime-proof.json';[IO.Directory]::CreateDirectory((Split-Path -Parent $storageProof))|Out-Null
- $storageExit=Invoke-DesktopFixtureProcess (Join-Path $app 'May-VPS-Deploy.exe') @('--ui-smoke',$storageProof,'--app-root',$app,'--exercise-storage','--exercise-additions')
- if($storageExit -ne 0 -and (Test-Path -LiteralPath $storageProof)){
-  $failure=Get-Content -Raw -LiteralPath $storageProof|ConvertFrom-Json
-  Write-Host ('Native storage UI proof: '+($failure|ConvertTo-Json -Depth 5 -Compress))
- }
- Assert-Desktop ($storageExit -eq 0) 'native node picker, archive migration and deployment additions UI works'
- $storageUi=Get-Content -Raw -LiteralPath (Join-Path $app '.tmp/storage-ui/storage-regression-proof.json')|ConvertFrom-Json
- Assert-Desktop ($storageUi.migration_roundtrip -and $storageUi.backup_opt_in -and $storageUi.select_and_clear_visible -and $storageUi.custom_font_rendered) 'storage and selection behavior is verified by the real WinUI frontend'
- $additionsUi=Get-Content -Raw -LiteralPath (Join-Path $app '.tmp/storage-ui/additions-regression-proof.json')|ConvertFrom-Json
- Assert-Desktop ($additionsUi.inline_execution -and $additionsUi.explicit_completion_and_failure -and $additionsUi.drag_handles_and_scheme_order -and $additionsUi.generation_validation_export_guidance -and $additionsUi.separate_component_installation -and $additionsUi.remote_connections -eq 0) 'new deployment and configuration behavior is verified by the real WinUI frontend'
- Remove-Item -LiteralPath (Join-Path $app 'qa-ui-review.fixture.json')
- & (Join-Path $ProjectRoot 'tests/Test-BackgroundNative.ps1') -ApplicationDirectory $app -FixtureRoot (Join-Path $fixture 'background-native') -ProjectRoot $ProjectRoot -PythonRuntimeDirectory (Join-Path $app 'runtime/python')
- $backgroundProof=Get-Content -Raw -LiteralPath (Join-Path $fixture 'background-native/test-artifacts/native-flow.json')|ConvertFrom-Json
- Assert-Desktop ($backgroundProof.state -eq 'passed' -and $backgroundProof.window.window_activations -eq 0 -and $backgroundProof.window.foreground_samples -eq 0) 'background interface executes real controls and dialogs without taking foreground focus'
+ # Application-wide UI regression is independent of installation ownership and
+ # data preservation. It remains available in Test-BackgroundNative.ps1.
  [IO.Directory]::CreateDirectory((Join-Path $app 'private/instances'))|Out-Null
  [IO.Directory]::CreateDirectory((Join-Path $app '.cache/fixture'))|Out-Null
  'fixture archive'|Set-Content -LiteralPath (Join-Path $app 'private/instances/record.txt')
@@ -110,9 +96,13 @@ try{
  @($setup,$files)|ForEach-Object{(Get-FileHash -LiteralPath $_).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($_)}|Set-Content -LiteralPath $checksums -Encoding ascii
  $assets=@($setup,$files,$checksums)|ForEach-Object{@{name=[IO.Path]::GetFileName($_);browser_download_url=('https://github.com/mxh110708/may-vps-deploy/releases/download/v'+$nextVersion+'/'+[IO.Path]::GetFileName($_));digest=('sha256:'+(Get-FileHash -LiteralPath $_).Hash.ToLowerInvariant());size=(Get-Item -LiteralPath $_).Length;state='uploaded'}}
  @{tag_name=('v'+$nextVersion);draft=$false;prerelease=$false;body="## 本次更新`n- 修正检查更新结束后的状态提示。`n- 在更新弹窗显示下载与校验进度。`n- 安装时显示进度窗口，保留私人归档和本地配置。`n`n这是隔离测试的示例更新说明。";assets=@($assets)}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $updateFixture 'release.json') -Encoding utf8
- Assert-Desktop ((Invoke-DesktopFixtureProcess (Join-Path $app 'May-VPS-Deploy.exe') @('--verify-installed-update') -MinimalPath) -eq 0) 'actual WinUI check-update and confirmation download and launch update'
+ $updateArguments=@('--verify-installed-update')
+ if(-not $EvidenceDirectory){$updateArguments+='--skip-ui-captures'}
+ Assert-Desktop ((Invoke-DesktopFixtureProcess (Join-Path $app 'May-VPS-Deploy.exe') $updateArguments -MinimalPath) -eq 0) 'actual WinUI check-update and confirmation download and launch update'
  $uiProof=Get-Content -LiteralPath (Join-Path $app '.tmp/ui-update-proof.json') -Raw|ConvertFrom-Json -AsHashtable
  Assert-Desktop ($uiProof.ui_update_started -and $uiProof.confirmation_clicked -and $uiProof.launcher_pid_recorded) 'real update confirmation and parent process handoff verified'
+ $captured=@($uiProof.progress.Downloading.captured,$uiProof.progress.Verifying.captured)
+ Assert-Desktop (@($captured|Where-Object {$_ -ne [bool]$EvidenceDirectory}).Count -eq 0) 'screenshots run only for explicitly requested evidence review'
  Assert-Desktop ($uiProof.release_notes_displayed) 'update dialog displays the release body returned by the GitHub-format metadata'
  Assert-Desktop ($uiProof.negative_checks.Count -eq 8) 'untrusted assets, corrupt downloads, size limits, cleanup and repeated version refused'
  $statusProof=Get-Content -LiteralPath (Join-Path $app '.tmp/update-status-proof.json') -Raw|ConvertFrom-Json -AsHashtable

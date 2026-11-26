@@ -19,6 +19,30 @@ SHARDS = {
     "foundation-forwarding": ("foundation", "chains", "operations"),
     "streams-udp": ("xhttp", "udp", "server-stream", "outbound"),
 }
+RUNTIME_BOUNDARIES = [{"python": "3.9", "powershell": "7.4.20"},
+                      {"python": "3.13", "powershell": "runner"}]
+
+
+def test_groups(name):
+    """A protocol fixture edit does not justify replaying unrelated protocols."""
+    if name in ("Program.cs", "ProcessIdentityTests.cs"):
+        return {"foundation"}
+    if name in ("PrivateDirectoryTests.cs", "SshConfirmationTests.cs"):
+        return {"foundation", "operations"}
+    families = (("Client", "RouteDiagnostic", "ServerOutbound", "ServerDestination", "ServerHop", "RealityOutbound"),
+                ("Forward", "Chain", "SharedChain", "TcpChain", "TcpForward", "WireGuard"),
+                ("Hysteria", "Tuic"), ("Udp", "ApplicationUdp", "ServerQuic"),
+                ("ServerStream", "ServerXhttp"))
+    for prefixes, groups in zip(families, ({"clients"}, {"chains"}, {"quic"}, {"udp"}, {"server-stream"})):
+        if name.startswith(prefixes):
+            return groups
+    if name.startswith("Xhttp"):
+        return {"xhttp", "server-stream"}
+    if name.startswith("Inbound"):
+        return {"chains", "udp", "server-stream"}
+    if name.startswith("OutboundAddress"):
+        return {"outbound"}
+    return set(GROUPS)
 
 
 def matrix(items):
@@ -27,7 +51,7 @@ def matrix(items):
 
 def classify(paths, full=False, reason=None):
     groups, reasons = set(), []
-    legacy = remote = shell = desktop = installer = False
+    legacy = remote = shell = desktop = installer = linux = macos = False
     full = bool(full)
     if reason:
         reasons.append(reason)
@@ -40,13 +64,21 @@ def classify(paths, full=False, reason=None):
             continue
         name = PurePosixPath(path).name
         if name == "AGENTS.md":
-            full = True
+            continue
         elif ((path.startswith("docs/") and path.endswith(".md"))
               or ("/" not in path and path.endswith(".md"))):
             continue
-        elif (path.startswith((".github/", "scripts/ci/", "vendor/", "assets/kernel/"))
+        elif path.startswith((".github/", "scripts/ci/")) or path in ("tests/test_ci45.py", "scripts/Test-NoSecrets.ps1"):
+            if path.startswith(".github/") or name == "run.py":
+                groups.add("foundation")
+                linux = macos = True
+            if name == "contracts.json":
+                remote = True
+            if name == "Initialize-ClientCores.ps1":
+                legacy = True
+        elif (path.startswith(("vendor/", "assets/kernel/"))
               or name in ("Directory.Build.props", "global.json", "packages.lock.json")
-              or path.startswith("requirements-") or path in (".gitignore", ".gitattributes", "scripts/Test-NoSecrets.ps1")
+              or path.startswith("requirements-") or path in (".gitignore", ".gitattributes")
               or name.endswith(".csproj") or path.startswith("config/")):
             full = True
         elif path.startswith("desktop/May.VpsDeploy.Desktop/"):
@@ -65,11 +97,14 @@ def classify(paths, full=False, reason=None):
             groups.update(GROUPS)
             desktop = True
             remote = True
+            linux = macos = True
         elif path.startswith("desktop/May.VpsDeploy.Tests/"):
-            groups.update(GROUPS)
+            groups.update(test_groups(name))
+            if name in ("Program.cs", "Fixtures.cs", "ProcessIdentityTests.cs", "TestProcessIdentity.cs", "PrivateDirectoryTests.cs", "SshConfirmationTests.cs"):
+                linux = macos = True
         elif path.startswith("assets/remote/"):
             remote = shell = True
-            groups.update(GROUPS)
+            groups.update(("foundation", "operations"))
         elif path.startswith(("assets/installer/", "src/desktop/")):
             installer = legacy = True
             groups.add("foundation")
@@ -91,10 +126,8 @@ def classify(paths, full=False, reason=None):
                 legacy = remote = True
                 groups.update(GROUPS)
         elif path.startswith("tests/"):
-            if "ci45" in name:
-                full = True
-            elif name in ("Run-Tests.ps1", "Test-NoSecrets.ps1"):
-                full = True
+            if name == "Run-Tests.ps1":
+                legacy = True
             elif "DesktopInstaller" in name or "BackgroundNative" in name:
                 installer = True
             elif name.endswith(".ps1"):
@@ -109,22 +142,23 @@ def classify(paths, full=False, reason=None):
             reasons.append("Unclassified path: " + path)
     if full:
         groups.update(GROUPS)
-        legacy = remote = shell = desktop = installer = True
+        legacy = remote = shell = installer = linux = macos = True
         reasons.append("Full validation")
+    # Packaging already compiles the actual WinUI consumer. A second standalone
+    # compilation in the same plan adds no coverage.
+    if installer:
+        desktop = False
     if groups:
         groups.add("foundation")
     selected = [g for g in GROUPS if g in groups]
     windows = [{"shard": name, "groups": [g for g in members if g in groups]}
                for name, members in SHARDS.items() if any(g in groups for g in members)]
-    # Only full validation needs the complete Python x PowerShell Cartesian product.
-    compatibility = ([{"python": p, "powershell": s}
-                      for p in ("3.9", "3.13") for s in ("runner", "7.4.20")]
-                     if full else [{"python": "3.13", "powershell": "runner"}])
+    compatibility = [dict(r) for r in (RUNTIME_BOUNDARIES if full else RUNTIME_BOUNDARIES[-1:])]
     return {
         "schema": 1, "full": full, "reuse_run_id": "", "changed_paths": len(paths),
         "reasons": reasons or ["Changed-file selection" if paths else "No content changes"],
         "core": bool(selected), "core_groups": selected, "windows_matrix": matrix(windows),
-        "macos": full, "legacy": legacy, "powershell_matrix": matrix(compatibility),
+        "linux": linux, "macos": macos, "legacy": legacy, "powershell_matrix": matrix(compatibility),
         "contracts": remote, "debian_matrix": matrix([{"debian": v} for v in ("12", "13")]),
         "shell": shell, "desktop": desktop, "installer": installer,
     }

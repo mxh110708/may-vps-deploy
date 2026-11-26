@@ -20,6 +20,7 @@ public sealed partial class MainWindow
     private JsonArray? updateNegativeChecks;
     private readonly JsonObject updateProgressChecks = new();
     private readonly List<Task> updateProgressCaptures = [];
+    private bool CaptureUpdateTestImages => !launchArguments.Contains("--skip-ui-captures");
     private WindowsUpdates CreateUpdates() => updateFixture == null
         ? new(paths, settings.Text("UpdateProxy"))
         : new(paths, new HttpClient(updateFixture, false) { Timeout = TimeSpan.FromMinutes(8) });
@@ -93,10 +94,13 @@ public sealed partial class MainWindow
             using (var transport = new UpdateFixtureTransport(directory, baseline.DeepClone().AsObject()))
             { transport.Release["tag_name"] = "v" + ArchiveStore.ReadJson(paths.Resolve("config/application.json")).Text("version"); updateFixture = transport; await CheckUpdates(true); }
             updateFixture = null; SelectPage("settings"); shell.UpdateLayout(); await Task.Delay(150);
-            var aboutIcon = Find<Image>(shell).Single(i => i.Name == "AboutApplicationIcon");
-            aboutIcon.StartBringIntoView(); await Task.Delay(150); shell.UpdateLayout();
-            await Capture(SafePath.Resolve(directory, "about-application-icon.png"), (UIElement)((FrameworkElement)((FrameworkElement)aboutIcon.Parent).Parent).Parent);
-            await Capture(SafePath.Resolve(directory, "completed-update-status.png"), (UIElement)((FrameworkElement)taskText.Parent).Parent);
+            if (CaptureUpdateTestImages)
+            {
+                var aboutIcon = Find<Image>(shell).Single(i => i.Name == "AboutApplicationIcon");
+                aboutIcon.StartBringIntoView(); await Task.Delay(150); shell.UpdateLayout();
+                await Capture(SafePath.Resolve(directory, "about-application-icon.png"), (UIElement)((FrameworkElement)((FrameworkElement)aboutIcon.Parent).Parent).Parent);
+                await Capture(SafePath.Resolve(directory, "completed-update-status.png"), (UIElement)((FrameworkElement)taskText.Parent).Parent);
+            }
             ArchiveStore.WriteJson(paths.Resolve(".tmp/update-status-proof.json"), new JsonObject { ["cases"] = statusCases });
             updateFixture = new(directory, baseline) { SlowReads = true }; updateProof = proof; updateNegativeChecks = checks;
             var confirmed = false;
@@ -106,7 +110,7 @@ public sealed partial class MainWindow
                 var dialog = VisualTreeHelper.GetOpenPopupsForXamlRoot(shell.XamlRoot).SelectMany(p => Find<ContentDialog>(p.Child)).FirstOrDefault(d => d.Tag as string == "ApplicationUpdate");
                 if (dialog == null) return;
                 var button = Find<Button>(dialog).FirstOrDefault(b => b.Name == "PrimaryButton" && b.IsEnabled); if (button == null) return;
-                confirmed = true; await Capture(SafePath.Resolve(directory, "ui-update-notes.png"), dialog);
+                confirmed = true; if (CaptureUpdateTestImages) await Capture(SafePath.Resolve(directory, "ui-update-notes.png"), dialog);
                 updateConfirmationClicked = true; ((IInvokeProvider)new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke)).Invoke();
             };
             timer.Start(); SelectPage("settings");
@@ -135,7 +139,7 @@ public sealed partial class MainWindow
         var bar = updateDialogProgress ?? taskProgress;
         if (progress.Percent < (previous?["percent"]?.GetValue<double>() ?? 0) || bar.Visibility != Visibility.Visible || bar.IsIndeterminate != (progress.TotalBytes == 0) || updateDialog == null) throw new OperationException("更新弹窗进度显示无效。");
         updateProgressChecks[key] = new JsonObject { ["percent"] = progress.Percent, ["visible"] = true, ["in_dialog"] = true, ["captured"] = previous?.Flag("captured") ?? false, ["total_bytes"] = progress.TotalBytes };
-        if (!updateProgressChecks[key]!.Flag("captured") && progress.Percent >= 25 && progress.Phase is UpdatePhase.Downloading or UpdatePhase.Verifying)
+        if (CaptureUpdateTestImages && !updateProgressChecks[key]!.Flag("captured") && progress.Percent >= 25 && progress.Phase is UpdatePhase.Downloading or UpdatePhase.Verifying)
         {
             updateProgressChecks[key]!["captured"] = true;
             updateDialog.UpdateLayout(); updateProgressCaptures.Add(Capture(paths.Resolve(".tmp/qa-update-fixture/ui-update-" + key.ToLowerInvariant() + ".png"), updateDialog));

@@ -1,10 +1,15 @@
 name: Shared .NET core
 'on':
   workflow_call:
+    outputs:
+      linux_result:
+        value: ${{ jobs.linux.outputs.result }}
+      macos_result:
+        value: ${{ jobs.macos.outputs.result }}
     inputs:
-      groups:
+      linux:
         required: true
-        type: string
+        type: boolean
       windows-matrix:
         required: true
         type: string
@@ -16,12 +21,14 @@ permissions:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    if: inputs.linux
+    outputs:
+      result: ${{ steps.verified.outputs.result }}
     timeout-minutes: 10
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
       NUGET_PACKAGES: ${{ github.workspace }}/.cache/nuget
-      MAY_CI_GROUPS: ${{ inputs.groups }}
     steps:
     - uses: actions/checkout@v5
       with:
@@ -38,9 +45,11 @@ jobs:
         cache-dependency-path: |-
           requirements-test.txt
           requirements-client-merge.txt
-    - run: python -m pip install --disable-pip-version-check -r requirements-test.txt paramiko==5.0.0
+    - run: python -m pip install --disable-pip-version-check paramiko==5.0.0
     - name: Run dotnet
-      run: python scripts/ci/run.py --suite dotnet
+      run: python scripts/ci/run.py --suite platform
+    - id: verified
+      run: echo 'result=success' >> "$GITHUB_OUTPUT"
     - uses: actions/upload-artifact@v4
       if: always()
       with:
@@ -48,7 +57,7 @@ jobs:
         path: .tmp/ci/dotnet.json
         if-no-files-found: ignore
         retention-days: 14
-    name: Linux shared behavior
+    name: Linux platform compatibility
   windows:
     runs-on: windows-latest
     timeout-minutes: 12
@@ -97,12 +106,13 @@ jobs:
       matrix: ${{ fromJSON(inputs.windows-matrix) }}
   macos:
     runs-on: macos-latest
+    outputs:
+      result: ${{ steps.verified.outputs.result }}
     timeout-minutes: 18
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
       NUGET_PACKAGES: ${{ github.workspace }}/.cache/nuget
-      MAY_CI_GROUPS: ${{ inputs.groups }}
     steps:
     - uses: actions/checkout@v5
       with:
@@ -119,9 +129,11 @@ jobs:
         cache-dependency-path: |-
           requirements-test.txt
           requirements-client-merge.txt
-    - run: python -m pip install --disable-pip-version-check -r requirements-test.txt paramiko==5.0.0
+    - run: python -m pip install --disable-pip-version-check paramiko==5.0.0
     - name: Run dotnet
-      run: python scripts/ci/run.py --suite dotnet
+      run: python scripts/ci/run.py --suite platform
+    - id: verified
+      run: echo 'result=success' >> "$GITHUB_OUTPUT"
     - uses: actions/upload-artifact@v4
       if: always()
       with:
@@ -129,5 +141,5 @@ jobs:
         path: .tmp/ci/dotnet.json
         if-no-files-found: ignore
         retention-days: 14
-    name: macOS full compatibility
+    name: macOS platform compatibility
     if: inputs.macos

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import re
 
-from plan import GROUPS, request_json
+from plan import GROUPS, RUNTIME_BOUNDARIES, request_json
 
 REQUIRED = {"contracts": "contracts", "legacy": "legacy", "core": "core",
             "desktop": "desktop", "installer": "installer", "shell": "shell"}
@@ -18,8 +18,15 @@ def check_gate(needs):
     outputs = needs["plan"].get("outputs", {})
     if outputs.get("full") not in ("true", "false"):
         raise ValueError("Missing full-validation selection")
-    if outputs["full"] == "true" and any(outputs.get(flag) != "true" for flag in REQUIRED.values()):
+    if outputs["full"] == "true" and any(outputs.get(flag) != "true" for flag in REQUIRED.values() if flag != "desktop"):
         raise ValueError("Full validation must select every suite")
+    if outputs.get("desktop") == "true" and outputs.get("installer") == "true":
+        raise ValueError("Installer compilation must not be duplicated by the desktop job")
+    if any(outputs.get(flag) not in ("true", "false") for flag in ("linux", "macos")):
+        raise ValueError("Missing platform compatibility selection")
+    for platform in ("linux", "macos"):
+        if outputs[platform] == "true" and needs.get("core", {}).get("outputs", {}).get(platform + "_result") != "success":
+            raise ValueError("Selected platform compatibility check did not succeed: " + platform)
     if outputs.get("core") == "true":
         groups = json.loads(outputs.get("core_groups", "[]"))
         windows = json.loads(outputs.get("windows_matrix", "{}"))
@@ -31,9 +38,9 @@ def check_gate(needs):
         compatibility = json.loads(outputs.get("powershell_matrix", "{}")).get("include", [])
         combinations = {(row.get("python"), row.get("powershell")) for row in compatibility}
         debian = json.loads(outputs.get("debian_matrix", "{}")).get("include", [])
-        if (set(groups) != set(GROUPS) or outputs.get("macos") != "true"
-                or len(compatibility) != 4
-                or combinations != {(p, s) for p in ("3.9", "3.13") for s in ("runner", "7.4.20")}
+        if (set(groups) != set(GROUPS) or outputs.get("macos") != "true" or outputs.get("linux") != "true"
+                or len(compatibility) != 2
+                or combinations != {(r["python"], r["powershell"]) for r in RUNTIME_BOUNDARIES}
                 or len(debian) != 2 or {row.get("debian") for row in debian} != {"12", "13"}):
             raise ValueError("Full platform or runtime compatibility matrix is incomplete")
     for job, flag in REQUIRED.items():

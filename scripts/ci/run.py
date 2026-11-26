@@ -15,9 +15,6 @@ from plan import GROUPS
 ROOT = Path(__file__).resolve().parents[2]
 TEST_PROJECT = "desktop/May.VpsDeploy.Tests/May.VpsDeploy.Tests.csproj"
 TEST_DLL = "desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll"
-# Same ordered phases as the ordinary C# chains suite, in separate owned children.
-CHAIN_PHASES = ("forwarding-models", "adjacent-tunnels", "forwarding-paths",
-                "underlays", "shared-ipv4", "shared-ipv6", "shared-recovery", "wireguard-inbounds")
 
 
 def selected_groups(value):
@@ -75,19 +72,19 @@ def steps_for(suite, root, groups=None):
     if suite == "installer":
         return [("Isolated install, upgrade and uninstall", [pwsh, "-NoProfile", "-STA", "-File",
                  "tests/Test-DesktopInstaller.ps1", "-ProjectRoot", str(root)], 900)]
-    if suite == "dotnet":
-        if not groups:
+    if suite in ("dotnet", "platform"):
+        if suite == "dotnet" and not groups:
             raise ValueError(".NET suite requires explicit groups")
         result = [("Locked .NET restore", ["dotnet", "restore", TEST_PROJECT, "--locked-mode"], 180),
                   (".NET test build", ["dotnet", "build", TEST_PROJECT, "-c", "Release", "--no-restore"], 180)]
-        if platform.system() == "Windows":
+        if suite == "platform":
+            return result + [("Platform filesystem, process and SSH contracts",
+                              ["dotnet", TEST_DLL, str(root), "--platform-only"], 120)]
+        if platform.system() == "Windows" and any(g != "foundation" for g in groups):
             result.append(("Verified fixed client cores", [pwsh, "-NoProfile", "-File",
                            "scripts/ci/Initialize-ClientCores.ps1", "-ProjectRoot", str(root), "-Xray"], 180))
         for group in groups:
-            if group == "chains":
-                result += [("Chains " + phase, ["dotnet", TEST_DLL, str(root), "--chain-phase", phase], 240)
-                           for phase in CHAIN_PHASES]
-            elif group == "server-stream":
+            if group == "server-stream":
                 result += [("Stream next hops", ["dotnet", TEST_DLL, str(root), "--server-stream-only"], 480),
                            ("XHTTP next hops", ["dotnet", TEST_DLL, str(root), "--server-xhttp-only"], 480)]
             elif group == "outbound":
@@ -96,7 +93,7 @@ def steps_for(suite, root, groups=None):
                     result.append(("Address-family actual fixed-core paths", [pwsh, "-NoProfile", "-File",
                                    "scripts/ci/Initialize-ClientCores.ps1", "-ProjectRoot", str(root), "-AddressRuntime"], 180))
             else:
-                result.append((".NET " + group, ["dotnet", TEST_DLL, str(root), "--group", group], 360))
+                result.append((".NET " + group, ["dotnet", TEST_DLL, str(root), "--group", group], 480 if group == "chains" else 360))
         if platform.system() == "Windows" and "foundation" in groups:
             project = "desktop/May.VpsDeploy.Windows.Tests/May.VpsDeploy.Windows.Tests.csproj"
             result += [("Windows adapters locked restore", ["dotnet", "restore", project, "--locked-mode"], 180),
@@ -175,7 +172,7 @@ def run_steps(steps, root, report, env=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=("quick", "contracts", "legacy", "dotnet", "desktop", "installer"), required=True)
+    parser.add_argument("--suite", choices=("quick", "contracts", "legacy", "dotnet", "platform", "desktop", "installer"), required=True)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--groups", default=os.environ.get("MAY_CI_GROUPS", "[]"))
     parser.add_argument("--report", type=Path)

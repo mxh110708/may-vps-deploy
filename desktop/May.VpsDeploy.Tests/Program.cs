@@ -86,12 +86,7 @@ else if (args.Contains("--may-monitor-only")) await new BoundaryTests(repository
 else if(args.Contains("--monitor-maintenance-only"))await new BoundaryTests(repository).RunMonitorMaintenanceTests();
 else if (args.Contains("--monitor-access-only")) await new BoundaryTests(repository).RunMonitorAccessTests();
 else if (args.Contains("--process-identity-only")) new BoundaryTests(repository).RunProcessIdentityTests();
-else if (args.Contains("--chain-phase"))
-{
-    var index = Array.IndexOf(args, "--chain-phase");
-    if (index + 1 >= args.Length) throw new ArgumentException("Choose an explicit chain phase.");
-    await new BoundaryTests(repository).RunChainPhase(args[index + 1]);
-}
+else if (args.Contains("--platform-only")) await new BoundaryTests(repository).RunPlatformTests();
 else if (args.Contains("--group")) await new BoundaryTests(repository).Run(args[Array.IndexOf(args, "--group") + 1]);
 else await new BoundaryTests(repository).Run();
 
@@ -110,6 +105,17 @@ internal sealed partial class BoundaryTests(string repository)
         using var f = new Fixture(repository);
         var python = Environment.GetEnvironmentVariable("MAY_TEST_SSH_PYTHON") ?? throw new Exception("MAY_TEST_SSH_PYTHON is required for transport tests.");
         await LocalSshConfirmation(f, python); Console.WriteLine($"PASS: {assertions} loopback SSH/SFTP transport assertions; no production connections.");
+    }
+    public async Task RunPlatformTests()
+    {
+        using var f = new Fixture(repository);
+        Paths(f); MixedPortBoundaries(); ProcessIdentityBoundaries();
+        await Trust(f);
+        await PrivateDirectoryExperience();
+        var python = Environment.GetEnvironmentVariable("MAY_TEST_SSH_PYTHON")
+            ?? throw new Exception("MAY_TEST_SSH_PYTHON is required for platform transport tests.");
+        await LocalSshConfirmation(f, python);
+        Console.WriteLine($"PASS: {assertions} platform filesystem, process, trust and SSH/SFTP assertions; no production connections.");
     }
     public async Task Run(string group = "all")
     {
@@ -159,7 +165,20 @@ internal sealed partial class BoundaryTests(string repository)
         }
         if (Includes("chains"))
         {
-            foreach (var phase in ChainPhases) await RunChainPhase(phase);
+            await ForwardProxy42Model(); await ForwardProxy42Workflows(); await ForwardProxy42Validation();
+            await ForwardTarget36Model(); await ForwardTarget36Workflows(); await ForwardProxy40Model(); await ForwardProxy40Workflows(); await ForwardMulti41Model(); await ForwardMulti41Workflows();
+            await Chain30Coverage();
+            using (var forwardedNodes = new Fixture(repository)) await ForwardedNodeExperience(forwardedNodes);
+            using (var forwarding = new Fixture(repository)) { await TcpForwardExperience(forwarding); await TcpForwardValidationLoopback(forwarding); }
+            await TcpChainExperience();
+            await Chain21Coverage();
+            await Chain24Coverage();
+            await SharedChainCoverage();
+            await WireGuardCoverage();
+            await InboundExperience();
+            await InboundPolicy28Model();
+            await InboundPolicy28Runtime();
+            await InboundPolicy28ProbeRuntime();
         }
         if (Includes("quic"))
         {

@@ -27,6 +27,7 @@ jobs:
       core_groups: ${{ steps.plan.outputs.core_groups }}
       windows_matrix: ${{ steps.plan.outputs.windows_matrix }}
       macos: ${{ steps.plan.outputs.macos }}
+      linux: ${{ steps.plan.outputs.linux }}
       legacy: ${{ steps.plan.outputs.legacy }}
       powershell_matrix: ${{ steps.plan.outputs.powershell_matrix }}
       contracts: ${{ steps.plan.outputs.contracts }}
@@ -197,9 +198,9 @@ jobs:
     if: needs.plan.outputs.core == 'true'
     uses: ./.github/workflows/dotnet.yml
     with:
-      groups: ${{ needs.plan.outputs.core_groups }}
       windows-matrix: ${{ needs.plan.outputs.windows_matrix }}
       macos: ${{ needs.plan.outputs.macos == 'true' }}
+      linux: ${{ needs.plan.outputs.linux == 'true' }}
   desktop:
     name: WinUI compile
     needs: plan

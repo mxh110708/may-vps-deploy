@@ -26,6 +26,7 @@ def needs_for(selection):
         for k, v in selection.items()}}, "quick": {"result": "success"}}
     needs.update({j: {"result": "success" if selection[f] else "skipped"}
                   for j, f in result.REQUIRED.items()})
+    needs["core"]["outputs"] = {p + "_result": "success" if selection[p] else "skipped" for p in ("linux", "macos")}
     return needs
 
 
@@ -49,7 +50,8 @@ class Selection(unittest.TestCase):
         self.assertTrue(p["contracts"])
         self.assertTrue(p["desktop"])
         self.assertFalse(p["installer"])
-        self.assertFalse(p["macos"])
+        self.assertTrue(p["macos"])
+        self.assertTrue(p["linux"])
 
     def test_installer_and_update_changes_select_lifecycle(self):
         for path in ("assets/installer/Desktop.iss", "src/VpsDeploy.Update.psm1",
@@ -63,16 +65,47 @@ class Selection(unittest.TestCase):
         self.assertTrue(p["contracts"])
         self.assertTrue(p["shell"])
         self.assertEqual([r["debian"] for r in p["debian_matrix"]["include"]], ["12", "13"])
+        self.assertEqual(p["core_groups"], ["foundation", "operations"])
+        self.assertFalse(p["macos"] or p["linux"] or p["installer"])
 
     def test_global_and_unknown_changes_request_full(self):
-        for path in (".github/workflows/ci.yml", "scripts/ci/plan.py", "requirements-test.txt",
+        for path in ("requirements-test.txt",
                      "desktop/global.json", "desktop/May.VpsDeploy.Core/packages.lock.json",
-                     "config/versions.json", "AGENTS.md", "docs/AGENTS.md", "scripts/Test-NoSecrets.ps1", "new-unclassified-file", "desktop/new-project/a.cs"):
+                     "config/versions.json", "new-unclassified-file", "desktop/new-project/a.cs"):
             with self.subTest(path=path):
                 p = plan.classify([path])
                 self.assertTrue(p["full"])
                 self.assertTrue(p["installer"])
-                self.assertEqual(len(p["powershell_matrix"]["include"]), 4)
+                self.assertEqual(p["powershell_matrix"]["include"], plan.RUNTIME_BOUNDARIES)
+
+    def test_ci_changes_validate_the_runner_without_replaying_application_protocols(self):
+        for path in (".github/workflows/ci.yml", ".github/workflows/dotnet.yml", "scripts/ci/run.py"):
+            with self.subTest(path=path):
+                p = plan.classify([path])
+                self.assertFalse(p["full"])
+                self.assertEqual(p["core_groups"], ["foundation"])
+                self.assertTrue(p["macos"] and p["linux"])
+                self.assertFalse(p["contracts"] or p["legacy"] or p["installer"])
+        for path in ("scripts/ci/plan.py", "scripts/ci/result.py", "tests/test_ci45.py", "AGENTS.md", "docs/AGENTS.md", "scripts/Test-NoSecrets.ps1"):
+            p = plan.classify([path])
+            self.assertFalse(any(p[k] for k in result.REQUIRED.values()))
+
+    def test_protocol_fixture_edit_does_not_select_unrelated_native_matrices(self):
+        p = plan.classify(["desktop/May.VpsDeploy.Tests/TuicRuntimeTests.cs"])
+        self.assertEqual(p["core_groups"], ["foundation", "quic"])
+        self.assertFalse(p["macos"] or p["linux"] or p["installer"])
+
+    def test_installer_owns_the_winui_compilation(self):
+        p = plan.classify(["assets/installer/Desktop.iss", "desktop/May.VpsDeploy.Desktop/MainWindow.xaml.cs"])
+        self.assertTrue(p["installer"])
+        self.assertFalse(p["desktop"])
+        result.check_gate(needs_for(p))
+
+    def test_full_compatibility_keeps_both_boundaries_without_cartesian_replay(self):
+        rows = plan.classify([], True)["powershell_matrix"]["include"]
+        self.assertEqual({(r["python"], r["powershell"]) for r in rows},
+                         {("3.9", "7.4.20"), ("3.13", "runner")})
+        self.assertEqual(len(rows), 2)
 
     def test_invalid_paths_request_full(self):
         for path in ("../README.md", "/README.md", "docs\\README.md", "docs/a\nb.md", None):
@@ -200,7 +233,7 @@ class GatesAndRunner(unittest.TestCase):
         with self.assertRaises(ValueError): result.check_gate(needs)
 
     def test_full_receipt_requires_all_platforms_versions_and_group_assignments(self):
-        for key, value in (("macos", "false"), ("core_groups", '["foundation"]'),
+        for key, value in (("macos", "false"), ("linux", "false"), ("core_groups", '["foundation"]'),
                            ("windows_matrix", '{"include":[]}'),
                            ("powershell_matrix", '{"include":[{"python":"3.13","powershell":"runner"}]}'),
                            ("debian_matrix", '{"include":[{"debian":"13"}]}')):
@@ -213,6 +246,13 @@ class GatesAndRunner(unittest.TestCase):
         needs = needs_for(plan.classify(["desktop/May.VpsDeploy.Desktop/MainWindow.xaml.cs"]))
         needs["plan"]["outputs"]["windows_matrix"] = '{"include":[]}'
         with self.assertRaises(ValueError): result.check_gate(needs)
+
+    def test_selected_macos_preflight_cannot_be_silently_skipped(self):
+        for platform in ("linux", "macos"):
+            for state in ("skipped", "failure", "cancelled", None):
+                needs = needs_for(plan.classify(["scripts/ci/run.py"]))
+                needs["core"]["outputs"][platform + "_result"] = state
+                with self.assertRaises(ValueError): result.check_gate(needs)
 
     def test_groups_reject_unknown_and_duplicate_names(self):
         for groups in ('[]', '["clients","clients"]', '["unknown"]', '"clients"'):
@@ -229,14 +269,17 @@ class GatesAndRunner(unittest.TestCase):
             self.assertEqual(env["MAY_TEST_PYTHON"], sys.executable)
             self.assertTrue(env["MAY_TEST_XRAY"].endswith("xray.exe"))
 
-    def test_chains_use_distinct_bounded_children_without_replaying_the_whole_group(self):
+    def test_chains_no_longer_spawn_eight_phase_processes(self):
         steps = run.steps_for("dotnet", ROOT, ["chains"])
-        phases = [(name, command, timeout) for name, command, timeout in steps if "--chain-phase" in command]
-        self.assertEqual([command[-1] for name, command, timeout in phases],
-                         ["forwarding-models", "adjacent-tunnels", "forwarding-paths",
-                          "underlays", "shared-ipv4", "shared-ipv6", "shared-recovery", "wireguard-inbounds"])
-        self.assertTrue(all(timeout == 240 for name, command, timeout in phases))
-        self.assertFalse(any("--group" in command for name, command, timeout in steps))
+        self.assertEqual(sum(command[-2:] == ["--group", "chains"] for name, command, timeout in steps), 1)
+        self.assertFalse(any("--chain-phase" in command for name, command, timeout in steps))
+
+    def test_unix_platform_suite_never_replays_the_nine_business_groups(self):
+        steps = run.steps_for("platform", ROOT)
+        self.assertEqual(len(steps), 3)
+        self.assertEqual(steps[-1][1][-1], "--platform-only")
+        self.assertFalse(any("--group" in command or "--chain-phase" in command for name, command, timeout in steps))
+        self.assertFalse(any("Initialize-ClientCores.ps1" in " ".join(command) for name, command, timeout in steps))
 
     def test_stream_groups_keep_their_previous_deadlines(self):
         steps = run.steps_for("dotnet", ROOT, ["chains", "server-stream"])
