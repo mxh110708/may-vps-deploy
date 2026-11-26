@@ -15,6 +15,9 @@ from plan import GROUPS
 ROOT = Path(__file__).resolve().parents[2]
 TEST_PROJECT = "desktop/May.VpsDeploy.Tests/May.VpsDeploy.Tests.csproj"
 TEST_DLL = "desktop/May.VpsDeploy.Tests/bin/Release/net10.0/May.VpsDeploy.Tests.dll"
+# Same ordered phases as the ordinary C# chains suite, in separate owned children.
+CHAIN_PHASES = ("forwarding-models", "adjacent-tunnels", "forwarding-paths",
+                "underlays", "shared-chains", "wireguard-inbounds")
 
 
 def selected_groups(value):
@@ -81,7 +84,10 @@ def steps_for(suite, root, groups=None):
             result.append(("Verified fixed client cores", [pwsh, "-NoProfile", "-File",
                            "scripts/ci/Initialize-ClientCores.ps1", "-ProjectRoot", str(root), "-Xray"], 180))
         for group in groups:
-            if group == "server-stream":
+            if group == "chains":
+                result += [("Chains " + phase, ["dotnet", TEST_DLL, str(root), "--chain-phase", phase], 240)
+                           for phase in CHAIN_PHASES]
+            elif group == "server-stream":
                 result += [("Stream next hops", ["dotnet", TEST_DLL, str(root), "--server-stream-only"], 480),
                            ("XHTTP next hops", ["dotnet", TEST_DLL, str(root), "--server-xhttp-only"], 480)]
             elif group == "outbound":
@@ -90,8 +96,7 @@ def steps_for(suite, root, groups=None):
                     result.append(("Address-family actual fixed-core paths", [pwsh, "-NoProfile", "-File",
                                    "scripts/ci/Initialize-ClientCores.ps1", "-ProjectRoot", str(root), "-AddressRuntime"], 180))
             else:
-                deadline = 480 if group == "chains" else 360
-                result.append((".NET " + group, ["dotnet", TEST_DLL, str(root), "--group", group], deadline))
+                result.append((".NET " + group, ["dotnet", TEST_DLL, str(root), "--group", group], 360))
         if platform.system() == "Windows" and "foundation" in groups:
             project = "desktop/May.VpsDeploy.Windows.Tests/May.VpsDeploy.Windows.Tests.csproj"
             result += [("Windows adapters locked restore", ["dotnet", "restore", project, "--locked-mode"], 180),

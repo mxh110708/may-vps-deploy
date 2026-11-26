@@ -86,6 +86,12 @@ else if (args.Contains("--may-monitor-only")) await new BoundaryTests(repository
 else if(args.Contains("--monitor-maintenance-only"))await new BoundaryTests(repository).RunMonitorMaintenanceTests();
 else if (args.Contains("--monitor-access-only")) await new BoundaryTests(repository).RunMonitorAccessTests();
 else if (args.Contains("--process-identity-only")) new BoundaryTests(repository).RunProcessIdentityTests();
+else if (args.Contains("--chain-phase"))
+{
+    var index = Array.IndexOf(args, "--chain-phase");
+    if (index + 1 >= args.Length) throw new ArgumentException("Choose an explicit chain phase.");
+    await new BoundaryTests(repository).RunChainPhase(args[index + 1]);
+}
 else if (args.Contains("--group")) await new BoundaryTests(repository).Run(args[Array.IndexOf(args, "--group") + 1]);
 else await new BoundaryTests(repository).Run();
 
@@ -153,20 +159,7 @@ internal sealed partial class BoundaryTests(string repository)
         }
         if (Includes("chains"))
         {
-            await ForwardProxy42Model(); await ForwardProxy42Workflows(); await ForwardProxy42Validation();
-            await ForwardTarget36Model(); await ForwardTarget36Workflows(); await ForwardProxy40Model(); await ForwardProxy40Workflows(); await ForwardMulti41Model(); await ForwardMulti41Workflows();
-            await Chain30Coverage();
-            using (var forwardedNodes = new Fixture(repository)) await ForwardedNodeExperience(forwardedNodes);
-            using (var forwarding = new Fixture(repository)) { await TcpForwardExperience(forwarding); await TcpForwardValidationLoopback(forwarding); }
-            await TcpChainExperience();
-            await Chain21Coverage();
-            await Chain24Coverage();
-            await SharedChainCoverage();
-            await WireGuardCoverage();
-            await InboundExperience();
-            await InboundPolicy28Model();
-            await InboundPolicy28Runtime();
-            await InboundPolicy28ProbeRuntime();
+            foreach (var phase in ChainPhases) await RunChainPhase(phase);
         }
         if (Includes("quic"))
         {

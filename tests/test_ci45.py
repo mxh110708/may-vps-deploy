@@ -229,10 +229,18 @@ class GatesAndRunner(unittest.TestCase):
             self.assertEqual(env["MAY_TEST_PYTHON"], sys.executable)
             self.assertTrue(env["MAY_TEST_XRAY"].endswith("xray.exe"))
 
-    def test_slow_cross_platform_groups_keep_their_previous_deadlines(self):
+    def test_chains_use_distinct_bounded_children_without_replaying_the_whole_group(self):
+        steps = run.steps_for("dotnet", ROOT, ["chains"])
+        phases = [(name, command, timeout) for name, command, timeout in steps if "--chain-phase" in command]
+        self.assertEqual([command[-1] for name, command, timeout in phases],
+                         ["forwarding-models", "adjacent-tunnels", "forwarding-paths",
+                          "underlays", "shared-chains", "wireguard-inbounds"])
+        self.assertTrue(all(timeout == 240 for name, command, timeout in phases))
+        self.assertFalse(any("--group" in command for name, command, timeout in steps))
+
+    def test_stream_groups_keep_their_previous_deadlines(self):
         steps = run.steps_for("dotnet", ROOT, ["chains", "server-stream"])
         by_name = {name: timeout for name, command, timeout in steps}
-        self.assertGreaterEqual(by_name[".NET chains"], 480)
         self.assertGreaterEqual(by_name["Stream next hops"], 480)
         self.assertGreaterEqual(by_name["XHTTP next hops"], 480)
 
